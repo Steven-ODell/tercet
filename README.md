@@ -1,7 +1,8 @@
-# tercet
+# tercet: a terminal client (TUI) for T3 Code
 
-A terminal client for [T3 Code](https://github.com/pingdotgg/t3code): your threads, transcripts
-and composer in a TUI, next to the web app, on the same server.
+tercet is a terminal UI for [T3 Code](https://github.com/pingdotgg/t3code). Your threads,
+transcripts and composer run in the terminal, next to the web app, on the same server. It works
+over SSH and inside tmux, and needs no window.
 
 ![tercet: opening a thread, a block-rendered image, a diff, the palette and a reply](docs/media/demo.gif)
 
