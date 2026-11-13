@@ -114,6 +114,11 @@ export interface Boundary {
   pause: () => Effect.Effect<void>;
 }
 export type Status = "connecting" | "live" | "retry" | "rejected";
+/** Shown when the server sends something this tercet cannot decode, most likely a newer T3. */
+export const UNREADABLE_SERVER =
+  "The server sent data this tercet cannot read (a newer T3?). Retrying… (r: retry; `tercet doctor` shows versions)";
+export const UNREADABLE_THREAD =
+  "This thread has data this tercet cannot read (a newer T3?). Open it in Web, or retry (r).";
 export function isRejected(error: unknown): boolean {
   return (
     typeof error === "object" &&
@@ -178,6 +183,11 @@ export function createClient(
               Effect.sync(() =>
                 setThread(id, { ...getThread(id), error: "Transcript disconnected. Retry (r)." }),
               ),
+            ),
+            // A stream item that fails to decode (a newer server's new field value) is a defect
+            // in effect's RPC client, not a failure; without this the fiber dies silently.
+            Effect.catchDefect(() =>
+              Effect.sync(() => setThread(id, { ...getThread(id), error: UNREADABLE_THREAD })),
             ),
           );
       }),
@@ -277,6 +287,13 @@ export function createClient(
         } else if (rejected) {
           token = undefined;
         }
+      }),
+    ),
+    // See followInto: an undecodable shell item would otherwise end the reconnect loop for good.
+    Effect.catchDefect(() =>
+      Effect.sync(() => {
+        registry.set(status, "retry");
+        registry.set(message, UNREADABLE_SERVER);
       }),
     ),
   );

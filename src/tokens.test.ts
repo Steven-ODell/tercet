@@ -12,6 +12,7 @@ const socket = `tercet-p7-tok-${process.pid}`;
 let dir = "";
 let seen: string[] = [];
 let version: string | undefined = "0.1.8";
+let protocol = 2;
 let server: ReturnType<typeof Bun.serve>;
 
 beforeAll(async () => {
@@ -37,7 +38,7 @@ beforeAll(async () => {
           label: "canary box",
           platform: { os: "linux", arch: "x64" },
           ...(version ? { serverVersion: version } : {}),
-          orchestrationProtocolVersion: 2,
+          orchestrationProtocolVersion: protocol,
           capabilities: { repositoryIdentity: false },
         });
       return Response.json(
@@ -99,11 +100,12 @@ test("--dump-status against a server that echoes the token: rejected, and the to
 }, 45_000);
 
 test("version gate, version-less and unreachable paths never print the token", async () => {
-  for (const [v, expected] of [
-    ["9.9.9", "Unsupported server version"],
-    [undefined, "did not report a version"],
+  for (const [v, p, expected] of [
+    ["9.9.9", 3, "Incompatible server protocol"],
+    [undefined, 2, "did not report a version"],
   ] as const) {
     version = v;
+    protocol = p;
     const result = await tercet(
       "--dump-status",
       "--url",
@@ -115,6 +117,7 @@ test("version gate, version-less and unreachable paths never print the token", a
     expect(result.err).toContain(expected);
     expect(result.all).not.toContain(CANARY);
   }
+  protocol = 2;
   const down = await tercet(
     "--dump-status",
     "--url",

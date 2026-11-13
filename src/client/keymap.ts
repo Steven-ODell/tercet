@@ -34,6 +34,7 @@ export const COMMANDS = [
   { id: "focusUp", keys: "Ctrl+k", label: "Pane up" },
   { id: "focusRight", keys: "Ctrl+l", label: "Pane right" },
   { id: "leave", keys: "Alt+c", label: "Close side panel" },
+  { id: "dismissNotice", keys: "Alt+x", label: "Dismiss server warning", needs: "notice" },
   { id: "close", keys: "Esc", label: "Close overlay / next pane", fixed: true },
   { id: "quit", keys: "Ctrl+c", label: "Quit", fixed: true, twice: true },
 ] as const satisfies readonly {
@@ -54,7 +55,7 @@ export interface Binding {
   chord?: Chord;
   /** How the key is written in hints and help, e.g. "Alt+t" or "Ctrl+c ×2". */
   hint: string;
-  needs?: "shell" | "dictation";
+  needs?: "shell" | "dictation" | "notice";
 }
 
 /**
@@ -257,7 +258,7 @@ export interface CheatSheet {
  */
 export function cheatSheet(
   bindings: readonly Binding[],
-  available: { shell?: boolean; dictation?: boolean },
+  available: { shell?: boolean; dictation?: boolean; notice?: boolean },
   targets: Readonly<Record<string, string>>,
 ): CheatSheet[] {
   return [

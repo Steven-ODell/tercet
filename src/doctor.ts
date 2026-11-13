@@ -19,6 +19,7 @@ import {
   type ClipboardTool,
   type Host,
 } from "./portable";
+import { ORCHESTRATION_PROTOCOL_VERSION } from "@t3tools/contracts";
 import { PINNED_SERVER_VERSION, checkDescriptor, supportedRange } from "./client/compat";
 import { decideMedia, queryTerminal, type Replies, type Rung } from "./client/media";
 
@@ -196,12 +197,16 @@ async function serverReport(config: Config, probes: DoctorProbes): Promise<Docto
   const record = (descriptor ?? {}) as Record<string, unknown>;
   const serverVersion = typeof record.serverVersion === "string" ? record.serverVersion : null;
   const protocolVersion =
-    check.kind === "unsupported" || check.kind === "no-version"
+    check.kind === "protocol" || check.kind === "out-of-range" || check.kind === "no-version"
       ? check.protocol
       : (record.orchestrationProtocolVersion as number);
-  // Same verdict as startup (client/compat.ts): out of range or another protocol is "no".
+  // Same verdict as startup (client/compat.ts): only another protocol (or no version) is "no".
   const supported =
-    check.kind === "unsupported" ? "no" : check.kind === "ok" && check.tested ? "yes" : "untested";
+    check.kind === "protocol" || check.kind === "no-version"
+      ? "no"
+      : check.kind === "ok" && check.tested
+        ? "yes"
+        : "untested";
   return {
     ...base,
     reachable: true,
@@ -209,13 +214,15 @@ async function serverReport(config: Config, probes: DoctorProbes): Promise<Docto
     protocolVersion,
     supported,
     detail:
-      check.kind === "unsupported"
-        ? `${check.reason}; \`--ignore-version\` starts anyway`
+      check.kind === "protocol"
+        ? `this server speaks orchestration protocol ${check.protocol} and tercet speaks ${ORCHESTRATION_PROTOCOL_VERSION}; tercet stops here unless \`--ignore-version\``
         : check.kind === "no-version"
-          ? `no version reported; tercet starts only with \`--ignore-version\``
-          : check.kind === "ok" && check.tested
-            ? `tercet is tested against ${PINNED_SERVER_VERSION}`
-            : `within ${supportedRange}, but tercet is tested against ${PINNED_SERVER_VERSION}`,
+          ? `no version reported; tercet stops unless \`--ignore-version\``
+          : check.kind === "out-of-range"
+            ? `outside ${supportedRange}, tested on ${PINNED_SERVER_VERSION}; tercet starts with a warning banner and some things may not work`
+            : check.kind === "ok" && check.tested
+              ? `tercet is tested against ${PINNED_SERVER_VERSION}`
+              : `within ${supportedRange}, but tercet is tested against ${PINNED_SERVER_VERSION}`,
   };
 }
 

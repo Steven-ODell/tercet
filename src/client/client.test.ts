@@ -3,7 +3,15 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import { AuthStandardClientScopes, type OrchestrationV2ShellSnapshot } from "@t3tools/contracts";
 import { connectionConfig } from "./config";
-import { createClient, waitForLive, type Boundary, type Client, type Status } from "./runtime";
+import {
+  createClient,
+  UNREADABLE_SERVER,
+  UNREADABLE_THREAD,
+  waitForLive,
+  type Boundary,
+  type Client,
+  type Status,
+} from "./runtime";
 import { platform, readOptional, tokenIssueArgs, issuedToken } from "./platform";
 import { sandboxUrl, tokenPath } from "../spikes/connect";
 
@@ -189,6 +197,34 @@ test("server down displays retry and automatic reconnect restores shell", async 
     await Effect.runPromise(Deferred.succeed(pause, undefined));
     await waitForLive(client);
     expect(attempts).toBe(2);
+  } finally {
+    await client.dispose();
+  }
+});
+
+test("an undecodable item (a defect, not a failure) still says why and keeps reconnecting", async () => {
+  const pause = await Effect.runPromise(Deferred.make<void>());
+  let attempts = 0;
+  const client = createClient(
+    fake({
+      // effect's RPC client turns a chunk that fails to decode into a defect (Effect.orDie).
+      follow: (token, receive) =>
+        ++attempts === 1 ? Effect.die(new Error("SchemaError")) : receiveSnapshot(token, receive),
+      followThread: () => Effect.die(new Error("SchemaError")),
+      pause: () => Deferred.await(pause),
+    }),
+    false,
+  );
+  try {
+    client.start();
+    await waitStatus(client, "retry");
+    expect(client.registry.get(client.message)).toBe(UNREADABLE_SERVER);
+    await Effect.runPromise(Deferred.succeed(pause, undefined));
+    await waitForLive(client);
+    expect(attempts).toBe(2);
+    client.registry.set(client.selectedThreadId, "thread-1" as never);
+    await Bun.sleep(20);
+    expect(client.registry.get(client.transcripts).get("thread-1")?.error).toBe(UNREADABLE_THREAD);
   } finally {
     await client.dispose();
   }

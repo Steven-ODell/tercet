@@ -18,8 +18,8 @@ and composer in a TUI, next to the web app, on the same server.
 bun install -g github:Steven-ODell/tercet
 ```
 
-You need [Bun](https://bun.com) (tested with 1.4.0) and a T3 Code server, 0.1.8 or a later
-0.1 release, on the same machine. No Bun yet? `curl -fsSL https://bun.com/install | bash`, or
+You need [Bun](https://bun.com) (tested with 1.4.0) and a T3 Code server on the same machine.
+tercet is built and tested against T3 0.1.8; other versions start under a warning banner. No Bun yet? `curl -fsSL https://bun.com/install | bash`, or
 use the install script, which checks for Bun first and then runs the line above:
 
 ```bash
@@ -154,9 +154,13 @@ terminal](docs/settings.md#keys-that-depend-on-the-terminal).
 - **A terminal that claims more than it can do.** Some terminals answer the image queries and
   then draw nothing, or draw garbage. Set `"media": { "protocol": "blocks" }`, or `"none"` for
   placeholders.
-- **"Unsupported server version".** tercet checks the T3 version before it opens. Update T3
-  Code or tercet; `tercet --ignore-version`, or `"ignoreVersion": true` under `server` in the
-  settings file, continues at your own risk.
+- **"Built for T3 0.1.8, you're on ..." banner.** Your T3 server is a version tercet was not
+  tested on. It still works, but screens or actions T3 added since may be missing or broken.
+  `Alt+x` or a click hides the banner for the session. Update tercet when a release for your T3
+  version is out.
+- **"Incompatible server protocol".** The server speaks another orchestration protocol, so
+  tercet stops before it connects. Update tercet (or T3). `tercet --ignore-version`, or
+  `"ignoreVersion": true` under `server` in the settings file, tries anyway at your own risk.
 - **Can't connect.** `tercet doctor` checks the server and token. A server on another port or
   host needs `server.url`; one started with another `--base-dir` needs `server.baseDir`.
 

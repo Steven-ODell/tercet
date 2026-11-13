@@ -230,7 +230,24 @@ test("a bad settings file, bad flags and an unreachable or newer server still gi
     }).probes,
   );
   expect(newer.server.supported).toBe("no");
-  expect(newer.server.detail).toContain("this server speaks 3");
+  expect(newer.server.detail).toContain("this server speaks orchestration protocol 3");
+  expect(newer.server.detail).toContain("--ignore-version");
+
+  // A newer minor on the same protocol starts, under a banner, and doctor says so.
+  const minor = await doctorReport(
+    [],
+    machine({
+      environment: async () => ({ serverVersion: "0.2.0", orchestrationProtocolVersion: 2 }),
+    }).probes,
+  );
+  expect(minor.server.supported).toBe("untested");
+  expect(minor.server.detail).toContain("starts with a warning banner");
+  const nameless = await doctorReport(
+    [],
+    machine({ environment: async () => ({ orchestrationProtocolVersion: 2 }) }).probes,
+  );
+  expect(nameless.server.supported).toBe("no");
+  expect(nameless.server.detail).toContain("no version reported");
 });
 
 test("doctor exits 0 and prints JSON even when a probe blows up", async () => {

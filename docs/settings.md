@@ -27,7 +27,7 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
     // "~/" is your home; other relative paths are relative to this directory.
     "tokenFile": "~/.config/tercet/token",
     "baseDir": "~/.t3",
-    // Start on a server outside the supported version range (same as --ignore-version).
+    // Start on a server with another protocol or no version (same as --ignore-version).
     "ignoreVersion": false,
   },
   "defaults": {
@@ -122,7 +122,8 @@ digit, Enter, Tab, Space or Backspace is refused, because it types. `"none"` unb
 
 Commands: `shell`, `terminal`, `web`, `launchers`, `sidebar`, `model`, `effort`, `files`,
 `diff`, `dictation`, `palette`, `newThread`, `search`, `threadMenu`, `help`, `focusLeft`,
-`focusDown`, `focusUp`, `focusRight`, `leave`. `close` (Esc) and `quit` (Ctrl+c twice) are fixed.
+`focusDown`, `focusUp`, `focusRight`, `leave`, `dismissNotice` (the server-version banner,
+listed only while it shows). `close` (Esc) and `quit` (Ctrl+c twice) are fixed.
 Keys without Ctrl or Alt (`?`, `.`, capitals) are typed text while the composer has focus.
 
 Two commands on one key is an error naming both, and so is a key a pane already uses: the
@@ -274,16 +275,19 @@ of them there is no open button.
 | `--base-dir DIR`    | The server's data directory (default `~/.t3`).                        |
 | `--token-file PATH` | Read the token from this file. tercet never rewrites or chmods it.    |
 | `--read-only`       | No writes: sending, shell, run, open and copy-to actions are blocked. |
-| `--ignore-version`  | Start on a server outside the supported range, or without a version.  |
+| `--ignore-version`  | Start on a server with another protocol, or without a version.        |
 | `--dump-status`     | Connect, print `live threads=N` and exit, with no TUI.                |
 | `--hello`           | A server-free demo screen for checking the terminal.                  |
 | `--version`         | Print tercet's version and the T3 server versions it supports.        |
 
-tercet checks the server's version before it opens. A version outside the supported range (now
-`>=0.1.8 <0.2.0`, tested on 0.1.8), another protocol, or a missing version stops on a full-screen
-message that says what was found and what to do. `--ignore-version`, or `"ignoreVersion": true`
-under `server` in the settings file, continues at your own risk. An unreachable server gets its
-own message, and tercet checks again every 2 s.
+tercet checks the server before it opens. Only two things stop it: a server it cannot reach (it
+checks again every 2 s) and a server on another orchestration protocol, which client-runtime would
+refuse anyway. A server that reports no version also stops, because client-runtime cannot read
+its descriptor. A version outside the tested range (now `>=0.1.8 <0.2.0`, tested on 0.1.8) starts
+normally under a one-line banner, "Built for T3 0.1.8, you're on 0.2.0: some things may not
+work." `Alt+x` (the `dismissNotice` key) or a click hides it for the session. `--ignore-version`,
+or `"ignoreVersion": true` under `server`, gets past a protocol mismatch or a missing version at
+your own risk.
 
 ## tercet doctor
 

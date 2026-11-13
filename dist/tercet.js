@@ -34546,6 +34546,7 @@ var catchCauseFilter = /* @__PURE__ */ dual(3, (self2, filter2, f) => catchCause
   return isFailure2(eb) ? failCause(eb.failure) : f(eb.success, cause);
 }));
 var catch_ = /* @__PURE__ */ dual(2, (self2, f) => catchCauseFilter(self2, findRecoverableError, (e) => f(e)));
+var catchDefect = /* @__PURE__ */ dual(2, (self2, f) => catchCauseFilter(self2, findDefect, f));
 var tapCause = /* @__PURE__ */ dual(2, (self2, f) => catchCause(self2, (cause) => andThen(f(cause), failCause(cause))));
 var tapCauseFilter = /* @__PURE__ */ dual(3, (self2, filter2, f) => catchCause(self2, (cause) => {
   const result = filter2(cause);
@@ -37005,6 +37006,7 @@ var catch_2 = catch_;
 var catchTag2 = catchTag;
 var catchTags2 = catchTags;
 var catchCause2 = catchCause;
+var catchDefect2 = catchDefect;
 var catchIf2 = catchIf;
 var catchCauseIf2 = catchCauseIf;
 var mapError3 = mapError2;
@@ -38445,6 +38447,7 @@ var COMMANDS = [
   { id: "focusUp", keys: "Ctrl+k", label: "Pane up" },
   { id: "focusRight", keys: "Ctrl+l", label: "Pane right" },
   { id: "leave", keys: "Alt+c", label: "Close side panel" },
+  { id: "dismissNotice", keys: "Alt+x", label: "Dismiss server warning", needs: "notice" },
   { id: "close", keys: "Esc", label: "Close overlay / next pane", fixed: true },
   { id: "quit", keys: "Ctrl+c", label: "Quit", fixed: true, twice: true }
 ];
@@ -91830,23 +91833,13 @@ function checkDescriptor(descriptor2) {
   if (!version)
     return { kind: "no-version", protocol };
   if (protocol !== ORCHESTRATION_PROTOCOL_VERSION)
-    return {
-      kind: "unsupported",
-      version,
-      protocol,
-      reason: `tercet speaks orchestration protocol ${ORCHESTRATION_PROTOCOL_VERSION}; this server speaks ${protocol}`
-    };
+    return { kind: "protocol", version, protocol };
   let inRange = false;
   try {
     inRange = Bun.semver.satisfies(version, supportedRange);
   } catch {}
   if (!inRange)
-    return {
-      kind: "unsupported",
-      version,
-      protocol,
-      reason: `tercet supports T3 ${supportedRange}`
-    };
+    return { kind: "out-of-range", version, protocol };
   return { kind: "ok", version, tested: version === PINNED_SERVER_VERSION };
 }
 async function checkServer(origin2, fetchDescriptor2 = environmentDescriptor) {
@@ -91875,24 +91868,36 @@ function describeError(error2) {
   return text4.slice(0, 120);
 }
 function blocksStart(check2, ignoreVersion) {
-  if (check2.kind === "ok")
+  if (check2.kind === "ok" || check2.kind === "out-of-range")
     return false;
   if (check2.kind === "unreachable")
     return true;
   return !ignoreVersion;
 }
+function compatWarning(check2) {
+  switch (check2.kind) {
+    case "out-of-range":
+      return `Built for T3 ${PINNED_SERVER_VERSION}, you're on ${check2.version}: some things may not work.`;
+    case "protocol":
+      return `Built for orchestration protocol ${ORCHESTRATION_PROTOCOL_VERSION}, this server speaks ${check2.protocol} (--ignore-version): expect broken screens.`;
+    case "no-version":
+      return `This server reported no version (--ignore-version): some things may not work.`;
+    default:
+      return null;
+  }
+}
 function compatMessage(check2, url) {
   const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(new URL(url).hostname);
   switch (check2.kind) {
-    case "unsupported":
+    case "protocol":
       return {
-        title: "Unsupported server version",
+        title: "Incompatible server protocol",
         lines: [
-          `Server: ${url} runs T3 ${check2.version} (protocol ${check2.protocol}).`,
-          `Supported: T3 ${supportedRange}, tested on ${PINNED_SERVER_VERSION}.` + (check2.protocol === ORCHESTRATION_PROTOCOL_VERSION ? "" : ` ${check2.reason}.`),
-          "What to do: use a tercet release made for this server, or run a supported server",
+          `Server: ${url} runs T3 ${check2.version}, orchestration protocol ${check2.protocol}.`,
+          `tercet speaks protocol ${ORCHESTRATION_PROTOCOL_VERSION} (built for T3 ${PINNED_SERVER_VERSION}).`,
+          "What to do: update tercet, or run a server on its protocol",
           `(\`npx t3@${PINNED_SERVER_VERSION}\`). \`tercet --ignore-version\` continues at your own risk:`,
-          "items this tercet does not know are dropped and screens may break."
+          "the connection will most likely be refused or screens will break."
         ]
       };
     case "no-version":
@@ -91900,7 +91905,7 @@ function compatMessage(check2, url) {
         title: "The server did not report a version",
         lines: [
           `Server: ${url} answered without a serverVersion (protocol ${check2.protocol}).`,
-          `Supported: T3 ${supportedRange}, tested on ${PINNED_SERVER_VERSION}.`,
+          `tercet is built for T3 ${PINNED_SERVER_VERSION}.`,
           "It may be a T3 build older than tercet knows, or not a T3 server at all.",
           "What to do: check --url, or run `tercet doctor`. `tercet --ignore-version` continues at",
           "your own risk."
@@ -91915,8 +91920,14 @@ function compatMessage(check2, url) {
           "tercet checks again every 2 s and opens once the server answers."
         ]
       };
-    case "ok":
-      return { title: "Server ok", lines: [`Server: ${url} runs T3 ${check2.version}.`] };
+    case "out-of-range":
+    case "ok": {
+      const warning = compatWarning(check2);
+      return {
+        title: "Server ok",
+        lines: [`Server: ${url} runs T3 ${check2.version}.`, ...warning ? [warning] : []]
+      };
+    }
   }
 }
 // package.json
@@ -92006,15 +92017,15 @@ async function serverReport(config, probes) {
   const check2 = checkDescriptor(descriptor2);
   const record3 = descriptor2 ?? {};
   const serverVersion = typeof record3.serverVersion === "string" ? record3.serverVersion : null;
-  const protocolVersion = check2.kind === "unsupported" || check2.kind === "no-version" ? check2.protocol : record3.orchestrationProtocolVersion;
-  const supported = check2.kind === "unsupported" ? "no" : check2.kind === "ok" && check2.tested ? "yes" : "untested";
+  const protocolVersion = check2.kind === "protocol" || check2.kind === "out-of-range" || check2.kind === "no-version" ? check2.protocol : record3.orchestrationProtocolVersion;
+  const supported = check2.kind === "protocol" || check2.kind === "no-version" ? "no" : check2.kind === "ok" && check2.tested ? "yes" : "untested";
   return {
     ...base,
     reachable: true,
     serverVersion,
     protocolVersion,
     supported,
-    detail: check2.kind === "unsupported" ? `${check2.reason}; \`--ignore-version\` starts anyway` : check2.kind === "no-version" ? `no version reported; tercet starts only with \`--ignore-version\`` : check2.kind === "ok" && check2.tested ? `tercet is tested against ${PINNED_SERVER_VERSION}` : `within ${supportedRange}, but tercet is tested against ${PINNED_SERVER_VERSION}`
+    detail: check2.kind === "protocol" ? `this server speaks orchestration protocol ${check2.protocol} and tercet speaks ${ORCHESTRATION_PROTOCOL_VERSION}; tercet stops here unless \`--ignore-version\`` : check2.kind === "no-version" ? `no version reported; tercet stops unless \`--ignore-version\`` : check2.kind === "out-of-range" ? `outside ${supportedRange}, tested on ${PINNED_SERVER_VERSION}; tercet starts with a warning banner and some things may not work` : check2.kind === "ok" && check2.tested ? `tercet is tested against ${PINNED_SERVER_VERSION}` : `within ${supportedRange}, but tercet is tested against ${PINNED_SERVER_VERSION}`
   };
 }
 async function programOf(spec, probes) {
@@ -92274,6 +92285,7 @@ function ConnectionScreen({
     ]
   });
 }
+var ServerNotice = import_react20.createContext(null);
 function ServerGate({
   url,
   initial: initial2,
@@ -92284,6 +92296,7 @@ function ServerGate({
   children: children2
 }) {
   const [state2, setState] = import_react20.useState(initial2);
+  const [dismissed, setDismissed] = import_react20.useState(false);
   const blocked = blocksStart(state2, ignoreVersion);
   const ready = import_react20.useRef(false);
   const quit = import_react20.useRef(false);
@@ -92315,10 +92328,13 @@ function ServerGate({
     else if (key5.name === "r")
       recheck();
   });
-  if (!blocked)
-    return /* @__PURE__ */ import_jsx_runtime.jsx(import_jsx_runtime.Fragment, {
+  if (!blocked) {
+    const warning = dismissed ? null : compatWarning(state2);
+    return /* @__PURE__ */ import_jsx_runtime.jsx(ServerNotice.Provider, {
+      value: warning ? { text: warning, dismiss: () => setDismissed(true) } : null,
       children: children2
     });
+  }
   const { title, lines } = compatMessage(state2, url);
   const button = (label, run3) => /* @__PURE__ */ import_jsx_runtime.jsx("box", {
     height: 1,
@@ -94784,6 +94800,8 @@ function provide6(managed, effect3) {
 }
 
 // src/client/runtime.ts
+var UNREADABLE_SERVER = "The server sent data this tercet cannot read (a newer T3?). Retrying\u2026 (r: retry; `tercet doctor` shows versions)";
+var UNREADABLE_THREAD = "This thread has data this tercet cannot read (a newer T3?). Open it in Web, or retry (r).";
 function isRejected(error2) {
   return typeof error2 === "object" && error2 !== null && "_tag" in error2 && (error2._tag === "EnvironmentAuthInvalidError" || error2._tag === "EnvironmentAuthRequiredError");
 }
@@ -94811,7 +94829,7 @@ function createClient(boundary, managedToken, now2 = Date.now) {
       yield* interrupt5(previous);
     if (!id2 || !token || !boundary.followThread)
       return;
-    yield* boundary.followThread(token, id2, (item) => setThread(id2, receiveThread(getThread(id2), item))).pipe(catch_2(() => sync2(() => setThread(id2, { ...getThread(id2), error: "Transcript disconnected. Retry (r)." }))));
+    yield* boundary.followThread(token, id2, (item) => setThread(id2, receiveThread(getThread(id2), item))).pipe(catch_2(() => sync2(() => setThread(id2, { ...getThread(id2), error: "Transcript disconnected. Retry (r)." }))), catchDefect2(() => sync2(() => setThread(id2, { ...getThread(id2), error: UNREADABLE_THREAD }))));
   }));
   let threadFiber;
   let viewFiber;
@@ -94879,6 +94897,9 @@ function createClient(boundary, managedToken, now2 = Date.now) {
     } else if (rejected) {
       token = undefined;
     }
+  })), catchDefect2(() => sync2(() => {
+    registry.set(status2, "retry");
+    registry.set(message, UNREADABLE_SERVER);
   })));
   const loop = forever3(cycle.pipe(andThen2(() => boundary.pause())));
   let fiber2;
@@ -105966,6 +105987,9 @@ function AppFrame({
     ...wrapName(`${logo?.glyph} ${selected.modelSelection.model} \xB7 effort ${effort ?? "default"} \xB7 ${context4}`, width2),
     ...wrapName(`${paneGlyphs.branch} ${selected.branch ?? "branch unknown"} \xB7 ${selected.worktreePath ?? snapshot2?.projects.find((p) => p.id === selected.projectId)?.workspaceRoot ?? "workspace unknown"}`, width2)
   ] : [];
+  const notice = import_react50.useContext(ServerNotice);
+  const noticeRows = notice ? wrapName(`! ${notice.text} [ Dismiss${hintFor("dismissNotice") === "none" ? "" : ` (${hintFor("dismissNotice")})`} ]`, width2) : [];
+  const topRows = headerRows.length + noticeRows.length;
   const [sidebarWanted, setSidebar] = import_react50.useState(true);
   const [narrowSidebar, setNarrowSidebar] = import_react50.useState(false);
   const sidebar = width2 >= 70 ? sidebarWanted : narrowSidebar;
@@ -105978,7 +106002,7 @@ function AppFrame({
   };
   const hasQueued = !agentId && !!selectedId && !!client.getThread(selectedId).projection?.runs.some((run3) => run3.status === "queued");
   const composerCollapsed = !hasCard && !hasQueued && (!!agentId || focus !== "composer" || sent);
-  const composerHeight = hasCard ? Math.min(17, Math.max(13, height - 7 - headerRows.length)) : composerCollapsed ? 3 : 9;
+  const composerHeight = hasCard ? Math.min(17, Math.max(13, height - 7 - topRows)) : composerCollapsed ? 3 : 9;
   const [filePath, setFilePath] = import_react50.useState();
   const [diffTarget, setDiffTarget] = import_react50.useState();
   const [diffSerial, setDiffSerial] = import_react50.useState(0);
@@ -106048,6 +106072,10 @@ function AppFrame({
       return;
     }
     setQuitArmed(false);
+    if (command2 === "dismissNotice") {
+      notice?.dismiss();
+      return;
+    }
     if (command2 === "dictation") {
       if (!effects?.toggleDictation)
         return;
@@ -106128,7 +106156,7 @@ function AppFrame({
   };
   useKeyboard((key5) => {
     const found = commandForKey(key5);
-    const command2 = found === "shell" && !effects?.shell || found === "dictation" && !effects?.toggleDictation ? undefined : found;
+    const command2 = found === "shell" && !effects?.shell || found === "dictation" && !effects?.toggleDictation || found === "dismissNotice" && !notice ? undefined : found;
     if (key5.defaultPrevented)
       return;
     if (focus === "right" && right === "terminal" && !overlay && !key5.meta)
@@ -106155,7 +106183,7 @@ function AppFrame({
     } else
       setQuitArmed(false);
   });
-  const helpLines = cheatSheet(keymap(), { shell: !!effects?.shell, dictation: !!effects?.toggleDictation }, targetKeys(effects)).flatMap((part, i) => [
+  const helpLines = cheatSheet(keymap(), { shell: !!effects?.shell, dictation: !!effects?.toggleDictation, notice: !!notice }, targetKeys(effects)).flatMap((part, i) => [
     ...i ? [{ text: "", title: false }] : [],
     { text: part.title, title: true },
     ...part.rows.map((row) => ({ text: `${row.keys.padEnd(20)}${row.label}`, title: false }))
@@ -106210,7 +106238,7 @@ function AppFrame({
               status2,
               " \xB7 threads=",
               count,
-              selected ? ` \xB7 ${runtimeModeLabels[selected.runtimeMode]}` : ""
+              selected ? ` \xB7 ${runtimeModeLabels[selected.runtimeMode] ?? selected.runtimeMode}` : ""
             ]
           }),
           runningAgents > 0 && /* @__PURE__ */ import_jsx_runtime.jsx("box", {
@@ -106231,6 +106259,19 @@ function AppFrame({
             })
           })
         ]
+      }),
+      noticeRows.length > 0 && /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+        flexDirection: "column",
+        flexShrink: 0,
+        onMouseUp: (event) => {
+          if (event.button === 0)
+            notice?.dismiss();
+        },
+        children: noticeRows.map((row, i) => /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+          height: 1,
+          fg: theme.yellow,
+          children: row
+        }, i))
       }),
       headerRows.map((row) => /* @__PURE__ */ import_jsx_runtime.jsx("text", {
         height: 1,
@@ -106254,7 +106295,7 @@ function AppFrame({
           sidebar && pane("sidebar", "Threads", content.sidebar ?? /* @__PURE__ */ import_jsx_runtime.jsx(ThreadSidebar, {
             client,
             width: (width2 < 100 ? 22 : 30) - 2,
-            height: Math.max(1, height - 7 - headerRows.length),
+            height: Math.max(1, height - 7 - topRows),
             enabled: !overlay,
             keyboardEnabled: focus === "sidebar",
             onOpen: () => {
@@ -106293,7 +106334,7 @@ function AppFrame({
                 },
                 client,
                 width: Math.max(2, width2 - (sidebar ? width2 < 100 ? 22 : 30 : 0) - (right ? rightWidth(right, width2) : 0) - 2),
-                height: Math.max(2, height - 15 - headerRows.length - (composerHeight - 9)),
+                height: Math.max(2, height - 15 - topRows - (composerHeight - 9)),
                 enabled: !overlay,
                 keyboardEnabled: focus === "transcript"
               }) : /* @__PURE__ */ import_jsx_runtime.jsx(ConnectionScreen, {
@@ -106351,7 +106392,7 @@ function AppFrame({
             cwd: selected?.worktreePath ?? snapshot2?.projects.find((p) => p.id === selected?.projectId)?.workspaceRoot,
             worktreePath: selected?.worktreePath ?? null,
             enabled: !overlay && focus === "right",
-            height: height - 8 - headerRows.length,
+            height: height - 8 - topRows,
             width: (width2 < 70 ? Math.max(1, width2 - (sidebar ? 22 : 0)) : rightWidth("terminal", width2)) - 2,
             close: () => {
               setRight(null);
@@ -106374,7 +106415,7 @@ function AppFrame({
             path: filePath?.threadId === selectedId ? filePath.path : undefined,
             enabled: !overlay && focus === "right",
             effects,
-            height: height - 7 - headerRows.length,
+            height: height - 7 - topRows,
             width: (width2 < 70 ? Math.max(1, width2 - (sidebar ? 22 : 0)) : rightWidth("files", width2)) - 2,
             close: () => {
               setRight(null);
@@ -106384,7 +106425,7 @@ function AppFrame({
             client,
             target: diffTarget,
             enabled: !overlay && focus === "right",
-            height: height - 7 - headerRows.length,
+            height: height - 7 - topRows,
             close: () => {
               setRight(null);
               setFocus("transcript");
@@ -106573,6 +106614,9 @@ ${lines.join(`
 `)}`);
     process.exitCode = 1;
   } else if (config.dumpStatus && client) {
+    const warning = firstCheck && compatWarning(firstCheck);
+    if (warning)
+      console.error(`tercet: warning: ${warning}`);
     try {
       client.start();
       let unsubscribe2 = () => {};

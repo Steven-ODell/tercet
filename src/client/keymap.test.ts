@@ -29,7 +29,11 @@ for (const [name, overrides] of [
 ] as const)
   test(`the cheat sheet is the bindings, and each listed key runs its command (${name})`, () => {
     const bindings = resolveKeymap(overrides, { D: "desk" });
-    const sheet = cheatSheet(bindings, { shell: true, dictation: true }, { Y: "copy", D: "desk" });
+    const sheet = cheatSheet(
+      bindings,
+      { shell: true, dictation: true, notice: true },
+      { Y: "copy", D: "desk" },
+    );
     const anywhere = sheet[0]!.rows;
     // Every command in the table is listed once, in table order, unless unbound.
     expect(anywhere.map((row) => row.label)).toEqual(

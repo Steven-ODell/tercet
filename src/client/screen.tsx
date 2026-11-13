@@ -1,6 +1,13 @@
 import { theme } from "./theme";
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { blocksStart, compatMessage, type ServerCheck } from "./compat";
+import {
+  createContext,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
+import { blocksStart, compatMessage, compatWarning, type ServerCheck } from "./compat";
 import { useKeyboard } from "@opentui/react";
 import type { Atom } from "effect/reactivity";
 import type { Client } from "./runtime";
@@ -45,8 +52,15 @@ export function ConnectionScreen({
 }
 
 /**
+ * The server warning the frame draws as a banner (`compatWarning`), until dismissed for the
+ * session. Null when there is nothing to say, so no banner and no dismiss key exist.
+ */
+export const ServerNotice = createContext<{ text: string; dismiss: () => void } | null>(null);
+
+/**
  * Full-screen stop for a server tercet should not open on (client/compat.ts): the version found,
- * the range supported and what to do. An unreachable server is checked again every 2 s; once a
+ * the protocol tercet speaks and what to do. A server it opens on with a warning gets the app plus
+ * a `ServerNotice`. An unreachable server is checked again every 2 s; once a
  * check passes, `onReady` runs once (it starts the client) and the app takes the screen.
  */
 export function ServerGate({
@@ -67,6 +81,7 @@ export function ServerGate({
   children: ReactNode;
 }) {
   const [state, setState] = useState(initial);
+  const [dismissed, setDismissed] = useState(false);
   const blocked = blocksStart(state, ignoreVersion);
   const ready = useRef(false);
   const quit = useRef(false);
@@ -93,7 +108,16 @@ export function ServerGate({
     if (key.name === "q" || key.name === "escape" || (key.ctrl && key.name === "c")) leave();
     else if (key.name === "r") recheck();
   });
-  if (!blocked) return <>{children}</>;
+  if (!blocked) {
+    const warning = dismissed ? null : compatWarning(state);
+    return (
+      <ServerNotice.Provider
+        value={warning ? { text: warning, dismiss: () => setDismissed(true) } : null}
+      >
+        {children}
+      </ServerNotice.Provider>
+    );
+  }
   const { title, lines } = compatMessage(state, url);
   const button = (label: string, run: () => void) => (
     <box

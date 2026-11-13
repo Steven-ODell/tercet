@@ -324,3 +324,49 @@ sandboxes use port 3775 and up.
   `TMUX` is set) plus one optional command template, `commands.tmux`. The README keeps tmux to
   a troubleshooting note and the terminals table, the settings example and the demo use no tmux
   command, and `tercet doctor` prints a tmux row only inside tmux.
+
+## Gate on protocol, warn on version (2026-11-12)
+
+- Replaces the P7 version gate. tercet is for people on plain upstream T3, which ships often and
+  may bump its minor at any time; refusing to start on 0.2.0 locked those users out for no
+  proven reason. `checkDescriptor` now has five verdicts: `ok` (inside `supportedRange`,
+  `tested` when it is `PINNED_SERVER_VERSION`), `out-of-range` (same protocol, any other version,
+  nightlies and unparseable ones included), `protocol` (another orchestration protocol),
+  `no-version` and `unreachable`.
+- Only `unreachable` and `protocol` stop startup, plus `no-version`, because client-runtime's
+  descriptor decode requires `serverVersion` and would sit on the retry screen anyway.
+  `--ignore-version` passes `protocol` and `no-version`, never `unreachable`.
+- `out-of-range` opens the app with a one-line banner above the header, "Built for T3 0.1.8,
+  you're on Y: some things may not work." `ServerGate` passes it to the frame through the
+  `ServerNotice` context; `Alt+x` (`dismissNotice` in `COMMANDS`, `needs: "notice"`) or a click
+  hides it for the session. The key exists, and `?` lists it, only while the banner shows. An
+  ignored protocol mismatch or missing version gets the same banner with its own text.
+  `--dump-status` prints the warning on stderr and carries on.
+- `tercet doctor`: `yes` for the pinned release, `untested` for any other version on the same
+  protocol (the detail says whether it is in range or starts with the banner), `no` for another
+  protocol or no version.
+
+### Can a newer server crash tercet?
+
+Read in the vendored v0.1.8 contracts and effect's RPC client, 2026-11-12:
+
+- Unknown thread events and unknown turn-item types are safe. `OrchestrationV2ThreadStreamItem`
+  decodes them as `unknown-event` (cursor advanced, payload dropped), and tercet's
+  `receiveThread` marks the transcript "Unsupported server item · open this thread in Web".
+  Unknown items in history pages and snapshots are filtered out
+  (`ForwardCompatibleUnionArray`). `work-log.ts` still draws any type that gets through as
+  `[?] unknown item`.
+- Unknown provider kinds are safe: `ProviderDriverKind` is an open slug, `ServerProviders` is a
+  `ForwardCompatibleArray` (bad entries dropped), and tercet's icon lookup falls back to a robot.
+- The risk is a new value inside a known shape: most enums (`RunStatus`, `RuntimeMode`, the
+  shell stream's `kind`, `location`) are closed `Schema.Literals`. One such value fails the
+  decode of that whole stream chunk, and effect's `RpcClient` turns a chunk decode failure into a
+  defect (`Effect.orDie`), not a typed failure. tercet's stream loops used `Effect.catch`, which
+  does not see defects, so the thread fiber, or the whole shell reconnect loop, died silently:
+  a frozen screen, not a process crash.
+- Fixed in tercet's own code (`src/client/runtime.ts`): both loops add `Effect.catchDefect`. The
+  shell loop shows "The server sent data this tercet cannot read (a newer T3?)" and keeps
+  retrying; the thread shows the same note in the transcript. `client.test.ts` covers both. The
+  frame's runtime-mode label also falls back to the raw value. Remaining risk, documented and
+  not fixable without vendor changes: a server that sends such a value on every snapshot keeps
+  tercet on that message until tercet is updated.

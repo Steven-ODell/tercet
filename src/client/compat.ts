@@ -3,14 +3,20 @@ import { ORCHESTRATION_PROTOCOL_VERSION } from "@t3tools/contracts";
 /** The T3 server release tercet is built and tested against (`vendor/t3/UPSTREAM`; a test checks). */
 export const PINNED_SERVER_VERSION = "0.1.8";
 /**
- * Server versions tercet starts against without `--ignore-version` (Bun.semver syntax). Patch
- * releases of the pinned minor keep the wire format; a new minor may add or change items.
+ * Server versions tercet treats as tested (Bun.semver syntax): patch releases of the pinned minor
+ * keep the wire format. A version outside it still starts, under a warning banner; only another
+ * orchestration protocol stops startup.
  */
 export const supportedRange = ">=0.1.8 <0.2.0";
 
 export type ServerCheck =
+  /** Inside `supportedRange`; `tested` when it is the pinned release itself. */
   | { kind: "ok"; version: string; tested: boolean }
-  | { kind: "unsupported"; version: string; protocol: number; reason: string }
+  /** Same protocol, version outside the range (newer minor, nightly, older, unparseable). */
+  | { kind: "out-of-range"; version: string; protocol: number }
+  /** Another orchestration protocol: client-runtime would refuse the connection. */
+  | { kind: "protocol"; version: string; protocol: number }
+  /** No serverVersion: client-runtime's descriptor decode requires one. */
   | { kind: "no-version"; protocol: number }
   | { kind: "unreachable"; error: string };
 
@@ -27,24 +33,12 @@ export function checkDescriptor(descriptor: unknown): ServerCheck {
       ? record.orchestrationProtocolVersion
       : 1;
   if (!version) return { kind: "no-version", protocol };
-  if (protocol !== ORCHESTRATION_PROTOCOL_VERSION)
-    return {
-      kind: "unsupported",
-      version,
-      protocol,
-      reason: `tercet speaks orchestration protocol ${ORCHESTRATION_PROTOCOL_VERSION}; this server speaks ${protocol}`,
-    };
+  if (protocol !== ORCHESTRATION_PROTOCOL_VERSION) return { kind: "protocol", version, protocol };
   let inRange = false;
   try {
     inRange = Bun.semver.satisfies(version, supportedRange);
   } catch {}
-  if (!inRange)
-    return {
-      kind: "unsupported",
-      version,
-      protocol,
-      reason: `tercet supports T3 ${supportedRange}`,
-    };
+  if (!inRange) return { kind: "out-of-range", version, protocol };
   return { kind: "ok", version, tested: version === PINNED_SERVER_VERSION };
 }
 
@@ -77,28 +71,47 @@ function describeError(error: unknown) {
   return text.slice(0, 120);
 }
 
-/** True when a check stops startup; `--ignore-version` lets version problems through. */
+/**
+ * True when a check stops startup: an unreachable server always, another protocol or a missing
+ * version unless `--ignore-version`. A version outside the range never stops it (see
+ * `compatWarning`).
+ */
 export function blocksStart(check: ServerCheck, ignoreVersion: boolean) {
-  if (check.kind === "ok") return false;
+  if (check.kind === "ok" || check.kind === "out-of-range") return false;
   if (check.kind === "unreachable") return true;
   return !ignoreVersion;
+}
+
+/**
+ * The one-line warning for a server tercet opens on but was not built for, or null. The frame
+ * shows it as a dismissable banner; `--dump-status` prints it on stderr.
+ */
+export function compatWarning(check: ServerCheck): string | null {
+  switch (check.kind) {
+    case "out-of-range":
+      return `Built for T3 ${PINNED_SERVER_VERSION}, you're on ${check.version}: some things may not work.`;
+    case "protocol":
+      return `Built for orchestration protocol ${ORCHESTRATION_PROTOCOL_VERSION}, this server speaks ${check.protocol} (--ignore-version): expect broken screens.`;
+    case "no-version":
+      return `This server reported no version (--ignore-version): some things may not work.`;
+    default:
+      return null;
+  }
 }
 
 /** The full-screen message for a check that stops startup. ASCII only, so every icon set draws it. */
 export function compatMessage(check: ServerCheck, url: string): { title: string; lines: string[] } {
   const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(new URL(url).hostname);
   switch (check.kind) {
-    case "unsupported":
+    case "protocol":
       return {
-        title: "Unsupported server version",
+        title: "Incompatible server protocol",
         lines: [
-          `Server: ${url} runs T3 ${check.version} (protocol ${check.protocol}).`,
-          `Supported: T3 ${supportedRange}, tested on ${PINNED_SERVER_VERSION}.` +
-            // The range case is already said above; only a protocol mismatch adds its reason.
-            (check.protocol === ORCHESTRATION_PROTOCOL_VERSION ? "" : ` ${check.reason}.`),
-          "What to do: use a tercet release made for this server, or run a supported server",
+          `Server: ${url} runs T3 ${check.version}, orchestration protocol ${check.protocol}.`,
+          `tercet speaks protocol ${ORCHESTRATION_PROTOCOL_VERSION} (built for T3 ${PINNED_SERVER_VERSION}).`,
+          "What to do: update tercet, or run a server on its protocol",
           `(\`npx t3@${PINNED_SERVER_VERSION}\`). \`tercet --ignore-version\` continues at your own risk:`,
-          "items this tercet does not know are dropped and screens may break.",
+          "the connection will most likely be refused or screens will break.",
         ],
       };
     case "no-version":
@@ -106,7 +119,7 @@ export function compatMessage(check: ServerCheck, url: string): { title: string;
         title: "The server did not report a version",
         lines: [
           `Server: ${url} answered without a serverVersion (protocol ${check.protocol}).`,
-          `Supported: T3 ${supportedRange}, tested on ${PINNED_SERVER_VERSION}.`,
+          `tercet is built for T3 ${PINNED_SERVER_VERSION}.`,
           "It may be a T3 build older than tercet knows, or not a T3 server at all.",
           "What to do: check --url, or run `tercet doctor`. `tercet --ignore-version` continues at",
           "your own risk.",
@@ -123,7 +136,13 @@ export function compatMessage(check: ServerCheck, url: string): { title: string;
           "tercet checks again every 2 s and opens once the server answers.",
         ],
       };
-    case "ok":
-      return { title: "Server ok", lines: [`Server: ${url} runs T3 ${check.version}.`] };
+    case "out-of-range":
+    case "ok": {
+      const warning = compatWarning(check);
+      return {
+        title: "Server ok",
+        lines: [`Server: ${url} runs T3 ${check.version}.`, ...(warning ? [warning] : [])],
+      };
+    }
   }
 }

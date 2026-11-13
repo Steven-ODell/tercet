@@ -32,6 +32,7 @@ import {
   blocksStart,
   checkServer,
   compatMessage,
+  compatWarning,
   supportedRange,
 } from "./client/compat";
 import { ServerGate } from "./client/screen";
@@ -84,6 +85,8 @@ try {
     console.error(`tercet: ${title}\n${lines.join("\n")}`);
     process.exitCode = 1;
   } else if (config.dumpStatus && client) {
+    const warning = firstCheck && compatWarning(firstCheck);
+    if (warning) console.error(`tercet: warning: ${warning}`);
     try {
       client.start();
       // A rejected token will not turn live by waiting; report it now instead of after 30 s.

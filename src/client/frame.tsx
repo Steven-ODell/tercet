@@ -14,13 +14,13 @@ import { allThreads, createThreadActions } from "./thread-actions";
 import type { OrchestrationV2ThreadShell, RuntimeMode, ThreadId } from "@t3tools/contracts";
 import { ThreadComposer } from "./composer";
 import { ThreadTranscript } from "./transcript";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
 import { contextFillOf, formatContextFillPercent } from "./usage";
 import { paneGlyphs, selectionIcon } from "./icons";
 import { ThreadSidebar, wrapName } from "./sidebar";
 import type { Client } from "./runtime";
-import { ConnectionScreen, useClientAtom } from "./screen";
+import { ConnectionScreen, ServerNotice, useClientAtom } from "./screen";
 import { cheatSheet, commandForKey, hintFor, keymap, type Command } from "./keymap";
 import { targetKeys } from "../actions";
 import { onMediaNotice } from "./media";
@@ -106,6 +106,15 @@ export function AppFrame({
         ),
       ]
     : [];
+  // A server tercet was not built for (client/compat.ts) gets a banner above the header rows.
+  const notice = useContext(ServerNotice);
+  const noticeRows = notice
+    ? wrapName(
+        `! ${notice.text} [ Dismiss${hintFor("dismissNotice") === "none" ? "" : ` (${hintFor("dismissNotice")})`} ]`,
+        width,
+      )
+    : [];
+  const topRows = headerRows.length + noticeRows.length;
   const [sidebarWanted, setSidebar] = useState(true);
   const [narrowSidebar, setNarrowSidebar] = useState(false);
   const sidebar = width >= 70 ? sidebarWanted : narrowSidebar;
@@ -124,7 +133,7 @@ export function AppFrame({
     !!client.getThread(selectedId).projection?.runs.some((run) => run.status === "queued");
   const composerCollapsed = !hasCard && !hasQueued && (!!agentId || focus !== "composer" || sent);
   const composerHeight = hasCard
-    ? Math.min(17, Math.max(13, height - 7 - headerRows.length))
+    ? Math.min(17, Math.max(13, height - 7 - topRows))
     : composerCollapsed
       ? 3
       : 9;
@@ -199,6 +208,10 @@ export function AppFrame({
       return;
     }
     setQuitArmed(false);
+    if (command === "dismissNotice") {
+      notice?.dismiss();
+      return;
+    }
     if (command === "dictation") {
       if (!effects?.toggleDictation) return;
       setActionError("Mic …");
@@ -313,7 +326,9 @@ export function AppFrame({
     const found = commandForKey(key);
     // A command whose action is missing is not bound, like it is not listed in help.
     const command =
-      (found === "shell" && !effects?.shell) || (found === "dictation" && !effects?.toggleDictation)
+      (found === "shell" && !effects?.shell) ||
+      (found === "dictation" && !effects?.toggleDictation) ||
+      (found === "dismissNotice" && !notice)
         ? undefined
         : found;
     if (key.defaultPrevented) return;
@@ -352,7 +367,7 @@ export function AppFrame({
   // The same table drives dispatch, so help lists exactly the keys that work.
   const helpLines = cheatSheet(
     keymap(),
-    { shell: !!effects?.shell, dictation: !!effects?.toggleDictation },
+    { shell: !!effects?.shell, dictation: !!effects?.toggleDictation, notice: !!notice },
     targetKeys(effects),
   ).flatMap((part, i) => [
     ...(i ? [{ text: "", title: false }] : []),
@@ -406,7 +421,7 @@ export function AppFrame({
       <box height={1} flexShrink={0} flexDirection="row">
         <text fg={theme.text}>
           tercet · {status} · threads={count}
-          {selected ? ` · ${runtimeModeLabels[selected.runtimeMode]}` : ""}
+          {selected ? ` · ${runtimeModeLabels[selected.runtimeMode] ?? selected.runtimeMode}` : ""}
         </text>
         {runningAgents > 0 && (
           <box
@@ -421,6 +436,21 @@ export function AppFrame({
           </box>
         )}
       </box>
+      {noticeRows.length > 0 && (
+        <box
+          flexDirection="column"
+          flexShrink={0}
+          onMouseUp={(event) => {
+            if (event.button === 0) notice?.dismiss();
+          }}
+        >
+          {noticeRows.map((row, i) => (
+            <text key={i} height={1} fg={theme.yellow}>
+              {row}
+            </text>
+          ))}
+        </box>
+      )}
       {headerRows.map((row) => (
         <text
           key={row}
@@ -447,7 +477,7 @@ export function AppFrame({
               <ThreadSidebar
                 client={client}
                 width={(width < 100 ? 22 : 30) - 2}
-                height={Math.max(1, height - 7 - headerRows.length)}
+                height={Math.max(1, height - 7 - topRows)}
                 enabled={!overlay}
                 keyboardEnabled={focus === "sidebar"}
                 onOpen={() => {
@@ -504,7 +534,7 @@ export function AppFrame({
                       (right ? rightWidth(right, width) : 0) -
                       2,
                   )}
-                  height={Math.max(2, height - 15 - headerRows.length - (composerHeight - 9))}
+                  height={Math.max(2, height - 15 - topRows - (composerHeight - 9))}
                   enabled={!overlay}
                   keyboardEnabled={focus === "transcript"}
                 />
@@ -586,7 +616,7 @@ export function AppFrame({
                   }
                   worktreePath={selected?.worktreePath ?? null}
                   enabled={!overlay && focus === "right"}
-                  height={height - 8 - headerRows.length}
+                  height={height - 8 - topRows}
                   width={
                     (width < 70
                       ? Math.max(1, width - (sidebar ? 22 : 0))
@@ -622,7 +652,7 @@ export function AppFrame({
                   path={filePath?.threadId === selectedId ? filePath.path : undefined}
                   enabled={!overlay && focus === "right"}
                   effects={effects}
-                  height={height - 7 - headerRows.length}
+                  height={height - 7 - topRows}
                   width={
                     (width < 70
                       ? Math.max(1, width - (sidebar ? 22 : 0))
@@ -639,7 +669,7 @@ export function AppFrame({
                   client={client}
                   target={diffTarget}
                   enabled={!overlay && focus === "right"}
-                  height={height - 7 - headerRows.length}
+                  height={height - 7 - topRows}
                   close={() => {
                     setRight(null);
                     setFocus("transcript");
