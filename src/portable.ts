@@ -389,8 +389,16 @@ export function runArgs(host: Host, args: readonly string[], options: RunOptions
     // for the pipes to close.
     child.once("exit", (code, signal) => {
       exit = code;
-      if (!options.capture) finish(code === 0 ? undefined : failure(code, signal));
-      else if (code !== 0) finish(failure(code, signal));
+      if (!options.capture && code === 0) return finish();
+      if (!options.capture && !child.stderr?.destroyed && !child.stderr?.readableEnded) {
+        // A failed run's message is on stderr, which may not be read yet; wait for the pipe to
+        // close, but not for a forked child that holds it open.
+        const done = () => finish(failure(code, signal));
+        child.stderr?.once("close", done);
+        timers.push(setTimeout(done, 250));
+        return;
+      }
+      if (code !== 0) finish(failure(code, signal));
     });
     child.once("close", (code, signal) => {
       if (options.capture) finish(exit === 0 || code === 0 ? undefined : failure(code, signal));

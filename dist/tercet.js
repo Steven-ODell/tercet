@@ -39529,9 +39529,15 @@ function runArgs(host, args2, options = {}) {
     child.once("error", (error) => finish(error));
     child.once("exit", (code, signal) => {
       exit3 = code;
-      if (!options.capture)
-        finish(code === 0 ? undefined : failure(code, signal));
-      else if (code !== 0)
+      if (!options.capture && code === 0)
+        return finish();
+      if (!options.capture && !child.stderr?.destroyed && !child.stderr?.readableEnded) {
+        const done4 = () => finish(failure(code, signal));
+        child.stderr?.once("close", done4);
+        timers.push(setTimeout(done4, 250));
+        return;
+      }
+      if (code !== 0)
         finish(failure(code, signal));
     });
     child.once("close", (code, signal) => {
