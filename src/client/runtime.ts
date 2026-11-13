@@ -47,7 +47,8 @@ export interface Boundary {
   uploadImage?: (
     token: string,
     bytes: Uint8Array,
-  ) => Effect.Effect<import("@t3tools/contracts").ChatImageAttachment, unknown>;
+    meta?: import("./connection").UploadMeta,
+  ) => Effect.Effect<import("@t3tools/contracts").ChatImageAttachment | import("@t3tools/contracts").ChatFileAttachment, unknown>;
   diffs?: {
     [K in keyof typeof import("./connection").diffMethods]: (
       token: string,
@@ -75,6 +76,8 @@ export interface Boundary {
   drafts?: import("./composer-state").DraftStore;
   sendShortcut?: () => Promise<import("./composer-state").SendShortcut>;
   sidebarWorkingShelf?: () => Promise<boolean>;
+  /** Whether the key hint rows start shown. */
+  showHints?: () => Promise<boolean>;
   /** `defaults` from the settings file: the model and mode new threads start with. */
   newThreadDefaults?: import("./model-defaults").NewThreadDefaults;
   dispatch?: (
@@ -304,9 +307,9 @@ export function createClient(
       if (!token || !boundary.workspaceRefs) return Promise.reject(new Error("Offline"));
       return runtime.runPromise(boundary.workspaceRefs(token, cwd));
     },
-    uploadImage(bytes: Uint8Array) {
+    uploadImage(bytes: Uint8Array, meta?: import("./connection").UploadMeta) {
       if (!token || !boundary.uploadImage) return Promise.reject(new Error("Offline"));
-      return runtime.runPromise(boundary.uploadImage(token, bytes));
+      return runtime.runPromise(boundary.uploadImage(token, bytes, meta));
     },
     get terminalAvailable() {
       return !!boundary.terminal;

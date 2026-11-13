@@ -1,4 +1,5 @@
 import type { KeyEvent } from "@opentui/core";
+import { createContext } from "react";
 
 /** One key with its modifiers. `name` is a lowercase letter, a character, or a named key. */
 export interface Chord {
@@ -24,11 +25,13 @@ export const COMMANDS = [
   { id: "files", keys: "Alt+f", label: "Files" },
   { id: "diff", keys: "Alt+d", label: "Diff" },
   { id: "dictation", keys: "Alt+v", label: "Dictation", needs: "dictation" },
+  { id: "attach", keys: "Alt+a", label: "Attach files", needs: "attach" },
   { id: "palette", keys: "Ctrl+p", label: "Palette" },
   { id: "newThread", keys: "Ctrl+n", label: "New thread" },
   { id: "search", keys: "Ctrl+/", label: "Search threads" },
   { id: "threadMenu", keys: ".", label: "Thread actions" },
   { id: "help", keys: "?", label: "Help" },
+  { id: "hints", keys: "Alt+i", label: "Show / hide key hints" },
   { id: "focusLeft", keys: "Alt+h", label: "Pane left" },
   { id: "focusDown", keys: "Ctrl+j", label: "Pane down" },
   { id: "focusUp", keys: "Ctrl+k", label: "Pane up" },
@@ -55,7 +58,7 @@ export interface Binding {
   chord?: Chord;
   /** How the key is written in hints and help, e.g. "Alt+t" or "Ctrl+c ×2". */
   hint: string;
-  needs?: "shell" | "dictation" | "notice";
+  needs?: "shell" | "dictation" | "notice" | "attach";
 }
 
 /**
@@ -220,6 +223,9 @@ export function resolveKeymap(
   return COMMANDS.map((command) => bindings.find((b) => b.id === command.id)!);
 }
 
+/** Whether key hints show: the frame's bottom rows and the transcript's vim line (`hints` key). */
+export const HintsShown = createContext(true);
+
 let active = resolveKeymap();
 /** The bindings in effect; `setKeymap` replaces them at startup. */
 export const keymap = () => active;
@@ -258,7 +264,7 @@ export interface CheatSheet {
  */
 export function cheatSheet(
   bindings: readonly Binding[],
-  available: { shell?: boolean; dictation?: boolean; notice?: boolean },
+  available: { shell?: boolean; dictation?: boolean; notice?: boolean; attach?: boolean },
   targets: Readonly<Record<string, string>>,
 ): CheatSheet[] {
   return [

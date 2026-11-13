@@ -38,6 +38,8 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
     "sendShortcut": "enter",
     "favorites": [{ "provider": "codex", "model": "gpt-5.5" }],
     "sidebarWorkingShelf": false,
+    // The key hint rows at the bottom; Alt+i (the hints key) toggles them.
+    "hints": true,
   },
   "theme": { "preset": "cyberdream", "accent": "#b07cf5" },
   // Rebind commands by name; "none" unbinds. `tercet keys` prints the result.
@@ -79,10 +81,11 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
 | `defaults.sendShortcut`                               | `enter`, `mod-enter`, `mod-enter-multiline`                     | `enter`                                    | now       |
 | `defaults.favorites`                                  | list of `{ provider, model }`                                   | `[]`                                       | now       |
 | `defaults.sidebarWorkingShelf`                        | boolean                                                         | `false`                                    | now       |
+| `defaults.hints`                                      | boolean                                                         | `true`                                     | now       |
 | `theme.preset`, `theme.accent`                        | `cyberdream`, `light`, `ansi`; `#rrggbb`                        | `cyberdream`, its own accent               | now       |
 | `keys`                                                | command name to key                                             | built-in keys                              | now       |
 | `icons`                                               | `nerd`, `unicode`, `ascii`                                      | `unicode`                                  | now       |
-| `launchers.terminal`, `.editor`, `.opener`, `.player` | command template                                                | see below                                  | now       |
+| `launchers.terminal`, `.editor`, `.opener`, `.player`, `.picker` | command template                                                | see below                                  | now       |
 | `media.protocol`                                      | `auto`, `kitty`, `sixel`, `blocks`, `none`                      | `auto`                                     | now       |
 | `media.video`                                         | `player`, `terminal`                                            | `player`                                   | now       |
 | `commands.<name>`                                     | command template                                                | none                                       | now       |
@@ -125,7 +128,8 @@ of `Esc`, `Enter`, `Tab`, `Space`, `Backspace`, `Delete`, `Insert`, `Up`, `Down`
 digit, Enter, Tab, Space or Backspace is refused, because it types. `"none"` unbinds.
 
 Commands: `shell`, `terminal`, `web`, `launchers`, `sidebar`, `model`, `effort`, `files`,
-`diff`, `dictation`, `palette`, `newThread`, `search`, `threadMenu`, `help`, `focusLeft`,
+`diff`, `dictation`, `attach` (the file picker), `palette`, `newThread`, `search`, `threadMenu`, `help`, `hints` (shows
+or hides the key hint rows at the bottom), `focusLeft`,
 `focusDown`, `focusUp`, `focusRight`, `leave`, `dismissNotice` (the server-version banner,
 listed only while it shows). `close` (Esc) and `quit` (Ctrl+c twice) are fixed.
 Keys without Ctrl or Alt (`?`, `.`, capitals) are typed text while the composer has focus.
@@ -270,6 +274,21 @@ terminal allows it. Image copy and image paste appear only when the tool handles
 
 Links and files open with `launchers.opener`, then `xdg-open`, then `open` on macOS. With none
 of them there is no open button.
+
+### File picker
+
+`Alt+a` (the `attach` key) or the composer's `[Attach]` button opens a file dialog:
+`launchers.picker`, then `zenity` or `kdialog` when a desktop session is running, then
+`osascript` on macOS. A picker template gets `{cwd}` (the thread's project) and prints the chosen
+paths one per line; exit status 1 means Cancel. Picked files upload to the server like pasted
+images, at most 8 per message and 50 MB each: a PNG up to 2000 px goes as an image the model sees,
+anything else as a file the agent can open. Without a picker there is no button or key.
+
+Over SSH (the `{sshHost}` lookup finds the machine you type from), the dialog opens on that
+machine instead, over `ssh -o BatchMode=yes`, and the files are copied from there: the server gets
+the file itself, never a path on the wrong machine. It needs key login from here to there, and
+zenity or kdialog there (osascript on a Mac). A `launchers.picker` template replaces this and its
+paths are read on this machine.
 
 ## Flags
 

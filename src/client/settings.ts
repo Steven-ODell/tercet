@@ -51,6 +51,8 @@ export const LAUNCHER_PLACEHOLDERS = {
   editor: ["cwd", "path"],
   opener: ["url", "path"],
   player: ["path"],
+  /** A file dialog that prints the picked paths, one per line. */
+  picker: ["cwd"],
 } as const satisfies Record<string, readonly Placeholder[]>;
 
 /** Transcript keys a target may not take: the built-in target actions and vim's G and V. */
@@ -78,12 +80,15 @@ export interface Settings {
     sendShortcut: (typeof SEND_SHORTCUTS)[number];
     favorites: { provider: string; model: string }[];
     sidebarWorkingShelf: boolean;
+    /** The two rows of key hints at the bottom; the `hints` key toggles them. */
+    hints: boolean;
   };
   launchers: {
     terminal?: CommandSpec;
     editor?: CommandSpec;
     opener?: CommandSpec;
     player?: CommandSpec;
+    picker?: CommandSpec;
   };
   /** How images draw (`auto` asks the terminal) and where Enter plays a video. */
   media: { protocol: MediaProtocol; video: VideoMode };
@@ -98,7 +103,7 @@ export const defaultSettings = (): Settings => ({
   theme: {},
   keys: {},
   icons: "unicode",
-  defaults: { sendShortcut: "enter", favorites: [], sidebarWorkingShelf: false },
+  defaults: { sendShortcut: "enter", favorites: [], sidebarWorkingShelf: false, hints: true },
   launchers: {},
   media: { protocol: "auto", video: "player" },
   commands: {},
@@ -470,6 +475,7 @@ const schema = struct({
     sendShortcut: oneOf(SEND_SHORTCUTS),
     favorites: list(struct({ provider: text, model: text })),
     sidebarWorkingShelf: bool,
+    hints: bool,
   }),
   launchers: struct(
     Object.fromEntries(

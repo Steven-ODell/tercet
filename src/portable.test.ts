@@ -17,6 +17,8 @@ import {
   hostActions,
   imageMime,
   openerChain,
+  pickerChain,
+  REMOTE_PICKER,
   systemHost,
   type Host,
 } from "./portable";
@@ -403,4 +405,89 @@ test("{sshHost} comes from the most recently active tmux client, else SSH_CONNEC
   expect(await lookup({ SSH_CONNECTION: own }, {})).toBe("10.0.0.9");
   expect(await lookup({ TMUX: "x", SSH_CONNECTION: own }, {})).toBe("10.0.0.9");
   expect(await lookup({}, {})).toBeUndefined();
+});
+
+test("picker chain: launchers.picker, then zenity or kdialog on a desktop, osascript on macOS", async () => {
+  const name = async (
+    programs: string[],
+    env: Record<string, string>,
+    platform = "linux",
+    settings = defaultSettings(),
+  ) => {
+    const { host } = await fakePath(programs, env);
+    return pickerChain(settings, { ...host, platform })?.name;
+  };
+  expect(await name(["zenity", "kdialog"], { WAYLAND_DISPLAY: "wayland-1" })).toBe("zenity");
+  expect(await name(["kdialog"], { DISPLAY: ":0" })).toBe("kdialog");
+  expect(await name(["zenity"], {})).toBeUndefined();
+  expect(await name(["osascript"], {}, "darwin")).toBe("osascript");
+  const picker = settingsWith('{"launchers": {"picker": ["my-picker", "{cwd}"]}}');
+  expect(await name([], {}, "linux", picker)).toBe("launchers.picker");
+  expect(build((await fakePath([])).host).actions.pickFiles).toBeUndefined();
+});
+
+test("picked files come back read, with a MIME type; Cancel is empty, other failures throw", async () => {
+  const fake = await fakePath(["zenity"], { WAYLAND_DISPLAY: "wayland-1" });
+  await writeFile(`${fake.dir}/shot.png`, PNG);
+  await writeFile(`${fake.dir}/notes.ts`, "const a = 1;");
+  await writeFile(`${fake.dir}/blob`, new Uint8Array([1, 0, 2]));
+  await fake.output("zenity", `${fake.dir}/shot.png\n${fake.dir}/notes.ts\n${fake.dir}/blob\n`);
+  const { actions } = build(fake.host);
+  const picked = await actions.pickFiles!("/proj");
+  expect(picked.map(({ name, mimeType }) => [name, mimeType])).toEqual([
+    ["shot.png", "image/png"],
+    ["notes.ts", "text/plain"],
+    ["blob", "application/octet-stream"],
+  ]);
+  expect(picked[0]!.bytes).toEqual(PNG);
+  expect((await fake.log()).join("\n")).toContain("--filename=/proj/");
+  await writeFile(`${fake.dir}/empty`, "");
+  await fake.output("zenity", `${fake.dir}/empty\n`);
+  await expect(actions.pickFiles!("/proj")).rejects.toThrow("empty is empty");
+  // zenity exits 1 on Cancel; any other failure is an error.
+  await writeFile(`${fake.dir}/zenity`, "#!/bin/sh\nexit 1\n");
+  expect(await actions.pickFiles!("/proj")).toEqual([]);
+  await writeFile(`${fake.dir}/zenity`, "#!/bin/sh\necho 'no display' >&2\nexit 5\n");
+  await expect(actions.pickFiles!("/proj")).rejects.toThrow("no display");
+});
+
+test("over SSH the picker runs on the machine typed from and the files are copied from there", async () => {
+  // The stub ssh answers the picker with two paths and runs any other command here, as the
+  // laptop would. A local zenity exists too, and must not be used.
+  const fake = await fakePath(["zenity"], { WAYLAND_DISPLAY: "wayland-1" });
+  await writeFile(`${fake.dir}/it's here.png`, PNG);
+  await writeFile(`${fake.dir}/big`, "x");
+  await writeFile(
+    `${fake.dir}/ssh`,
+    `#!/bin/sh
+printf '%s\\n' "ssh $*" >> "${fake.dir}/log"
+for last; do :; done
+case "$last" in
+  *zenity*) printf '%s\\n' "${fake.dir}/it's here.png" "${fake.dir}/notes.txt" ;;
+  *) PATH=/usr/bin:/bin exec /bin/sh -c "$last" ;;
+esac
+`,
+  );
+  await chmod(`${fake.dir}/ssh`, 0o755);
+  await writeFile(`${fake.dir}/notes.txt`, "remote notes");
+  const { actions } = build(fake.host, defaultSettings(), { sshHost: async () => "laptop" });
+  const picked = await actions.pickFiles!("/proj");
+  expect(picked.map(({ name, mimeType }) => [name, mimeType])).toEqual([
+    ["it's here.png", "image/png"],
+    ["notes.txt", "text/plain"],
+  ]);
+  expect(picked[0]!.bytes).toEqual(PNG);
+  const log = await fake.log();
+  expect(log[0]).toStartWith("ssh -n -o BatchMode=yes -o ConnectTimeout=5 laptop sh -c");
+  expect(log.some((line) => line.startsWith("zenity"))).toBe(false);
+  // Not over SSH (no client host): the local picker.
+  await fake.output("zenity", "");
+  const local = build(fake.host, defaultSettings(), { sshHost: async () => undefined });
+  expect(await local.actions.pickFiles!("/proj")).toEqual([]);
+  expect((await fake.log()).filter((line) => line.startsWith("zenity"))).toHaveLength(1);
+  // A machine without a desktop still offers attach when ssh can reach the client.
+  const headless = await fakePath(["ssh"]);
+  expect(build(headless.host, defaultSettings(), { sshHost: async () => "x" }).actions.pickFiles)
+    .toBeDefined();
+  expect(REMOTE_PICKER).toContain("wayland-");
 });

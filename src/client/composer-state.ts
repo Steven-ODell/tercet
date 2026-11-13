@@ -93,6 +93,28 @@ export function createComposer(client: Client, storage?: DraftStore) {
         [id]: [...(client.registry.get(images)[id] ?? []), { key: crypto.randomUUID(), bytes }],
       });
     },
+    /**
+     * A picked file: a PNG the clipboard path would take goes as an image the model sees, anything
+     * else as a file the agent can open.
+     */
+    attachFile(id: string, file: { name: string; mimeType: string; bytes: Uint8Array }) {
+      if ((client.registry.get(images)[id]?.length ?? 0) >= 8)
+        throw new Error("Send at most 8 attachments at once.");
+      let type: "image" | "file" = "file";
+      if (file.mimeType === "image/png")
+        try {
+          validateClipboardPng(file.bytes);
+          type = "image";
+        } catch {}
+      const upload = { type, name: file.name, mimeType: file.mimeType };
+      client.registry.set(images, {
+        ...client.registry.get(images),
+        [id]: [
+          ...(client.registry.get(images)[id] ?? []),
+          { key: crypto.randomUUID(), bytes: file.bytes, upload },
+        ],
+      });
+    },
     removeImage(id: string, key: string) {
       if (client.registry.get(busy)) return;
       client.registry.set(images, {
@@ -126,7 +148,7 @@ export function createComposer(client: Client, storage?: DraftStore) {
         activeTurnDefault: "queue",
       });
       const base = { commandId: CommandId.make(crypto.randomUUID()), threadId: id };
-      const attachments: import("@t3tools/contracts").ChatImageAttachment[] = [];
+      const attachments: NonNullable<(typeof pending)[number]["uploaded"]>[] = [];
       // A thread left unnamed takes its title from the first message, as on web. The server ignores
       // the seed once the thread has messages, and a thread the user named never sends one.
       const unnamed = isUnnamedThread(client, id);
@@ -143,7 +165,10 @@ export function createComposer(client: Client, storage?: DraftStore) {
                 ? {
                     titleSeed: deriveThreadTitleSeed({
                       text,
-                      attachments: pending.map(() => ({ type: "image" as const, name: "clipboard.png" })),
+                      attachments: pending.map((image) => ({
+                        type: image.upload?.type ?? ("image" as const),
+                        name: image.upload?.name ?? "clipboard.png",
+                      })),
                     }),
                   }
                 : {}),
@@ -154,7 +179,7 @@ export function createComposer(client: Client, storage?: DraftStore) {
             },
         async () => {
           for (const image of pending) {
-            image.uploaded ??= await client.uploadImage(image.bytes);
+            image.uploaded ??= await client.uploadImage(image.bytes, image.upload);
             attachments.push(image.uploaded);
           }
         },

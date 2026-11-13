@@ -5,6 +5,11 @@ export interface Actions {
   openThread?(input: { threadId: string }): Promise<unknown>;
   pasteClipboard?(): Promise<{ type: "image"; bytes: Uint8Array } | { type: "text"; text: string }>;
   pasteImage?(): Promise<Uint8Array>;
+  /**
+   * Opens a file dialog starting in `cwd` and reads the picked files (50 MB each at most).
+   * Cancel gives an empty list.
+   */
+  pickFiles?(cwd?: string): Promise<{ name: string; mimeType: string; bytes: Uint8Array }[]>;
   toggleDictation?(): Promise<{ recording: boolean }>;
   editor?(input: { cwd: string; path: string }): Promise<unknown>;
   /** OSC 52, plus the local clipboard tool when there is one. */

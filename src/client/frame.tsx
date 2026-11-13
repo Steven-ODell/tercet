@@ -21,7 +21,7 @@ import { paneGlyphs, selectionIcon } from "./icons";
 import { ThreadSidebar, wrapName } from "./sidebar";
 import type { Client } from "./runtime";
 import { ConnectionScreen, ServerNotice, useClientAtom } from "./screen";
-import { cheatSheet, commandForKey, hintFor, keymap, type Command } from "./keymap";
+import { cheatSheet, commandForKey, hintFor, HintsShown, keymap, type Command } from "./keymap";
 import { targetKeys } from "../actions";
 import { onMediaNotice } from "./media";
 
@@ -115,6 +115,16 @@ export function AppFrame({
       )
     : [];
   const topRows = headerRows.length + noticeRows.length;
+  // The two key hint rows at the bottom; the hints key (Alt+i) gives them back to the panes.
+  const [hintsShown, setHintsShown] = useState(true);
+  useEffect(() => {
+    void client.boundary
+      .showHints?.()
+      .then(setHintsShown)
+      .catch(() => {});
+  }, [client]);
+  // Rows outside the panes: header and banner above, the hint rows below.
+  const chromeRows = topRows + (hintsShown ? 2 : 0);
   const [sidebarWanted, setSidebar] = useState(true);
   const [narrowSidebar, setNarrowSidebar] = useState(false);
   const sidebar = width >= 70 ? sidebarWanted : narrowSidebar;
@@ -133,7 +143,7 @@ export function AppFrame({
     !!client.getThread(selectedId).projection?.runs.some((run) => run.status === "queued");
   const composerCollapsed = !hasCard && !hasQueued && (!!agentId || focus !== "composer" || sent);
   const composerHeight = hasCard
-    ? Math.min(17, Math.max(13, height - 7 - topRows))
+    ? Math.min(17, Math.max(13, height - 5 - chromeRows))
     : composerCollapsed
       ? 3
       : 9;
@@ -210,6 +220,12 @@ export function AppFrame({
     setQuitArmed(false);
     if (command === "dismissNotice") {
       notice?.dismiss();
+      return;
+    }
+    // The composer runs attach itself (it owns the draft), from wherever a paste would land.
+    if (command === "attach") return;
+    if (command === "hints") {
+      setHintsShown(!hintsShown);
       return;
     }
     if (command === "dictation") {
@@ -328,6 +344,7 @@ export function AppFrame({
     const command =
       (found === "shell" && !effects?.shell) ||
       (found === "dictation" && !effects?.toggleDictation) ||
+      (found === "attach" && !effects?.pickFiles) ||
       (found === "dismissNotice" && !notice)
         ? undefined
         : found;
@@ -367,7 +384,12 @@ export function AppFrame({
   // The same table drives dispatch, so help lists exactly the keys that work.
   const helpLines = cheatSheet(
     keymap(),
-    { shell: !!effects?.shell, dictation: !!effects?.toggleDictation, notice: !!notice },
+    {
+      shell: !!effects?.shell,
+      dictation: !!effects?.toggleDictation,
+      notice: !!notice,
+      attach: !!effects?.pickFiles,
+    },
     targetKeys(effects),
   ).flatMap((part, i) => [
     ...(i ? [{ text: "", title: false }] : []),
@@ -417,381 +439,388 @@ export function AppFrame({
     </box>
   );
   return (
-    <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.canvas}>
-      <box height={1} flexShrink={0} flexDirection="row">
-        <text fg={theme.text}>
-          tercet · {status} · threads={count}
-          {selected ? ` · ${runtimeModeLabels[selected.runtimeMode] ?? selected.runtimeMode}` : ""}
-        </text>
-        {runningAgents > 0 && (
-          <box
-            marginLeft={2}
-            onMouseUp={(event) => {
-              if (event.button === 0 && !overlay) openRight("launchers");
-            }}
-          >
-            <text fg={theme.accent} selectable={false}>
-              {runningAgents} {runningAgents === 1 ? "agent" : "agents"} running
-            </text>
-          </box>
-        )}
-      </box>
-      {noticeRows.length > 0 && (
-        <box
-          flexDirection="column"
-          flexShrink={0}
-          onMouseUp={(event) => {
-            if (event.button === 0) notice?.dismiss();
-          }}
-        >
-          {noticeRows.map((row, i) => (
-            <text key={i} height={1} fg={theme.yellow}>
-              {row}
-            </text>
-          ))}
-        </box>
-      )}
-      {headerRows.map((row) => (
-        <text
-          key={row}
-          height={1}
-          flexShrink={0}
-          fg={fill?.level === "full" ? theme.red : theme.accent}
-        >
-          {logo && row.startsWith(logo.glyph) ? (
-            <>
-              <span fg={logo.color}>{logo.glyph}</span>
-              {row.slice(logo.glyph.length)}
-            </>
-          ) : (
-            row
-          )}
-        </text>
-      ))}
-      <box flexGrow={1} minHeight={0} flexDirection="row">
-        {sidebar &&
-          pane(
-            "sidebar",
-            "Threads",
-            content.sidebar ?? (
-              <ThreadSidebar
-                client={client}
-                width={(width < 100 ? 22 : 30) - 2}
-                height={Math.max(1, height - 7 - topRows)}
-                enabled={!overlay}
-                keyboardEnabled={focus === "sidebar"}
-                onOpen={() => {
-                  if (width >= 70 || !right) setFocus("transcript");
-                }}
-                onMenu={(id) => {
-                  setMenuTarget(allThreads(client).find((t) => t.id === id));
-                  setOverlay("menu");
-                }}
-              />
-            ),
-            { width: width < 100 ? 22 : 30 },
-          )}
-        <box flexGrow={1} minWidth={0} flexDirection="column" visible={width >= 70 || !right}>
-          {pane(
-            "transcript",
-            agentId
-              ? `Agent · ${agentThread ? formatSubagentDisplayTitle(agentThread.title) : "thread"} · read-only`
-              : "Transcript",
-            content.transcript ??
-              (status === "live" || selectedId ? (
-                <ThreadTranscript
-                  effects={effects}
-                  threadId={agentId ?? undefined}
-                  openAgent={openAgent}
-                  openDiff={
-                    agentId
-                      ? undefined
-                      : (target) => {
-                          setDiffTarget(target);
-                          setDiffSerial((n) => n + 1);
-                          setRight("diff");
-                          setFocus("right");
-                        }
-                  }
-                  openFile={
-                    agentId
-                      ? undefined
-                      : (path) => {
-                          setFilePath((previous) => ({
-                            threadId: selectedId,
-                            path,
-                            serial: (previous?.serial ?? 0) + 1,
-                          }));
-                          setRight("files");
-                          setFocus("right");
-                        }
-                  }
-                  client={client}
-                  width={Math.max(
-                    2,
-                    width -
-                      (sidebar ? (width < 100 ? 22 : 30) : 0) -
-                      (right ? rightWidth(right, width) : 0) -
-                      2,
-                  )}
-                  height={Math.max(2, height - 15 - topRows - (composerHeight - 9))}
-                  enabled={!overlay}
-                  keyboardEnabled={focus === "transcript"}
-                />
-              ) : (
-                <ConnectionScreen client={client} keyboardEnabled={!overlay} />
-              )),
-            { flexGrow: 1 },
-          )}
-          {pane(
-            "composer",
-            agentId ? "Agent · read-only" : "Composer",
-            content.composer ?? (
-              <>
-                {/* Stays mounted while an agent is viewed so an unsent draft is kept. */}
-                <box visible={!agentId} height="100%">
-                  <ThreadComposer
-                    client={client}
-                    effects={effects}
-                    enabled={!overlay && focus === "composer" && !agentId}
-                    pasteEnabled={
-                      !overlay &&
-                      !agentId &&
-                      (width >= 70 || !right) &&
-                      !(focus === "right" && right === "terminal")
-                    }
-                    collapsed={composerCollapsed}
-                    onSent={() => setSent(true)}
-                    onInputFocus={() => setFocus("composer")}
-                  />
-                </box>
-                {agentId && (
-                  <box flexDirection="column" height="100%">
-                    {agentCard && (
-                      <RequestPanel
-                        key={agentCardKey}
-                        client={client}
-                        id={agentId}
-                        card={agentCard}
-                        enabled={!overlay && focus === "composer"}
-                        onEscape={closeAgent}
-                      />
-                    )}
-                    <box
-                      height={1}
-                      flexShrink={0}
-                      onMouseUp={(event) => {
-                        if (event.button === 0 && !overlay) closeAgent();
-                      }}
-                    >
-                      <text fg={theme.accent} selectable={false}>
-                        Read-only agent view · [Esc Back]
-                      </text>
-                    </box>
-                  </box>
-                )}
-              </>
-            ),
-            { height: composerHeight },
-          )}
-        </box>
-        {right &&
-          pane(
-            "right",
-            right === "files"
-              ? "Files"
-              : right === "diff"
-                ? "Diff"
-                : right === "terminal"
-                  ? "Terminal"
-                  : "Launchers",
-            content.right ??
-              (right === "terminal" ? (
-                <TerminalPanel
-                  client={client}
-                  threadId={selectedId ?? undefined}
-                  cwd={
-                    selected?.worktreePath ??
-                    snapshot?.projects.find((p) => p.id === selected?.projectId)?.workspaceRoot
-                  }
-                  worktreePath={selected?.worktreePath ?? null}
-                  enabled={!overlay && focus === "right"}
-                  height={height - 8 - topRows}
-                  width={
-                    (width < 70
-                      ? Math.max(1, width - (sidebar ? 22 : 0))
-                      : rightWidth("terminal", width)) - 2
-                  }
-                  close={() => {
-                    setRight(null);
-                    setFocus("transcript");
-                  }}
-                />
-              ) : right === "launchers" ? (
-                <LaunchersPanel
-                  key={selectedId}
-                  open={openRight}
-                  shell={effects?.shell ? runShell : undefined}
-                  agents={agents}
-                  openAgent={openAgent}
-                  now={client.now}
-                  enabled={!overlay && focus === "right"}
-                  close={() => {
-                    setRight(null);
-                    setFocus("transcript");
-                  }}
-                />
-              ) : right === "files" ? (
-                <FilesPanel
-                  key={`${selectedId}:${filePath?.serial ?? 0}`}
-                  api={client.files}
-                  cwd={
-                    selected?.worktreePath ??
-                    snapshot?.projects.find((p) => p.id === selected?.projectId)?.workspaceRoot
-                  }
-                  path={filePath?.threadId === selectedId ? filePath.path : undefined}
-                  enabled={!overlay && focus === "right"}
-                  effects={effects}
-                  height={height - 7 - topRows}
-                  width={
-                    (width < 70
-                      ? Math.max(1, width - (sidebar ? 22 : 0))
-                      : rightWidth("files", width)) - 2
-                  }
-                  close={() => {
-                    setRight(null);
-                    setFocus("transcript");
-                  }}
-                />
-              ) : (
-                <DiffPanel
-                  key={`${selectedId}:${diffSerial}`}
-                  client={client}
-                  target={diffTarget}
-                  enabled={!overlay && focus === "right"}
-                  height={height - 7 - topRows}
-                  close={() => {
-                    setRight(null);
-                    setFocus("transcript");
-                  }}
-                />
-              )),
-            {
-              width:
-                width < 70 ? Math.max(1, width - (sidebar ? 22 : 0)) : rightWidth(right, width),
-            },
-          )}
-      </box>
-      <text height={1} flexShrink={0} fg={theme.accent}>
-        {actionError ||
-          (quitArmed ? "Press Ctrl+c again to quit; any other key cancels" : `Focus: ${focus}`)}
-      </text>
-      <box height={2} flexShrink={0} flexDirection="row" flexWrap="wrap">
-        {keymap()
-          .filter(
-            (binding) =>
-              binding.chord &&
-              [
-                "sidebar",
-                "web",
-                "launchers",
-                "model",
-                "effort",
-                "palette",
-                "help",
-                "leave",
-                "close",
-              ].includes(binding.id),
-          )
-          // Files, Diff, Terminal and Shell live in the launcher list; their Alt keys still work and stay in Help.
-          .map((binding) => (
+    <HintsShown.Provider value={hintsShown}>
+      <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.canvas}>
+        <box height={1} flexShrink={0} flexDirection="row">
+          <text fg={theme.text}>
+            tercet · {status} · threads={count}
+            {selected ? ` · ${runtimeModeLabels[selected.runtimeMode] ?? selected.runtimeMode}` : ""}
+          </text>
+          {runningAgents > 0 && (
             <box
-              key={binding.id}
-              height={1}
-              marginRight={2}
+              marginLeft={2}
               onMouseUp={(event) => {
-                if (event.button === 0) dispatch(binding.id);
-              }}
-            >
-              <text fg={theme.text} selectable={false}>
-                {binding.hint} {binding.label}
-              </text>
-            </box>
-          ))}
-      </box>
-      {(overlay === "palette" || overlay === "search" || overlay === "menu") && (
-        <ThreadPalette
-          key={overlay}
-          client={client}
-          mode={overlay}
-          target={menuTarget}
-          actions={actions}
-          newThread={() => setOverlay("workspace")}
-          close={() => setOverlay(null)}
-          width={width}
-          height={height}
-        />
-      )}
-      {(overlay === "model" || overlay === "effort") && (
-        <ModelPicker
-          key={overlay}
-          client={client}
-          effort={overlay === "effort"}
-          close={() => setOverlay(null)}
-          width={width}
-          height={height}
-        />
-      )}
-      {overlay === "workspace" && (
-        <NewThreadPicker
-          client={client}
-          target={menuTarget}
-          actions={actions}
-          close={() => setOverlay(null)}
-          created={() => {
-            setOverlay("model");
-            if (width >= 70 || !right) setFocus("composer");
-          }}
-        />
-      )}
-      {overlay === "help" && (
-        <box position="absolute" left={0} top={0} width="100%" height="100%">
-          <box
-            position="absolute"
-            left={Math.max(0, Math.floor((width - Math.min(60, width)) / 2))}
-            top={Math.max(
-              0,
-              Math.floor((height - 4 - Math.min(height - 4, helpLines.length + 3)) / 2),
-            )}
-            width={Math.min(60, width)}
-            height={Math.min(height - 4, helpLines.length + 3)}
-            border
-            borderStyle="rounded"
-            borderColor={theme.accent}
-            backgroundColor={theme.canvas}
-            title="Keys"
-            flexDirection="column"
-          >
-            <scrollbox scrollY scrollX={false} flexGrow={1}>
-              {helpLines.map((line, i) => (
-                <text key={i} fg={line.title ? theme.accent : theme.text}>
-                  {line.text}
-                </text>
-              ))}
-            </scrollbox>
-            <box
-              height={1}
-              onMouseUp={(event) => {
-                if (event.button === 0) dispatch("close");
+                if (event.button === 0 && !overlay) openRight("launchers");
               }}
             >
               <text fg={theme.accent} selectable={false}>
-                [ Esc Close ]
+                {runningAgents} {runningAgents === 1 ? "agent" : "agents"} running
               </text>
             </box>
-          </box>
+          )}
         </box>
-      )}
-    </box>
+        {noticeRows.length > 0 && (
+          <box
+            flexDirection="column"
+            flexShrink={0}
+            onMouseUp={(event) => {
+              if (event.button === 0) notice?.dismiss();
+            }}
+          >
+            {noticeRows.map((row, i) => (
+              <text key={i} height={1} fg={theme.yellow}>
+                {row}
+              </text>
+            ))}
+          </box>
+        )}
+        {headerRows.map((row) => (
+          <text
+            key={row}
+            height={1}
+            flexShrink={0}
+            fg={fill?.level === "full" ? theme.red : theme.accent}
+          >
+            {logo && row.startsWith(logo.glyph) ? (
+              <>
+                <span fg={logo.color}>{logo.glyph}</span>
+                {row.slice(logo.glyph.length)}
+              </>
+            ) : (
+              row
+            )}
+          </text>
+        ))}
+        <box flexGrow={1} minHeight={0} flexDirection="row">
+          {sidebar &&
+            pane(
+              "sidebar",
+              "Threads",
+              content.sidebar ?? (
+                <ThreadSidebar
+                  client={client}
+                  width={(width < 100 ? 22 : 30) - 2}
+                  height={Math.max(1, height - 5 - chromeRows)}
+                  enabled={!overlay}
+                  keyboardEnabled={focus === "sidebar"}
+                  onOpen={() => {
+                    if (width >= 70 || !right) setFocus("transcript");
+                  }}
+                  onMenu={(id) => {
+                    setMenuTarget(allThreads(client).find((t) => t.id === id));
+                    setOverlay("menu");
+                  }}
+                />
+              ),
+              { width: width < 100 ? 22 : 30 },
+            )}
+          <box flexGrow={1} minWidth={0} flexDirection="column" visible={width >= 70 || !right}>
+            {pane(
+              "transcript",
+              agentId
+                ? `Agent · ${agentThread ? formatSubagentDisplayTitle(agentThread.title) : "thread"} · read-only`
+                : "Transcript",
+              content.transcript ??
+                (status === "live" || selectedId ? (
+                  <ThreadTranscript
+                    effects={effects}
+                    threadId={agentId ?? undefined}
+                    openAgent={openAgent}
+                    openDiff={
+                      agentId
+                        ? undefined
+                        : (target) => {
+                            setDiffTarget(target);
+                            setDiffSerial((n) => n + 1);
+                            setRight("diff");
+                            setFocus("right");
+                          }
+                    }
+                    openFile={
+                      agentId
+                        ? undefined
+                        : (path) => {
+                            setFilePath((previous) => ({
+                              threadId: selectedId,
+                              path,
+                              serial: (previous?.serial ?? 0) + 1,
+                            }));
+                            setRight("files");
+                            setFocus("right");
+                          }
+                    }
+                    client={client}
+                    width={Math.max(
+                      2,
+                      width -
+                        (sidebar ? (width < 100 ? 22 : 30) : 0) -
+                        (right ? rightWidth(right, width) : 0) -
+                        2,
+                    )}
+                    height={Math.max(2, height - 13 - chromeRows - (composerHeight - 9))}
+                    enabled={!overlay}
+                    keyboardEnabled={focus === "transcript"}
+                  />
+                ) : (
+                  <ConnectionScreen client={client} keyboardEnabled={!overlay} />
+                )),
+              { flexGrow: 1 },
+            )}
+            {pane(
+              "composer",
+              agentId ? "Agent · read-only" : "Composer",
+              content.composer ?? (
+                <>
+                  {/* Stays mounted while an agent is viewed so an unsent draft is kept. */}
+                  <box visible={!agentId} height="100%">
+                    <ThreadComposer
+                      client={client}
+                      effects={effects}
+                      enabled={!overlay && focus === "composer" && !agentId}
+                      pasteEnabled={
+                        !overlay &&
+                        !agentId &&
+                        (width >= 70 || !right) &&
+                        !(focus === "right" && right === "terminal")
+                      }
+                      collapsed={composerCollapsed}
+                      onSent={() => setSent(true)}
+                      onInputFocus={() => setFocus("composer")}
+                    />
+                  </box>
+                  {agentId && (
+                    <box flexDirection="column" height="100%">
+                      {agentCard && (
+                        <RequestPanel
+                          key={agentCardKey}
+                          client={client}
+                          id={agentId}
+                          card={agentCard}
+                          enabled={!overlay && focus === "composer"}
+                          onEscape={closeAgent}
+                        />
+                      )}
+                      <box
+                        height={1}
+                        flexShrink={0}
+                        onMouseUp={(event) => {
+                          if (event.button === 0 && !overlay) closeAgent();
+                        }}
+                      >
+                        <text fg={theme.accent} selectable={false}>
+                          Read-only agent view · [Esc Back]
+                        </text>
+                      </box>
+                    </box>
+                  )}
+                </>
+              ),
+              { height: composerHeight },
+            )}
+          </box>
+          {right &&
+            pane(
+              "right",
+              right === "files"
+                ? "Files"
+                : right === "diff"
+                  ? "Diff"
+                  : right === "terminal"
+                    ? "Terminal"
+                    : "Launchers",
+              content.right ??
+                (right === "terminal" ? (
+                  <TerminalPanel
+                    client={client}
+                    threadId={selectedId ?? undefined}
+                    cwd={
+                      selected?.worktreePath ??
+                      snapshot?.projects.find((p) => p.id === selected?.projectId)?.workspaceRoot
+                    }
+                    worktreePath={selected?.worktreePath ?? null}
+                    enabled={!overlay && focus === "right"}
+                    height={height - 6 - chromeRows}
+                    width={
+                      (width < 70
+                        ? Math.max(1, width - (sidebar ? 22 : 0))
+                        : rightWidth("terminal", width)) - 2
+                    }
+                    close={() => {
+                      setRight(null);
+                      setFocus("transcript");
+                    }}
+                  />
+                ) : right === "launchers" ? (
+                  <LaunchersPanel
+                    key={selectedId}
+                    open={openRight}
+                    shell={effects?.shell ? runShell : undefined}
+                    agents={agents}
+                    openAgent={openAgent}
+                    now={client.now}
+                    enabled={!overlay && focus === "right"}
+                    close={() => {
+                      setRight(null);
+                      setFocus("transcript");
+                    }}
+                  />
+                ) : right === "files" ? (
+                  <FilesPanel
+                    key={`${selectedId}:${filePath?.serial ?? 0}`}
+                    api={client.files}
+                    cwd={
+                      selected?.worktreePath ??
+                      snapshot?.projects.find((p) => p.id === selected?.projectId)?.workspaceRoot
+                    }
+                    path={filePath?.threadId === selectedId ? filePath.path : undefined}
+                    enabled={!overlay && focus === "right"}
+                    effects={effects}
+                    height={height - 5 - chromeRows}
+                    width={
+                      (width < 70
+                        ? Math.max(1, width - (sidebar ? 22 : 0))
+                        : rightWidth("files", width)) - 2
+                    }
+                    close={() => {
+                      setRight(null);
+                      setFocus("transcript");
+                    }}
+                  />
+                ) : (
+                  <DiffPanel
+                    key={`${selectedId}:${diffSerial}`}
+                    client={client}
+                    target={diffTarget}
+                    enabled={!overlay && focus === "right"}
+                    height={height - 5 - chromeRows}
+                    close={() => {
+                      setRight(null);
+                      setFocus("transcript");
+                    }}
+                  />
+                )),
+              {
+                width:
+                  width < 70 ? Math.max(1, width - (sidebar ? 22 : 0)) : rightWidth(right, width),
+              },
+            )}
+        </box>
+        <text height={1} flexShrink={0} fg={theme.accent}>
+          {actionError ||
+            (quitArmed
+              ? "Press Ctrl+c again to quit; any other key cancels"
+              : `Focus: ${focus}${hintsShown || hintFor("hints") === "none" ? "" : ` · ${hintFor("hints")} hints`}`)}
+        </text>
+        {hintsShown && (
+          <box height={2} flexShrink={0} flexDirection="row" flexWrap="wrap">
+            {keymap()
+              .filter(
+                (binding) =>
+                  binding.chord &&
+                  [
+                    "sidebar",
+                    "web",
+                    "launchers",
+                    "model",
+                    "effort",
+                    "palette",
+                    "help",
+                    "leave",
+                    "close",
+                    "hints",
+                  ].includes(binding.id),
+              )
+              // Files, Diff, Terminal and Shell live in the launcher list; their Alt keys still work and stay in Help.
+              .map((binding) => (
+                <box
+                  key={binding.id}
+                  height={1}
+                  marginRight={2}
+                  onMouseUp={(event) => {
+                    if (event.button === 0) dispatch(binding.id);
+                  }}
+                >
+                  <text fg={theme.text} selectable={false}>
+                    {binding.hint} {binding.id === "hints" ? "Hide hints" : binding.label}
+                  </text>
+                </box>
+              ))}
+          </box>
+        )}
+        {(overlay === "palette" || overlay === "search" || overlay === "menu") && (
+          <ThreadPalette
+            key={overlay}
+            client={client}
+            mode={overlay}
+            target={menuTarget}
+            actions={actions}
+            newThread={() => setOverlay("workspace")}
+            close={() => setOverlay(null)}
+            width={width}
+            height={height}
+          />
+        )}
+        {(overlay === "model" || overlay === "effort") && (
+          <ModelPicker
+            key={overlay}
+            client={client}
+            effort={overlay === "effort"}
+            close={() => setOverlay(null)}
+            width={width}
+            height={height}
+          />
+        )}
+        {overlay === "workspace" && (
+          <NewThreadPicker
+            client={client}
+            target={menuTarget}
+            actions={actions}
+            close={() => setOverlay(null)}
+            created={() => {
+              setOverlay("model");
+              if (width >= 70 || !right) setFocus("composer");
+            }}
+          />
+        )}
+        {overlay === "help" && (
+          <box position="absolute" left={0} top={0} width="100%" height="100%">
+            <box
+              position="absolute"
+              left={Math.max(0, Math.floor((width - Math.min(60, width)) / 2))}
+              top={Math.max(
+                0,
+                Math.floor((height - 4 - Math.min(height - 4, helpLines.length + 3)) / 2),
+              )}
+              width={Math.min(60, width)}
+              height={Math.min(height - 4, helpLines.length + 3)}
+              border
+              borderStyle="rounded"
+              borderColor={theme.accent}
+              backgroundColor={theme.canvas}
+              title="Keys"
+              flexDirection="column"
+            >
+              <scrollbox scrollY scrollX={false} flexGrow={1}>
+                {helpLines.map((line, i) => (
+                  <text key={i} fg={line.title ? theme.accent : theme.text}>
+                    {line.text}
+                  </text>
+                ))}
+              </scrollbox>
+              <box
+                height={1}
+                onMouseUp={(event) => {
+                  if (event.button === 0) dispatch("close");
+                }}
+              >
+                <text fg={theme.accent} selectable={false}>
+                  [ Esc Close ]
+                </text>
+              </box>
+            </box>
+          </box>
+        )}
+      </box>
+    </HintsShown.Provider>
   );
 }

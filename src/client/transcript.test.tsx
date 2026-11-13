@@ -9,6 +9,7 @@ import {
 } from "@t3tools/contracts";
 import { MarkdownCache, measureMarkdown, anchorIndex } from "./markdown";
 import { TranscriptViewport, ThreadTranscript } from "./transcript";
+import { HintsShown } from "./keymap";
 import { workMessages, type WorkRow } from "./work-log";
 import { createClient, waitForLive, type Boundary } from "./runtime";
 import { platform } from "./platform";
@@ -670,4 +671,34 @@ test("rule rows ignore clicks and stay out of copied selections", async () => {
       await view.dispose();
     });
   }
+});
+
+test("hidden hints drop the vim key rows and give one back to the transcript", async () => {
+  const items = Array.from({ length: 12 }, (_, i) => ({
+    id: `u${i}`,
+    kind: "user" as const,
+    text: `line ${String(i).padStart(2, "0")}`,
+  }));
+  const render = async (shown: boolean) => {
+    const view = await testRender(
+      <HintsShown.Provider value={shown}>
+        <TranscriptViewport effects={{ copy: () => {} }} items={items} width={60} height={8} />
+      </HintsShown.Provider>,
+      { width: 60, height: 8 },
+    );
+    await view.flush();
+    const frame = view.captureCharFrame();
+    view.renderer.destroy();
+    return frame;
+  };
+  const shown = await render(true);
+  expect(shown).toContain("hjkl wbe move");
+  expect(shown).toContain("focus block");
+  const hidden = await render(false);
+  expect(hidden).not.toContain("hjkl");
+  expect(hidden).not.toContain("focus block");
+  // Following the tail, the last message sits one row lower when the hint row is gone.
+  const lastAt = (frame: string) => frame.split("\n").findIndex((l) => l.includes("line 11"));
+  expect(lastAt(shown)).toBeGreaterThan(0);
+  expect(lastAt(hidden)).toBe(lastAt(shown) + 1);
 });

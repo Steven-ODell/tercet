@@ -37,4 +37,4 @@ tercet · live · threads=1 · Supervised
 ╰────────────────────────────╯╰────────────────────────────────────────────────────────────────────────────────────────╯
 Focus: sidebar
 Alt+o Web  Alt+l Launchers  Alt+b Sidebar  Alt+m Model  Alt+e Effort / Permissions  Ctrl+p Palette  ? Help
-Alt+c Close side panel  Esc Close overlay / next pane
+Alt+i Hide hints  Alt+c Close side panel  Esc Close overlay / next pane

@@ -274,15 +274,24 @@ export function workspaceRefs(url: string, token: string, cwd: string) {
   );
 }
 
-export function uploadImage(url: string, token: string, bytes: Uint8Array) {
+/** What an upload is called and how the server files it; a clipboard PNG without one. */
+export interface UploadMeta {
+  type: "image" | "file";
+  name: string;
+  mimeType: string;
+}
+
+export function uploadImage(
+  url: string,
+  token: string,
+  bytes: Uint8Array,
+  upload: UploadMeta = { type: "image", name: "clipboard.png", mimeType: "image/png" },
+) {
   return withConnection(url, token, (session) =>
     Effect.gen(function* () {
-      const meta = {
-        type: "image" as const,
-        name: "clipboard.png",
-        mimeType: "image/png" as const,
-        sizeBytes: bytes.length,
-      };
+      const meta = { ...upload, sizeBytes: bytes.length } as
+        | { type: "image"; name: string; mimeType: "image/png"; sizeBytes: number }
+        | { type: "file"; name: string; mimeType: string; sizeBytes: number };
       const minted = yield* session.client[WS_METHODS.attachmentsCreateUploadUrl](meta);
       yield* Effect.tryPromise(async () => {
         const response = await fetch(new URL(minted.relativeUrl, url), {

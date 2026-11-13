@@ -4,8 +4,9 @@
 // This is the only file in src/ that names desktop tools; anything personal lives in the user's
 // settings file as a template.
 import { spawn } from "node:child_process";
+import { readFile, stat } from "node:fs/promises";
 import type { Actions } from "./actions";
-import { LinkCopied } from "./actions";
+import { LinkCopied, shellQuote } from "./actions";
 import { parseFfmpegInfo, type MediaProbe } from "./client/media";
 import {
   PLACEHOLDER,
@@ -168,6 +169,125 @@ export function playerChain(settings: Settings, host: Host): Opener | undefined 
     return { name: "launchers.player", args: (target, vars) => expand(spec, vars, [target]) };
   if (host.which("mpv")) return { name: "mpv", args: (target) => ["mpv", "--", target] };
   return openerChain(settings, host);
+}
+
+/**
+ * The file dialog behind attach: `launchers.picker`, then zenity or kdialog on a desktop session,
+ * then osascript on macOS. Each prints the picked paths one per line and exits 1 on cancel.
+ */
+export function pickerChain(settings: Settings, host: Host) {
+  const spec = settings.launchers.picker;
+  if (spec) return { name: "launchers.picker", args: (cwd: string, vars: Vars) => expand(spec, { ...vars, cwd }) };
+  const desktop = !!(host.env.WAYLAND_DISPLAY || host.env.DISPLAY);
+  if (desktop && host.which("zenity"))
+    return {
+      name: "zenity",
+      args: (cwd: string) => [
+        "zenity",
+        "--file-selection",
+        "--multiple",
+        "--separator=\n",
+        "--title=Attach files",
+        `--filename=${cwd.replace(/\/?$/, "/")}`,
+      ],
+    };
+  if (desktop && host.which("kdialog"))
+    return {
+      name: "kdialog",
+      args: (cwd: string) => [
+        "kdialog",
+        "--title",
+        "Attach files",
+        "--getopenfilename",
+        cwd,
+        "--multiple",
+        "--separate-output",
+      ],
+    };
+  if (host.platform === "darwin" && host.which("osascript"))
+    return {
+      name: "osascript",
+      args: (cwd: string) => [
+        "osascript",
+        "-e",
+        `set picked to choose file with prompt "Attach files" default location (POSIX file ${JSON.stringify(cwd)}) with multiple selections allowed`,
+        "-e",
+        'set out to ""',
+        "-e",
+        "repeat with f in picked",
+        "-e",
+        "set out to out & POSIX path of f & linefeed",
+        "-e",
+        "end repeat",
+        "-e",
+        "return out",
+      ],
+    };
+  return undefined;
+}
+
+/** ssh that never prompts (a prompt would land in the TUI) and gives up on a dead host quickly. */
+const sshArgs = (host: string) => ["ssh", "-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host];
+
+/**
+ * The picker over SSH, run on the machine you type from. A non-interactive ssh session has no
+ * WAYLAND_DISPLAY, so it borrows the desktop's socket from XDG_RUNTIME_DIR (else DISPLAY=:0).
+ * Starts in that machine's home; prints one path per line and exits 1 on Cancel, like the local ones.
+ */
+export const REMOTE_PICKER = `export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+if [ -z "\${WAYLAND_DISPLAY:-}" ]; then
+  for s in "$XDG_RUNTIME_DIR"/wayland-*; do
+    if [ -S "$s" ]; then export WAYLAND_DISPLAY="\${s##*/}"; break; fi
+  done
+fi
+[ -n "\${WAYLAND_DISPLAY:-}\${DISPLAY:-}" ] || export DISPLAY=:0
+if command -v zenity >/dev/null 2>&1; then
+  exec zenity --file-selection --multiple --title="Attach files" --separator='
+'
+elif command -v kdialog >/dev/null 2>&1; then
+  exec kdialog --title "Attach files" --getopenfilename "$HOME" --multiple --separate-output
+elif command -v osascript >/dev/null 2>&1; then
+  exec osascript -e 'set picked to choose file with prompt "Attach files" with multiple selections allowed' -e 'set out to ""' -e 'repeat with f in picked' -e 'set out to out & POSIX path of f & linefeed' -e 'end repeat' -e 'return out'
+else
+  echo "no file picker (zenity or kdialog) on $(uname -n)" >&2
+  exit 2
+fi`;
+
+/** The largest file T3 takes as an attachment (PROVIDER_SEND_TURN_MAX_FILE_BYTES). */
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
+
+const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+  pdf: "application/pdf",
+  json: "application/json",
+  zip: "application/zip",
+  md: "text/markdown",
+  csv: "text/csv",
+  html: "text/html",
+  txt: "text/plain",
+  mp4: "video/mp4",
+  webm: "video/webm",
+  mov: "video/quicktime",
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  ogg: "audio/ogg",
+};
+
+/** A picked file's MIME type: image bytes by their magic number, else by extension. */
+export function fileMime(name: string, bytes: Uint8Array) {
+  try {
+    return imageMime(bytes);
+  } catch {
+    const extension = name.toLowerCase().split(".").at(-1) ?? "";
+    if (MIME_BY_EXTENSION[extension]) return MIME_BY_EXTENSION[extension];
+    // Source and other text files: no NUL byte in the first 8 KB.
+    return bytes.subarray(0, 8192).includes(0) ? "application/octet-stream" : "text/plain";
+  }
 }
 
 /** ffmpeg args for a poster: the first video frame, at most 640 px wide, as PNG on stdout. */
@@ -413,6 +533,51 @@ export function hostActions(deps: HostDeps): Actions {
     };
     actions.openPath = (path) => open(path, { url: path, path });
   }
+  const picker = pickerChain(settings, host);
+  // Over SSH the dialog opens where you type and the files come from there, so the action exists
+  // whenever ssh does, even on a machine without a desktop.
+  const remote = !picker?.name.startsWith("launchers") && deps.sshHost && host.which("ssh");
+  if (picker || remote)
+    actions.pickFiles = async (cwd) => {
+      const via = remote ? await deps.sshHost!() : undefined;
+      if (!via && !picker) throw new Error("No file picker found");
+      let out: Uint8Array;
+      try {
+        out = await runArgs(
+          host,
+          via
+            ? [...sshArgs(via), `sh -c ${shellQuote(REMOTE_PICKER)}`]
+            : picker!.args(cwd ?? host.env.HOME ?? "/", await vars(launchers.picker, {})),
+          { capture: true },
+        );
+      } catch (error) {
+        // zenity and kdialog exit 1 on Cancel; osascript reports "User canceled. (-128)".
+        if (error instanceof Error && /exited with 1$|cancel/i.test(error.message)) return [];
+        throw error;
+      }
+      const paths = decode(out)
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith("/"));
+      const files = [];
+      for (const path of paths) {
+        const name = path.split("/").at(-1)!;
+        let bytes: Uint8Array;
+        if (via) {
+          // One byte past the limit is enough to know it is too big without copying all of it.
+          const read = `f=${shellQuote(path)}; [ -f "$f" ] || { echo "$f is not a file" >&2; exit 2; }; exec head -c ${MAX_FILE_BYTES + 1} -- "$f"`;
+          bytes = await runArgs(host, [...sshArgs(via), read], { capture: true });
+        } else {
+          const info = await stat(path);
+          if (!info.isFile()) throw new Error(`${name} is not a file`);
+          if (info.size > MAX_FILE_BYTES) throw new Error(`${name} is over 50 MB`);
+          bytes = new Uint8Array(await readFile(path));
+        }
+        if (!bytes.length) throw new Error(`${name} is empty`);
+        if (bytes.length > MAX_FILE_BYTES) throw new Error(`${name} is over 50 MB`);
+        files.push({ name, mimeType: fileMime(name, bytes), bytes });
+      }
+      return files;
+    };
   const player = playerChain(settings, host);
   if (player)
     actions.play = async (target) => {

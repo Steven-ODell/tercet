@@ -19,5 +19,9 @@ export function validateClipboardPng(bytes: Uint8Array) {
 export interface PendingImage {
   key: string;
   bytes: Uint8Array;
-  uploaded?: import("@t3tools/contracts").ChatImageAttachment;
+  /** Set for a picked file; a clipboard image has none and uploads as clipboard.png. */
+  upload?: import("./connection").UploadMeta;
+  uploaded?:
+    | import("@t3tools/contracts").ChatImageAttachment
+    | import("@t3tools/contracts").ChatFileAttachment;
 }

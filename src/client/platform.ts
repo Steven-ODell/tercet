@@ -16,6 +16,7 @@ import {
   webThreadUrl,
   workspaceRefs,
   uploadImage,
+  type UploadMeta,
   fileMethods,
   diffMethods,
   pageUrl,
@@ -75,7 +76,8 @@ export function platform(config: Config) {
   const draftPath = `${config.tokenFile}.drafts-${Bun.hash(config.url).toString(16)}.json`;
   const boundary = {
     workspaceRefs: (token: string, cwd: string) => workspaceRefs(config.url, token, cwd),
-    uploadImage: (token: string, bytes: Uint8Array) => uploadImage(config.url, token, bytes),
+    uploadImage: (token: string, bytes: Uint8Array, meta?: UploadMeta) =>
+      uploadImage(config.url, token, bytes, meta),
     diffs: {
       full: (token: string, input: Parameters<typeof diffMethods.full>[2]) =>
         diffMethods.full(config.url, token, input),
@@ -117,6 +119,7 @@ export function platform(config: Config) {
     },
     sendShortcut: async () => config.settings.defaults.sendShortcut,
     sidebarWorkingShelf: async () => config.settings.defaults.sidebarWorkingShelf,
+    showHints: async () => config.settings.defaults.hints,
     newThreadDefaults: {
       provider: config.settings.defaults.provider,
       model: config.settings.defaults.model,

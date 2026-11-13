@@ -50,6 +50,7 @@ test("a missing settings file gives the defaults", async () => {
     sendShortcut: "enter",
     favorites: [],
     sidebarWorkingShelf: false,
+    hints: true,
   });
   expect(loaded.settings.media.protocol).toBe("auto");
   expect(parse("{}")).toEqual(defaultSettings());
@@ -69,6 +70,7 @@ test("JSONC with comments and trailing commas fills every section", () => {
     "sendShortcut": "mod-enter",
     "favorites": [{ "provider": "codex", "model": "gpt-5.5" },],
     "sidebarWorkingShelf": true,
+    "hints": false,
   },
   "launchers": { "editor": "nvim", "opener": ["my-opener"], "player": ["mpv", "--no-terminal"] },
   "media": { "protocol": "none" },
@@ -90,6 +92,7 @@ test("JSONC with comments and trailing commas fills every section", () => {
     sendShortcut: "mod-enter",
     favorites: [{ provider: "codex", model: "gpt-5.5" }],
     sidebarWorkingShelf: true,
+    hints: false,
   });
   expect(settings.launchers.player).toEqual(["mpv", "--no-terminal"]);
   expect(settings.media.protocol).toBe("none");

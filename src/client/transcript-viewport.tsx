@@ -1,7 +1,8 @@
 import { theme } from "./theme";
 import { ImagePreview } from "./image-preview";
 import { mediaKind } from "./media";
-import { memo, useMemo, useRef, useState } from "react";
+import { memo, useContext, useMemo, useRef, useState } from "react";
+import { HintsShown } from "./keymap";
 import {
   failureText,
   keyHints,
@@ -290,7 +291,9 @@ export function TranscriptViewport({
   );
   const rowMessage = (row: MarkdownRow) =>
     row.id.slice(0, row.id.lastIndexOf(":", row.id.lastIndexOf(":") - 1));
-  const viewport = Math.max(1, height - (effects ? 3 : 1));
+  // With hints hidden the action row is one line: block buttons, then feedback or the vim mode.
+  const hints = useContext(HintsShown);
+  const viewport = Math.max(1, height - (effects ? (hints ? 3 : 2) : 1));
   const start = anchorIndex(rows, anchor, viewport);
   const scroll = (delta: number) => {
     const next = Math.max(0, Math.min(Math.max(0, rows.length - viewport), start + delta));
@@ -643,7 +646,7 @@ export function TranscriptViewport({
         {!rows.length && <text fg={theme.plain}>No messages yet</text>}
       </box>
       {effects && (
-        <box height={2} flexShrink={0} flexDirection="column">
+        <box height={hints ? 2 : 1} flexShrink={0} flexDirection="column">
           <box height={1} flexDirection="row">
             {target ? (
               [
@@ -672,20 +675,27 @@ export function TranscriptViewport({
                   <text selectable={false} fg={theme.accent}>{`[${action}] `}</text>
                 </box>
               ))
-            ) : (
+            ) : hints ? (
               <text fg={theme.plain} selectable={false}>
                 Hover / click text · [ / ] focus block
               </text>
+            ) : null}
+            {!hints && (
+              <text fg={theme.plain} selectable={false}>
+                {feedback || modeLabel}
+              </text>
             )}
           </box>
-          <text fg={theme.plain} selectable={false}>
-            {feedback ||
-              (target?.kind === "image"
-                ? `l / Enter open image · y copy${effects.copyImageTo ? keyHints(effects, ["tmux", "run", "send"]) : ""}`
-                : modeLabel
-                  ? `${modeLabel}y yank${keyHints(effects, ["run"])} · Esc cancel`
-                  : `hjkl wbe move · v/V select · y yank${keyHints(effects, ["run"])} · Y block`)}
-          </text>
+          {hints && (
+            <text fg={theme.plain} selectable={false}>
+              {feedback ||
+                (target?.kind === "image"
+                  ? `l / Enter open image · y copy${effects.copyImageTo ? keyHints(effects, ["tmux", "run", "send"]) : ""}`
+                  : modeLabel
+                    ? `${modeLabel}y yank${keyHints(effects, ["run"])} · Esc cancel`
+                    : `hjkl wbe move · v/V select · y yank${keyHints(effects, ["run"])} · Y block`)}
+            </text>
+          )}
         </box>
       )}
       <box height={1} flexDirection="row">

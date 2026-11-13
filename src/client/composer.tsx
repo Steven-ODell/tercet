@@ -108,7 +108,7 @@ function Editor({
   const [mediaBusy, setMediaBusy] = useState(false);
   const mediaLock = useRef(false);
   const [recording, setRecording] = useState(false);
-  async function media(kind: "paste" | "clipboard" | "mic") {
+  async function media(kind: "paste" | "clipboard" | "mic" | "files") {
     if (mediaLock.current || busy) return;
     mediaLock.current = true;
     setMediaBusy(true);
@@ -122,6 +122,14 @@ function Editor({
           editor.current.insertText(value.text);
           composer.setDraft(id, editor.current.plainText);
         }
+      } else if (kind === "files") {
+        if (!effects?.pickFiles) throw new Error("unavailable");
+        const picked = await effects.pickFiles(cwd);
+        if (!picked.length) {
+          setMediaStatus("");
+          return;
+        }
+        for (const file of picked) composer.attachFile(id, file);
       } else if (kind === "paste") {
         if (!effects?.pasteImage) throw new Error("unavailable");
         composer.attach(id, await effects.pasteImage());
@@ -133,7 +141,9 @@ function Editor({
     } catch (error) {
       const reason = error instanceof Error && error.message !== "unavailable" ? error.message : "";
       setMediaStatus(
-        kind !== "mic"
+        kind === "files"
+          ? `Attach failed${reason && ` (${reason})`}.`
+          : kind !== "mic"
           ? `Paste unavailable${reason && ` (${reason})`}: copy text or a PNG up to 2000px / 10 MB.`
           : `Mic unavailable${reason && ` (${reason})`}; retry when connected.`,
       );
@@ -241,6 +251,13 @@ function Editor({
       key.preventDefault();
       onInputFocus?.();
       void media("clipboard");
+      return;
+    }
+    // Attach, like a paste, works from another pane and brings focus here.
+    if ((enabled || pasteFromPane) && commandForKey(key) === "attach" && effects?.pickFiles) {
+      key.preventDefault();
+      if (!enabled) onInputFocus?.();
+      void media("files");
       return;
     }
     if (!enabled) return;
@@ -383,9 +400,19 @@ function Editor({
               backgroundColor={theme.highlight}
               overflow="hidden"
             >
-              <InlineImage bytes={image.bytes} width={6} height={3} />
+              {image.upload?.type === "file" ? (
+                <box width={6} height={3} justifyContent="center" alignItems="center">
+                  <text selectable={false} fg={fileIcon(image.upload.name).color}>
+                    {fileIcon(image.upload.name).glyph}
+                  </text>
+                </box>
+              ) : (
+                <InlineImage bytes={image.bytes} width={6} height={3} />
+              )}
               <box flexDirection="column" width={21} height={3}>
-                <text selectable={false} fg={theme.accent}>{`clipboard.png ${index + 1}`}</text>
+                <text selectable={false} fg={theme.accent} wrapMode="none">
+                  {image.upload?.name ?? `clipboard.png ${index + 1}`}
+                </text>
                 <text
                   fg={theme.plain}
                   selectable={false}
@@ -424,6 +451,16 @@ function Editor({
               }}
             >
               [Alt+p Paste image]{" "}
+            </text>
+          )}
+          {effects?.pickFiles && (
+            <text
+              fg={theme.accent}
+              onMouseUp={(event) => {
+                if (event.button === 0) void media("files");
+              }}
+            >
+              [{hintFor("attach") === "none" ? "" : `${hintFor("attach")} `}Attach]{" "}
             </text>
           )}
           {effects?.toggleDictation && (
@@ -527,3 +564,4 @@ function Editor({
     </box>
   );
 }
+

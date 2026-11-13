@@ -461,3 +461,65 @@ test("composer thumbnail cards sit side by side, reserve space only while attach
     await h.client.dispose();
   }
 });
+
+test("Alt+a attaches picked files: a PNG as an image, anything else as a named file", async () => {
+  const h = await composerFixture();
+  const uploads: unknown[] = [];
+  h.client.boundary.uploadImage = (_, bytes, meta) =>
+    Effect.sync(() => {
+      uploads.push(meta);
+      const upload = meta ?? { type: "image", name: "clipboard.png", mimeType: "image/png" };
+      return { ...upload, id: `up-${uploads.length}`, sizeBytes: bytes.length } as never;
+    });
+  let picks = 0;
+  const view = await testRender(
+    <ThreadComposer
+      client={h.client}
+      enabled
+      effects={{
+        copy() {},
+        pickFiles: async () => {
+          picks++;
+          return [
+            { name: "shot.png", mimeType: "image/png", bytes: png },
+            { name: "notes.md", mimeType: "text/markdown", bytes: new TextEncoder().encode("# hi") },
+          ];
+        },
+      }}
+    />,
+    { width: 110, height: 12, kittyKeyboard: true },
+  );
+  try {
+    await act(async () => {
+      await view.mockInput.typeText("see these");
+    });
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("[Alt+a Attach]");
+    await act(async () => {
+      view.mockInput.pressKey("a", { meta: true });
+    });
+    await view.waitForFrame((frame) => frame.includes("notes.md"));
+    expect(picks).toBe(1);
+    expect(view.captureCharFrame()).toContain("shot.png");
+    await act(async () => {
+      view.mockInput.pressKey("RETURN");
+    });
+    await view.flush();
+    for (let i = 0; i < 50 && !h.commands.length; i++) await Bun.sleep(10);
+    expect(uploads).toEqual([
+      { type: "image", name: "shot.png", mimeType: "image/png" },
+      { type: "file", name: "notes.md", mimeType: "text/markdown" },
+    ]);
+    expect(h.commands.at(-1)).toMatchObject({
+      type: "message.dispatch",
+      text: "see these",
+      attachments: [
+        { type: "image", name: "shot.png", id: "up-1" },
+        { type: "file", name: "notes.md", id: "up-2" },
+      ],
+    });
+  } finally {
+    await view.dispose();
+    await h.client.dispose();
+  }
+});

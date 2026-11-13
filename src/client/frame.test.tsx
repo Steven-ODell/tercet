@@ -84,6 +84,13 @@ for (const [width, height] of [
       expect(frame()).not.toContain("Threads");
       await clickHint();
       expect(frame()).toContain("Threads");
+      // Alt+i hides the hint rows and leaves a pointer on the focus line; again brings them back.
+      await key("i", { meta: true });
+      expect(frame()).not.toContain("Alt+b Sidebar");
+      expect(frame()).toContain("· Alt+i hints");
+      await key("i", { meta: true });
+      expect(frame()).toContain("Alt+i Hide hints");
+      expect(frame()).not.toContain("· Alt+i hints");
       await click(4, 3);
       expect(frame()).toContain("Focus: sidebar");
       await key("escape");

@@ -37948,12 +37948,14 @@ function sshHostLookup(env, output, read) {
     }
   };
 }
+var shellQuote = (value) => "'" + value.replaceAll("'", "'\\''") + "'";
 function threadWebUrl(origin, environmentId, threadId) {
   return new URL(`/${encodeURIComponent(environmentId)}/${encodeURIComponent(threadId)}`, origin).href;
 }
 
 // src/portable.ts
 import { spawn } from "child_process";
+import { readFile, stat as stat2 } from "fs/promises";
 
 // src/client/settings.ts
 import { lstatSync, renameSync, symlinkSync } from "fs";
@@ -38475,6 +38477,7 @@ function asciiFrame(buffer) {
 }
 
 // src/client/keymap.ts
+var import_react18 = __toESM(require_react(), 1);
 var COMMANDS = [
   { id: "shell", keys: "Alt+t", label: "Shell", needs: "shell" },
   { id: "terminal", keys: "Alt+j", label: "Terminal" },
@@ -38486,11 +38489,13 @@ var COMMANDS = [
   { id: "files", keys: "Alt+f", label: "Files" },
   { id: "diff", keys: "Alt+d", label: "Diff" },
   { id: "dictation", keys: "Alt+v", label: "Dictation", needs: "dictation" },
+  { id: "attach", keys: "Alt+a", label: "Attach files", needs: "attach" },
   { id: "palette", keys: "Ctrl+p", label: "Palette" },
   { id: "newThread", keys: "Ctrl+n", label: "New thread" },
   { id: "search", keys: "Ctrl+/", label: "Search threads" },
   { id: "threadMenu", keys: ".", label: "Thread actions" },
   { id: "help", keys: "?", label: "Help" },
+  { id: "hints", keys: "Alt+i", label: "Show / hide key hints" },
   { id: "focusLeft", keys: "Alt+h", label: "Pane left" },
   { id: "focusDown", keys: "Ctrl+j", label: "Pane down" },
   { id: "focusUp", keys: "Ctrl+k", label: "Pane up" },
@@ -38640,6 +38645,7 @@ function resolveKeymap(overrides = {}, targetKeys2 = {}) {
   }
   return COMMANDS.map((command) => bindings.find((b) => b.id === command.id));
 }
+var HintsShown = import_react18.createContext(true);
 var active = resolveKeymap();
 var keymap = () => active;
 var setKeymap = (bindings) => {
@@ -38721,7 +38727,8 @@ var LAUNCHER_PLACEHOLDERS = {
   terminal: ["cwd"],
   editor: ["cwd", "path"],
   opener: ["url", "path"],
-  player: ["path"]
+  player: ["path"],
+  picker: ["cwd"]
 };
 var RESERVED_TARGET_KEYS = ["Y", "T", "X", "F", "O", "G", "V"];
 var RESERVED_TARGET_NAMES = ["copy", "open", "tmux", "run", "send", "path"];
@@ -38731,7 +38738,7 @@ var defaultSettings = () => ({
   theme: {},
   keys: {},
   icons: "unicode",
-  defaults: { sendShortcut: "enter", favorites: [], sidebarWorkingShelf: false },
+  defaults: { sendShortcut: "enter", favorites: [], sidebarWorkingShelf: false, hints: true },
   launchers: {},
   media: { protocol: "auto", video: "player" },
   commands: {},
@@ -39009,7 +39016,8 @@ var schema = struct({
     mode: oneOf(RUNTIME_MODES),
     sendShortcut: oneOf(SEND_SHORTCUTS),
     favorites: list(struct({ provider: text2, model: text2 })),
-    sidebarWorkingShelf: bool
+    sidebarWorkingShelf: bool,
+    hints: bool
   }),
   launchers: struct(Object.fromEntries(Object.entries(LAUNCHER_PLACEHOLDERS).map(([name, vars]) => [name, withHost(vars)]))),
   media: struct({ protocol: oneOf(MEDIA_PROTOCOLS), video: oneOf(VIDEO_MODES) }),
@@ -39139,6 +39147,109 @@ function playerChain(settings, host) {
   if (host.which("mpv"))
     return { name: "mpv", args: (target2) => ["mpv", "--", target2] };
   return openerChain(settings, host);
+}
+function pickerChain(settings, host) {
+  const spec = settings.launchers.picker;
+  if (spec)
+    return { name: "launchers.picker", args: (cwd, vars) => expand(spec, { ...vars, cwd }) };
+  const desktop = !!(host.env.WAYLAND_DISPLAY || host.env.DISPLAY);
+  if (desktop && host.which("zenity"))
+    return {
+      name: "zenity",
+      args: (cwd) => [
+        "zenity",
+        "--file-selection",
+        "--multiple",
+        `--separator=
+`,
+        "--title=Attach files",
+        `--filename=${cwd.replace(/\/?$/, "/")}`
+      ]
+    };
+  if (desktop && host.which("kdialog"))
+    return {
+      name: "kdialog",
+      args: (cwd) => [
+        "kdialog",
+        "--title",
+        "Attach files",
+        "--getopenfilename",
+        cwd,
+        "--multiple",
+        "--separate-output"
+      ]
+    };
+  if (host.platform === "darwin" && host.which("osascript"))
+    return {
+      name: "osascript",
+      args: (cwd) => [
+        "osascript",
+        "-e",
+        `set picked to choose file with prompt "Attach files" default location (POSIX file ${JSON.stringify(cwd)}) with multiple selections allowed`,
+        "-e",
+        'set out to ""',
+        "-e",
+        "repeat with f in picked",
+        "-e",
+        "set out to out & POSIX path of f & linefeed",
+        "-e",
+        "end repeat",
+        "-e",
+        "return out"
+      ]
+    };
+  return;
+}
+var sshArgs = (host) => ["ssh", "-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host];
+var REMOTE_PICKER = `export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+if [ -z "\${WAYLAND_DISPLAY:-}" ]; then
+  for s in "$XDG_RUNTIME_DIR"/wayland-*; do
+    if [ -S "$s" ]; then export WAYLAND_DISPLAY="\${s##*/}"; break; fi
+  done
+fi
+[ -n "\${WAYLAND_DISPLAY:-}\${DISPLAY:-}" ] || export DISPLAY=:0
+if command -v zenity >/dev/null 2>&1; then
+  exec zenity --file-selection --multiple --title="Attach files" --separator='
+'
+elif command -v kdialog >/dev/null 2>&1; then
+  exec kdialog --title "Attach files" --getopenfilename "$HOME" --multiple --separate-output
+elif command -v osascript >/dev/null 2>&1; then
+  exec osascript -e 'set picked to choose file with prompt "Attach files" with multiple selections allowed' -e 'set out to ""' -e 'repeat with f in picked' -e 'set out to out & POSIX path of f & linefeed' -e 'end repeat' -e 'return out'
+else
+  echo "no file picker (zenity or kdialog) on $(uname -n)" >&2
+  exit 2
+fi`;
+var MAX_FILE_BYTES = 50 * 1024 * 1024;
+var MIME_BY_EXTENSION = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+  pdf: "application/pdf",
+  json: "application/json",
+  zip: "application/zip",
+  md: "text/markdown",
+  csv: "text/csv",
+  html: "text/html",
+  txt: "text/plain",
+  mp4: "video/mp4",
+  webm: "video/webm",
+  mov: "video/quicktime",
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  ogg: "audio/ogg"
+};
+function fileMime(name, bytes) {
+  try {
+    return imageMime(bytes);
+  } catch {
+    const extension = name.toLowerCase().split(".").at(-1) ?? "";
+    if (MIME_BY_EXTENSION[extension])
+      return MIME_BY_EXTENSION[extension];
+    return bytes.subarray(0, 8192).includes(0) ? "application/octet-stream" : "text/plain";
+  }
 }
 var posterArgs = (target2) => [
   "ffmpeg",
@@ -39365,6 +39476,45 @@ function hostActions(deps) {
     };
     actions.openPath = (path) => open2(path, { url: path, path });
   }
+  const picker = pickerChain(settings, host);
+  const remote = !picker?.name.startsWith("launchers") && deps.sshHost && host.which("ssh");
+  if (picker || remote)
+    actions.pickFiles = async (cwd) => {
+      const via = remote ? await deps.sshHost() : undefined;
+      if (!via && !picker)
+        throw new Error("No file picker found");
+      let out;
+      try {
+        out = await runArgs(host, via ? [...sshArgs(via), `sh -c ${shellQuote(REMOTE_PICKER)}`] : picker.args(cwd ?? host.env.HOME ?? "/", await vars(launchers.picker, {})), { capture: true });
+      } catch (error) {
+        if (error instanceof Error && /exited with 1$|cancel/i.test(error.message))
+          return [];
+        throw error;
+      }
+      const paths = decode2(out).split(/\r?\n/).filter((line) => line.startsWith("/"));
+      const files = [];
+      for (const path of paths) {
+        const name = path.split("/").at(-1);
+        let bytes;
+        if (via) {
+          const read = `f=${shellQuote(path)}; [ -f "$f" ] || { echo "$f is not a file" >&2; exit 2; }; exec head -c ${MAX_FILE_BYTES + 1} -- "$f"`;
+          bytes = await runArgs(host, [...sshArgs(via), read], { capture: true });
+        } else {
+          const info = await stat2(path);
+          if (!info.isFile())
+            throw new Error(`${name} is not a file`);
+          if (info.size > MAX_FILE_BYTES)
+            throw new Error(`${name} is over 50 MB`);
+          bytes = new Uint8Array(await readFile(path));
+        }
+        if (!bytes.length)
+          throw new Error(`${name} is empty`);
+        if (bytes.length > MAX_FILE_BYTES)
+          throw new Error(`${name} is over 50 MB`);
+        files.push({ name, mimeType: fileMime(name, bytes), bytes });
+      }
+      return files;
+    };
   const player = playerChain(settings, host);
   if (player)
     actions.play = async (target2) => {
@@ -39425,7 +39575,7 @@ function hostActions(deps) {
 }
 
 // src/hello.tsx
-var import_react18 = __toESM(require_react(), 1);
+var import_react19 = __toESM(require_react(), 1);
 
 // node_modules/@opentui/react/jsx-runtime.js
 var import_jsx_runtime = __toESM(require_jsx_runtime(), 1);
@@ -39433,9 +39583,9 @@ var import_jsx_runtime = __toESM(require_jsx_runtime(), 1);
 // src/hello.tsx
 var sample = "Drag this text to copy";
 function Hello({ actions }) {
-  const [clicks, setClicks] = import_react18.useState(0);
-  const [copied, setCopied] = import_react18.useState(false);
-  const scroll = import_react18.useRef(null);
+  const [clicks, setClicks] = import_react19.useState(0);
+  const [copied, setCopied] = import_react19.useState(false);
+  const scroll = import_react19.useRef(null);
   const renderer = useRenderer();
   const copy = (text3) => {
     if (!text3)
@@ -80052,7 +80202,7 @@ function clientRpcRequiredScopes(method, input) {
   return Object.hasOwn(CLIENT_GUARDED_RPC_SCOPES, method) ? [CLIENT_GUARDED_RPC_SCOPES[method]] : [];
 }
 // src/client/platform.ts
-import { chmod, mkdir as mkdir2, readFile, rename, writeFile as writeFile2 } from "fs/promises";
+import { chmod, mkdir as mkdir2, readFile as readFile2, rename, writeFile as writeFile2 } from "fs/promises";
 import { dirname as dirname2 } from "path";
 
 // vendor/t3/packages/client-runtime/src/connection/model.ts
@@ -91704,14 +91854,9 @@ function workspaceRefs(url, token, cwd) {
     return refs;
   }));
 }
-function uploadImage(url, token, bytes2) {
+function uploadImage(url, token, bytes2, upload = { type: "image", name: "clipboard.png", mimeType: "image/png" }) {
   return withConnection(url, token, (session) => gen2(function* () {
-    const meta = {
-      type: "image",
-      name: "clipboard.png",
-      mimeType: "image/png",
-      sizeBytes: bytes2.length
-    };
+    const meta = { ...upload, sizeBytes: bytes2.length };
     const minted = yield* session.client[WS_METHODS.attachmentsCreateUploadUrl](meta);
     yield* tryPromise2(async () => {
       const response = await fetch(new URL(minted.relativeUrl, url), {
@@ -91753,7 +91898,7 @@ function webThreadUrl(url, threadId) {
 // src/client/platform.ts
 async function readOptional(path) {
   try {
-    return await readFile(path, "utf8");
+    return await readFile2(path, "utf8");
   } catch (error2) {
     if (error2.code === "ENOENT")
       return;
@@ -91792,7 +91937,7 @@ function platform(config) {
   const draftPath = `${config.tokenFile}.drafts-${Bun.hash(config.url).toString(16)}.json`;
   const boundary = {
     workspaceRefs: (token, cwd) => workspaceRefs(config.url, token, cwd),
-    uploadImage: (token, bytes2) => uploadImage(config.url, token, bytes2),
+    uploadImage: (token, bytes2, meta) => uploadImage(config.url, token, bytes2, meta),
     diffs: {
       full: (token, input) => diffMethods.full(config.url, token, input),
       turn: (token, input) => diffMethods.turn(config.url, token, input)
@@ -91822,6 +91967,7 @@ function platform(config) {
     },
     sendShortcut: async () => config.settings.defaults.sendShortcut,
     sidebarWorkingShelf: async () => config.settings.defaults.sidebarWorkingShelf,
+    showHints: async () => config.settings.defaults.hints,
     newThreadDefaults: {
       provider: config.settings.defaults.provider,
       model: config.settings.defaults.model,
@@ -92323,9 +92469,9 @@ async function runDoctor(args2, probes = systemProbes()) {
 }
 
 // src/client/screen.tsx
-var import_react20 = __toESM(require_react(), 1);
+var import_react21 = __toESM(require_react(), 1);
 function useClientAtom(client, atom) {
-  return import_react20.useSyncExternalStore((notify) => client.registry.subscribe(atom, notify), () => client.registry.get(atom));
+  return import_react21.useSyncExternalStore((notify) => client.registry.subscribe(atom, notify), () => client.registry.get(atom));
 }
 function ConnectionScreen({
   client,
@@ -92372,7 +92518,7 @@ function ConnectionScreen({
     ]
   });
 }
-var ServerNotice = import_react20.createContext(null);
+var ServerNotice = import_react21.createContext(null);
 function ServerGate({
   url,
   initial: initial2,
@@ -92382,18 +92528,18 @@ function ServerGate({
   onQuit,
   children: children2
 }) {
-  const [state2, setState] = import_react20.useState(initial2);
-  const [dismissed, setDismissed] = import_react20.useState(false);
+  const [state2, setState] = import_react21.useState(initial2);
+  const [dismissed, setDismissed] = import_react21.useState(false);
   const blocked = blocksStart(state2, ignoreVersion);
-  const ready = import_react20.useRef(false);
-  const quit = import_react20.useRef(false);
+  const ready = import_react21.useRef(false);
+  const quit = import_react21.useRef(false);
   const recheck = () => {
     check2().then((next2) => {
       if (!quit.current)
         setState(next2);
     });
   };
-  import_react20.useEffect(() => {
+  import_react21.useEffect(() => {
     if (!blocked && !ready.current) {
       ready.current = true;
       onReady();
@@ -92476,6 +92622,7 @@ var READ_ONLY_POLICY = {
   openThread: "block",
   pasteClipboard: "block",
   pasteImage: "block",
+  pickFiles: "block",
   toggleDictation: "block",
   editor: "block",
   copy: "allow",
@@ -94996,10 +95143,10 @@ function createClient(boundary, managedToken, now2 = Date.now) {
         return Promise.reject(new Error("Offline"));
       return runtime2.runPromise(boundary.workspaceRefs(token, cwd));
     },
-    uploadImage(bytes2) {
+    uploadImage(bytes2, meta) {
       if (!token || !boundary.uploadImage)
         return Promise.reject(new Error("Offline"));
-      return runtime2.runPromise(boundary.uploadImage(token, bytes2));
+      return runtime2.runPromise(boundary.uploadImage(token, bytes2, meta));
     },
     get terminalAvailable() {
       return !!boundary.terminal;
@@ -95216,10 +95363,10 @@ function waitForLive(client, timeoutMs = 30000) {
 }
 
 // src/client/launchers.tsx
-var import_react23 = __toESM(require_react(), 1);
+var import_react24 = __toESM(require_react(), 1);
 
 // src/client/agents.ts
-var import_react22 = __toESM(require_react(), 1);
+var import_react23 = __toESM(require_react(), 1);
 
 // vendor/t3/packages/client-runtime/src/state/threadRelationships.ts
 function edgeKey(edge) {
@@ -96139,7 +96286,7 @@ function useAgentRows(client, parentId) {
   const states = useClientAtom(client, client.transcripts);
   const projection = parentId ? states.get(parentId)?.projection ?? null : null;
   const subagents = projection?.subagents;
-  return import_react22.useMemo(() => deriveAgentRows({ threads: allThreads(client), parentId, projection }), [client, snapshot2, archives, parentId, subagents]);
+  return import_react23.useMemo(() => deriveAgentRows({ threads: allThreads(client), parentId, projection }), [client, snapshot2, archives, parentId, subagents]);
 }
 
 // src/client/launchers.tsx
@@ -96153,9 +96300,9 @@ function LaunchersPanel({
   openAgent,
   now: now2 = Date.now
 }) {
-  const [clock, setClock] = import_react23.useState(now2());
+  const [clock, setClock] = import_react24.useState(now2());
   const anyLive = agents.some((agent) => agent.live);
-  import_react23.useEffect(() => {
+  import_react24.useEffect(() => {
     if (!anyLive)
       return;
     const timer = setInterval(() => setClock(now2()), 1000);
@@ -96174,8 +96321,8 @@ function LaunchersPanel({
     })) : [{ label: "No agents", letter: "a", run: () => {} }]
   ];
   const firstAgent = agents.length ? entries3.findIndex((entry) => entry.heading) : -1;
-  const [index3, setIndex] = import_react23.useState(0);
-  const [feedback, setFeedback] = import_react23.useState("");
+  const [index3, setIndex] = import_react24.useState(0);
+  const [feedback, setFeedback] = import_react24.useState("");
   const launch = (entry) => {
     if (!enabled)
       return;
@@ -96272,7 +96419,7 @@ function LaunchersPanel({
 }
 
 // src/client/terminal.tsx
-var import_react25 = __toESM(require_react(), 1);
+var import_react26 = __toESM(require_react(), 1);
 import { decodePasteBytes } from "@opentui/core";
 var import_headless = __toESM(require_xterm_headless(), 1);
 
@@ -96424,17 +96571,17 @@ function TerminalPanel({
 }) {
   const cols = Math.max(2, width2);
   const rows = Math.max(1, height - 1);
-  const size6 = import_react25.useRef({ cols, rows });
+  const size6 = import_react26.useRef({ cols, rows });
   size6.current = { cols, rows };
   const live = useClientAtom(client, client.status) === "live";
-  const term = import_react25.useRef(undefined);
-  const session = import_react25.useRef(undefined);
-  const [state2, setState] = import_react25.useState("connecting");
-  const [label, setLabel] = import_react25.useState("");
-  const [error2, setError] = import_react25.useState("");
-  const [retry5, setRetry] = import_react25.useState(0);
-  const [frame, setFrame] = import_react25.useState(0);
-  import_react25.useEffect(() => {
+  const term = import_react26.useRef(undefined);
+  const session = import_react26.useRef(undefined);
+  const [state2, setState] = import_react26.useState("connecting");
+  const [label, setLabel] = import_react26.useState("");
+  const [error2, setError] = import_react26.useState("");
+  const [retry5, setRetry] = import_react26.useState(0);
+  const [frame, setFrame] = import_react26.useState(0);
+  import_react26.useEffect(() => {
     if (!threadId || !cwd || !live || !client.terminalAvailable)
       return;
     const screen2 = new import_headless.Terminal({ ...size6.current, scrollback: 5000, allowProposedApi: true });
@@ -96507,7 +96654,7 @@ function TerminalPanel({
       session.current = undefined;
     };
   }, [client, threadId, cwd, worktreePath, live, retry5]);
-  import_react25.useEffect(() => {
+  import_react26.useEffect(() => {
     const screen2 = term.current;
     if (!screen2 || screen2.cols === cols && screen2.rows === rows)
       return;
@@ -96549,7 +96696,7 @@ function TerminalPanel({
       return;
     write(term.current?.modes.bracketedPasteMode ? `\x1B[200~${text5}\x1B[201~` : text5.replace(/\r?\n/g, "\r"));
   });
-  const screen = import_react25.useMemo(() => term.current ? screenText(term.current, enabled && state2 === "running") : undefined, [frame, enabled, state2, cols, rows]);
+  const screen = import_react26.useMemo(() => term.current ? screenText(term.current, enabled && state2 === "running") : undefined, [frame, enabled, state2, cols, rows]);
   const button = (text5, action) => /* @__PURE__ */ import_jsx_runtime.jsx("box", {
     marginLeft: 1,
     onMouseUp: (event) => {
@@ -96607,7 +96754,7 @@ function TerminalPanel({
 }
 
 // src/client/workspace.tsx
-var import_react27 = __toESM(require_react(), 1);
+var import_react28 = __toESM(require_react(), 1);
 function workspaceChoices(root, refs) {
   const current2 = refs.find((ref) => ref.current);
   return [
@@ -96627,8 +96774,8 @@ function NewThreadPicker({
 }) {
   const snapshot2 = useClientAtom(client, client.snapshot);
   const projects = projectChoices(snapshot2?.projects ?? [], target2?.projectId);
-  const [cursor, setCursor] = import_react27.useState(0);
-  const [picked, setPicked] = import_react27.useState();
+  const [cursor, setCursor] = import_react28.useState(0);
+  const [picked, setPicked] = import_react28.useState();
   const next2 = (index3) => {
     if (projects[index3])
       setPicked(projects[index3]);
@@ -96742,13 +96889,13 @@ function WorkspacePicker({
   const wanted = projectId ?? target2?.projectId;
   const project2 = client.registry.get(client.snapshot)?.projects.find((p) => p.id === wanted) ?? client.registry.get(client.snapshot)?.projects[0];
   const root = project2?.workspaceRoot;
-  const [rows, setRows] = import_react27.useState([]);
-  const [cursor, setCursor] = import_react27.useState(0);
-  const [attempt2, setAttempt] = import_react27.useState(0);
-  const [error2, setError] = import_react27.useState("");
-  const [loading, setLoading] = import_react27.useState(true);
-  const [busy, setBusy] = import_react27.useState(false);
-  import_react27.useEffect(() => {
+  const [rows, setRows] = import_react28.useState([]);
+  const [cursor, setCursor] = import_react28.useState(0);
+  const [attempt2, setAttempt] = import_react28.useState(0);
+  const [error2, setError] = import_react28.useState("");
+  const [loading, setLoading] = import_react28.useState(true);
+  const [busy, setBusy] = import_react28.useState(false);
+  import_react28.useEffect(() => {
     let stale = false;
     setLoading(true);
     setError("");
@@ -96876,7 +97023,7 @@ function WorkspacePicker({
 }
 
 // src/client/diff.tsx
-var import_react29 = __toESM(require_react(), 1);
+var import_react30 = __toESM(require_react(), 1);
 
 // vendor/t3/packages/client-runtime/src/state/threadCheckpoints.ts
 function deriveThreadCheckpointSummaries(projection) {
@@ -96980,20 +97127,20 @@ function DiffPanel({
   const status2 = useClientAtom(client, client.status);
   const threadId = target2?.threadId ?? selected;
   const projection = threadId ? states.get(threadId)?.projection : undefined;
-  const checkpoints = import_react29.useMemo(() => projection ? deriveThreadCheckpointSummaries(projection) : [], [projection]);
+  const checkpoints = import_react30.useMemo(() => projection ? deriveThreadCheckpointSummaries(projection) : [], [projection]);
   const turns = [...new Set(checkpoints.map((c2) => c2.checkpointTurnCount))].sort((a, b) => a - b);
   const latest = turns.at(-1) ?? 0;
   const hasProjection = !!projection;
-  const [turn, setTurn] = import_react29.useState(target2?.turn);
-  const [patch3, setPatch] = import_react29.useState("");
-  const [pending, setPending] = import_react29.useState(false);
-  const [error2, setError] = import_react29.useState("");
-  const [retry5, setRetry] = import_react29.useState(0);
-  const [index3, setIndex] = import_react29.useState(0);
-  const [opened, setOpened] = import_react29.useState(false);
-  const [offset, setOffset] = import_react29.useState(0);
-  const files = import_react29.useMemo(() => diffFiles(patch3), [patch3]);
-  import_react29.useEffect(() => {
+  const [turn, setTurn] = import_react30.useState(target2?.turn);
+  const [patch3, setPatch] = import_react30.useState("");
+  const [pending, setPending] = import_react30.useState(false);
+  const [error2, setError] = import_react30.useState("");
+  const [retry5, setRetry] = import_react30.useState(0);
+  const [index3, setIndex] = import_react30.useState(0);
+  const [opened, setOpened] = import_react30.useState(false);
+  const [offset, setOffset] = import_react30.useState(0);
+  const files = import_react30.useMemo(() => diffFiles(patch3), [patch3]);
+  import_react30.useEffect(() => {
     let active2 = true;
     setPatch("");
     setError("");
@@ -97201,7 +97348,7 @@ function DiffPanel({
 }
 
 // src/client/files.tsx
-var import_react32 = __toESM(require_react(), 1);
+var import_react33 = __toESM(require_react(), 1);
 
 // src/client/markdown.ts
 var segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
@@ -97642,7 +97789,7 @@ function anchorIndex(rows, anchor, height) {
 }
 
 // src/client/image-preview.tsx
-var import_react31 = __toESM(require_react(), 1);
+var import_react32 = __toESM(require_react(), 1);
 var loadedRemote = new Set;
 function ImagePreview({
   image: image2,
@@ -97657,16 +97804,16 @@ function ImagePreview({
   visibleHeight
 }) {
   const kind = mediaKind(image2.source);
-  const [bytes2, setBytes] = import_react31.useState();
-  const [info, setInfo] = import_react31.useState();
-  const [failed, setFailed] = import_react31.useState(false);
-  const [, consent] = import_react31.useState(0);
+  const [bytes2, setBytes] = import_react32.useState();
+  const [info, setInfo] = import_react32.useState();
+  const [failed, setFailed] = import_react32.useState(false);
+  const [, consent] = import_react32.useState(0);
   const remote2 = isRemoteSource(image2.source);
   const drawable = media().rung !== "none";
   const allowed = !remote2 || drawable && loadedRemote.has(image2.source);
   const load = kind === "image" && allowed ? effects?.loadImage : undefined;
   const inspect2 = kind === "image" ? undefined : effects?.inspectMedia;
-  import_react31.useEffect(() => {
+  import_react32.useEffect(() => {
     let active2 = true;
     setBytes(undefined);
     setInfo(undefined);
@@ -97810,9 +97957,9 @@ function InlineImage({
   fallback = "[image]"
 }) {
   const { rung, hint } = media();
-  const [failed, setFailed] = import_react31.useState(false);
-  import_react31.useEffect(() => setFailed(false), [bytes2]);
-  import_react31.useEffect(() => {
+  const [failed, setFailed] = import_react32.useState(false);
+  import_react32.useEffect(() => setFailed(false), [bytes2]);
+  import_react32.useEffect(() => {
     if (hint)
       mediaFellBack();
   }, [hint]);
@@ -97858,26 +98005,26 @@ function FilesPanel({
   width: width2 = 30,
   peekDelay = 80
 }) {
-  const [mode2, setMode] = import_react32.useState("tree");
-  const [query2, setQuery] = import_react32.useState("");
-  const [draft, setDraft] = import_react32.useState("");
-  const [editing, setEditing] = import_react32.useState(false);
-  const [expanded, setExpanded] = import_react32.useState([]);
-  const [rows, setRows] = import_react32.useState([]);
-  const [index3, setIndex] = import_react32.useState(0);
-  const [file2, setFile] = import_react32.useState();
-  const [line, setLine] = import_react32.useState(0);
-  const [preview2, setPreview] = import_react32.useState();
-  const [peeking, setPeeking] = import_react32.useState(true);
-  const [peek2, setPeek] = import_react32.useState();
-  const [loading, setLoading] = import_react32.useState(false);
-  const [error2, setError] = import_react32.useState("");
-  const [notice, setNotice] = import_react32.useState("");
-  const [retry5, setRetry] = import_react32.useState(0);
-  const readGeneration = import_react32.useRef(0);
-  const listings = import_react32.useRef(new Map);
-  const lastView = import_react32.useRef("");
-  const loads = import_react32.useRef(new Map);
+  const [mode2, setMode] = import_react33.useState("tree");
+  const [query2, setQuery] = import_react33.useState("");
+  const [draft, setDraft] = import_react33.useState("");
+  const [editing, setEditing] = import_react33.useState(false);
+  const [expanded, setExpanded] = import_react33.useState([]);
+  const [rows, setRows] = import_react33.useState([]);
+  const [index3, setIndex] = import_react33.useState(0);
+  const [file2, setFile] = import_react33.useState();
+  const [line, setLine] = import_react33.useState(0);
+  const [preview2, setPreview] = import_react33.useState();
+  const [peeking, setPeeking] = import_react33.useState(true);
+  const [peek2, setPeek] = import_react33.useState();
+  const [loading, setLoading] = import_react33.useState(false);
+  const [error2, setError] = import_react33.useState("");
+  const [notice, setNotice] = import_react33.useState("");
+  const [retry5, setRetry] = import_react33.useState(0);
+  const readGeneration = import_react33.useRef(0);
+  const listings = import_react33.useRef(new Map);
+  const lastView = import_react33.useRef("");
+  const loads = import_react33.useRef(new Map);
   const loadImage = effects?.loadImage;
   const load = (target2) => {
     const key5 = `${cwd}\x00${target2}`;
@@ -97892,7 +98039,7 @@ function FilesPanel({
     fresh.catch(() => loads.current.delete(key5));
     return fresh;
   };
-  import_react32.useEffect(() => {
+  import_react33.useEffect(() => {
     listings.current.clear();
     loads.current.clear();
     setExpanded([]);
@@ -97901,13 +98048,13 @@ function FilesPanel({
     setQuery("");
     setMode("tree");
   }, [cwd]);
-  import_react32.useEffect(() => {
+  import_react33.useEffect(() => {
     if (path) {
       setFile(path.replace(/:\d+(?::\d+)?$/, ""));
       setLine(Math.max(0, Number(path.match(/:(\d+)(?::\d+)?$/)?.[1] ?? 1) - 1));
     }
   }, [path, cwd]);
-  import_react32.useEffect(() => {
+  import_react33.useEffect(() => {
     if (!cwd)
       return;
     let current2 = true;
@@ -97992,7 +98139,7 @@ function FilesPanel({
       current2 = false;
     };
   }, [api, cwd, mode2, query2, expanded, retry5]);
-  import_react32.useEffect(() => {
+  import_react33.useEffect(() => {
     const generation = ++readGeneration.current;
     setPreview(undefined);
     setError("");
@@ -98013,14 +98160,14 @@ function FilesPanel({
       readGeneration.current++;
     };
   }, [api, cwd, file2, retry5]);
-  const lines = import_react32.useMemo(() => preview2 && ("text" in preview2) ? preview2.text.contents.split(`
+  const lines = import_react33.useMemo(() => preview2 && ("text" in preview2) ? preview2.text.contents.split(`
 `) : [], [preview2]);
   const visible = Math.max(1, height - 9);
   const peekRows = peeking && !file2 && visible >= 12 ? Math.floor(visible * 0.55) - 1 : 0;
   const listRows = peekRows ? visible - peekRows - 1 : visible;
   const cursor = file2 ? undefined : rows[index3];
   const peekPath = peekRows && cursor?.kind === "file" ? cursor.path : undefined;
-  import_react32.useEffect(() => {
+  import_react33.useEffect(() => {
     setPeek(peekPath ? { path: peekPath } : undefined);
     if (!peekPath || !cwd)
       return;
@@ -98331,7 +98478,7 @@ function FilesPanel({
 }
 
 // src/client/requests.tsx
-var import_react34 = __toESM(require_react(), 1);
+var import_react35 = __toESM(require_react(), 1);
 import { decodePasteBytes as decodePasteBytes2 } from "@opentui/core";
 
 // vendor/t3/packages/client-runtime/src/state/entities.ts
@@ -98499,19 +98646,19 @@ function RequestPanel({
   enabled,
   onEscape
 }) {
-  const value4 = import_react34.useRef(card.kind === "question" ? card.item.questions[0]?.initialAnswer ?? "" : "");
-  const [customText, setCustomText] = import_react34.useState(card.kind === "question" ? card.item.questions[0]?.initialAnswer ?? "" : "");
-  const [entered, setEntered] = import_react34.useState(false);
-  const [other, setOther] = import_react34.useState(card.kind === "question" && card.item.questions[0]?.initialAnswer !== undefined);
-  const [index3, setIndex] = import_react34.useState(0);
-  const [questionIndex, setQuestionIndex] = import_react34.useState(0);
-  const [selected, setSelected] = import_react34.useState([]);
-  const answers = import_react34.useRef({});
-  const [busy, setBusy] = import_react34.useState(false);
-  const sending = import_react34.useRef(false);
-  const [done4, setDone] = import_react34.useState(false);
-  const [error2, setError] = import_react34.useState("");
-  import_react34.useEffect(() => () => {
+  const value4 = import_react35.useRef(card.kind === "question" ? card.item.questions[0]?.initialAnswer ?? "" : "");
+  const [customText, setCustomText] = import_react35.useState(card.kind === "question" ? card.item.questions[0]?.initialAnswer ?? "" : "");
+  const [entered, setEntered] = import_react35.useState(false);
+  const [other, setOther] = import_react35.useState(card.kind === "question" && card.item.questions[0]?.initialAnswer !== undefined);
+  const [index3, setIndex] = import_react35.useState(0);
+  const [questionIndex, setQuestionIndex] = import_react35.useState(0);
+  const [selected, setSelected] = import_react35.useState([]);
+  const answers = import_react35.useRef({});
+  const [busy, setBusy] = import_react35.useState(false);
+  const sending = import_react35.useRef(false);
+  const [done4, setDone] = import_react35.useState(false);
+  const [error2, setError] = import_react35.useState("");
+  import_react35.useEffect(() => () => {
     value4.current = "";
   }, []);
   const question = card.kind === "question" ? card.item.questions[questionIndex] : undefined;
@@ -98720,7 +98867,7 @@ function RequestPanel({
 }
 
 // src/client/model-picker.tsx
-var import_react36 = __toESM(require_react(), 1);
+var import_react37 = __toESM(require_react(), 1);
 
 // vendor/t3/packages/client-runtime/src/state/providerInstanceDisplay.ts
 function humanizeSlug(slug) {
@@ -98971,15 +99118,15 @@ function ModelPicker({
   const snapshot2 = useClientAtom(client, client.snapshot);
   const id2 = useClientAtom(client, client.selectedThreadId);
   const thread = snapshot2?.threads.find((t) => t.id === id2);
-  const [favorites, setFavorites] = import_react36.useState([]);
-  const [error2, setError] = import_react36.useState("");
-  const [busy, setBusy] = import_react36.useState(false);
-  const [query2, setQuery] = import_react36.useState("");
-  const [filtering, setFiltering] = import_react36.useState(false);
-  const [cursor, setCursor] = import_react36.useState(0);
-  const [selection, setSelection] = import_react36.useState(effort ? thread?.modelSelection ?? client.registry.get(client.newModelSelection) ?? undefined : undefined);
-  const [mode2, setMode] = import_react36.useState(thread?.runtimeMode ?? client.registry.get(client.newRuntimeMode) ?? "approval-required");
-  import_react36.useEffect(() => {
+  const [favorites, setFavorites] = import_react37.useState([]);
+  const [error2, setError] = import_react37.useState("");
+  const [busy, setBusy] = import_react37.useState(false);
+  const [query2, setQuery] = import_react37.useState("");
+  const [filtering, setFiltering] = import_react37.useState(false);
+  const [cursor, setCursor] = import_react37.useState(0);
+  const [selection, setSelection] = import_react37.useState(effort ? thread?.modelSelection ?? client.registry.get(client.newModelSelection) ?? undefined : undefined);
+  const [mode2, setMode] = import_react37.useState(thread?.runtimeMode ?? client.registry.get(client.newRuntimeMode) ?? "approval-required");
+  import_react37.useEffect(() => {
     let stale = false;
     client.boundary.modelFavorites?.().then((value4) => {
       if (!stale)
@@ -99236,10 +99383,10 @@ function ModelPicker({
 }
 
 // src/client/thread-palette.tsx
-var import_react41 = __toESM(require_react(), 1);
+var import_react42 = __toESM(require_react(), 1);
 
 // src/client/sidebar.tsx
-var import_react39 = __toESM(require_react(), 1);
+var import_react40 = __toESM(require_react(), 1);
 
 // vendor/t3/packages/shared/src/t3McpToolPresentation.ts
 function tool(labels2, summaryAction, icon9 = "t3-code", displayName = `${labels2[0]} ${labels2[3]}`) {
@@ -99954,7 +100101,7 @@ function projectColor(project2) {
 }
 
 // src/client/meters.tsx
-var import_react38 = __toESM(require_react(), 1);
+var import_react39 = __toESM(require_react(), 1);
 
 // vendor/t3/packages/shared/src/usageLimits.ts
 var MINUTE = 60000;
@@ -100057,8 +100204,8 @@ function formatContextWindowTokens(value4) {
 // src/client/meters.tsx
 function useUsageLimits(client) {
   const providers = useClientAtom(client, client.providers);
-  const [now2, setNow] = import_react38.useState(() => Math.floor(client.now() / 60000) * 60000);
-  import_react38.useEffect(() => {
+  const [now2, setNow] = import_react39.useState(() => Math.floor(client.now() / 60000) * 60000);
+  import_react39.useEffect(() => {
     const timer = setInterval(() => setNow(Math.floor(client.now() / 60000) * 60000), 60000);
     return () => clearInterval(timer);
   }, [client]);
@@ -100303,27 +100450,27 @@ function ThreadSidebar({
   onOpen
 }) {
   const transcripts = useClientAtom(client, client.transcripts);
-  const waiting2 = import_react39.useMemo(() => new Set([...transcripts].filter(([, state2]) => pendingCard(state2.projection)).map(([id2]) => id2)), [transcripts]);
+  const waiting2 = import_react40.useMemo(() => new Set([...transcripts].filter(([, state2]) => pendingCard(state2.projection)).map(([id2]) => id2)), [transcripts]);
   const snapshot2 = useClientAtom(client, client.snapshot);
   const selected = useClientAtom(client, client.selectedThreadId);
   const visited = useClientAtom(client, client.visitedThreads);
   const providers = useClientAtom(client, client.providers);
-  const [hideMachine, setHideMachine] = import_react39.useState(false);
-  const [expanded, setExpanded] = import_react39.useState(new Set);
-  const [settledVisible, setSettledVisible] = import_react39.useState(SETTLED_TAIL_INITIAL_COUNT);
-  const [workingShelf, setWorkingShelf] = import_react39.useState(false);
-  const [wakeTick, setWakeTick] = import_react39.useState(0);
-  const [cursor, setCursor] = import_react39.useState();
-  const [offset, setOffset] = import_react39.useState(0);
-  const [shownSelected, setShownSelected] = import_react39.useState(selected);
-  import_react39.useEffect(() => {
+  const [hideMachine, setHideMachine] = import_react40.useState(false);
+  const [expanded, setExpanded] = import_react40.useState(new Set);
+  const [settledVisible, setSettledVisible] = import_react40.useState(SETTLED_TAIL_INITIAL_COUNT);
+  const [workingShelf, setWorkingShelf] = import_react40.useState(false);
+  const [wakeTick, setWakeTick] = import_react40.useState(0);
+  const [cursor, setCursor] = import_react40.useState();
+  const [offset, setOffset] = import_react40.useState(0);
+  const [shownSelected, setShownSelected] = import_react40.useState(selected);
+  import_react40.useEffect(() => {
     const timer = setInterval(() => setWakeTick((tick2) => tick2 + 1), 60000);
     return () => clearInterval(timer);
   }, []);
-  import_react39.useEffect(() => {
+  import_react40.useEffect(() => {
     client.boundary.sidebarWorkingShelf?.().then(setWorkingShelf).catch(() => {});
   }, [client]);
-  import_react39.useEffect(() => {
+  import_react40.useEffect(() => {
     const now2 = client.now();
     const wakes = (snapshot2?.threads ?? []).map((thread) => stamp(thread.snoozedUntil)).filter((wake) => wake > now2);
     if (!wakes.length)
@@ -100332,7 +100479,7 @@ function ThreadSidebar({
     const timer = setTimeout(() => setWakeTick((tick2) => tick2 + 1), delay3);
     return () => clearTimeout(timer);
   }, [client, snapshot2, wakeTick]);
-  const entries3 = import_react39.useMemo(() => {
+  const entries3 = import_react40.useMemo(() => {
     return sidebarEntries(snapshot2, {
       hideMachine,
       expanded,
@@ -100358,7 +100505,7 @@ function ThreadSidebar({
     providers,
     wakeTick
   ]);
-  const rows = import_react39.useMemo(() => sidebarRows(entries3, width2), [entries3, width2]);
+  const rows = import_react40.useMemo(() => sidebarRows(entries3, width2), [entries3, width2]);
   const limits = useUsageLimits(client);
   const footer = limits.flatMap((provider2) => [
     ...limits.length > 1 ? wrapName(`${modelIcon(provider2.driver, "").glyph} ${provider2.instanceId}`, width2).map((text5) => [{ text: text5 }]) : [],
@@ -100524,14 +100671,14 @@ function ThreadPalette({
 }) {
   useClientAtom(client, client.snapshot);
   useClientAtom(client, client.archives);
-  const [query2, setQuery] = import_react41.useState("");
-  const [cursor, setCursor] = import_react41.useState(0);
-  const [prompt, setPrompt] = import_react41.useState();
-  const [error2, setError] = import_react41.useState("");
-  const [busy, setBusy] = import_react41.useState(false);
-  const [matches, setMatches] = import_react41.useState([]);
-  const [loading, setLoading] = import_react41.useState(false);
-  import_react41.useEffect(() => {
+  const [query2, setQuery] = import_react42.useState("");
+  const [cursor, setCursor] = import_react42.useState(0);
+  const [prompt, setPrompt] = import_react42.useState();
+  const [error2, setError] = import_react42.useState("");
+  const [busy, setBusy] = import_react42.useState(false);
+  const [matches, setMatches] = import_react42.useState([]);
+  const [loading, setLoading] = import_react42.useState(false);
+  import_react42.useEffect(() => {
     if (mode2 !== "search")
       return;
     let stale = false;
@@ -100744,7 +100891,7 @@ function ThreadPalette({
 }
 
 // src/client/composer.tsx
-var import_react43 = __toESM(require_react(), 1);
+var import_react44 = __toESM(require_react(), 1);
 import { decodePasteBytes as decodePasteBytes3 } from "@opentui/core";
 
 // vendor/t3/packages/client-runtime/src/state/composerDispatch.ts
@@ -101686,6 +101833,24 @@ function createComposer(client, storage) {
         [id2]: [...client.registry.get(images)[id2] ?? [], { key: crypto.randomUUID(), bytes: bytes2 }]
       });
     },
+    attachFile(id2, file2) {
+      if ((client.registry.get(images)[id2]?.length ?? 0) >= 8)
+        throw new Error("Send at most 8 attachments at once.");
+      let type = "file";
+      if (file2.mimeType === "image/png")
+        try {
+          validateClipboardPng(file2.bytes);
+          type = "image";
+        } catch {}
+      const upload = { type, name: file2.name, mimeType: file2.mimeType };
+      client.registry.set(images, {
+        ...client.registry.get(images),
+        [id2]: [
+          ...client.registry.get(images)[id2] ?? [],
+          { key: crypto.randomUUID(), bytes: file2.bytes, upload }
+        ]
+      });
+    },
     removeImage(id2, key5) {
       if (client.registry.get(busy))
         return;
@@ -101729,7 +101894,10 @@ function createComposer(client, storage) {
         ...unnamed ? {
           titleSeed: deriveThreadTitleSeed({
             text: text5,
-            attachments: pending.map(() => ({ type: "image", name: "clipboard.png" }))
+            attachments: pending.map((image2) => ({
+              type: image2.upload?.type ?? "image",
+              name: image2.upload?.name ?? "clipboard.png"
+            }))
           })
         } : {},
         createdBy: "user",
@@ -101738,7 +101906,7 @@ function createComposer(client, storage) {
         dispatchMode: { type: mode2 === "queue" ? "queue_after_active" : "start_immediately" }
       }, async () => {
         for (const image2 of pending) {
-          image2.uploaded ??= await client.uploadImage(image2.bytes);
+          image2.uploaded ??= await client.uploadImage(image2.bytes, image2.upload);
           attachments.push(image2.uploaded);
         }
       });
@@ -101947,9 +102115,9 @@ function ThreadComposer({
   onInputFocus,
   onSent
 }) {
-  const composer = import_react43.useMemo(() => createComposer(client, client.boundary.drafts), [client]);
+  const composer = import_react44.useMemo(() => createComposer(client, client.boundary.drafts), [client]);
   useClientAtom(client, client.transcripts);
-  const [leaveCard, setLeaveCard] = import_react43.useState();
+  const [leaveCard, setLeaveCard] = import_react44.useState();
   const id2 = useClientAtom(client, client.selectedThreadId);
   const card = id2 ? pendingCard(client.getThread(id2).projection) : undefined;
   const cardKey = card && `${id2}:${requestKey(card)}`;
@@ -101960,7 +102128,7 @@ function ThreadComposer({
       setLeaveCard(answering ? cardKey : undefined);
     }
   });
-  import_react43.useEffect(() => {
+  import_react44.useEffect(() => {
     client.boundary.sendShortcut?.().then((value4) => client.registry.set(composer.shortcut, value4)).catch(() => {});
     return () => {
       composer.flush();
@@ -102007,10 +102175,10 @@ function Editor({
   onSent
 }) {
   const images = useClientAtom(client, composer.images)[id2] ?? [];
-  const [mediaStatus, setMediaStatus] = import_react43.useState("");
-  const [mediaBusy, setMediaBusy] = import_react43.useState(false);
-  const mediaLock = import_react43.useRef(false);
-  const [recording, setRecording] = import_react43.useState(false);
+  const [mediaStatus, setMediaStatus] = import_react44.useState("");
+  const [mediaBusy, setMediaBusy] = import_react44.useState(false);
+  const mediaLock = import_react44.useRef(false);
+  const [recording, setRecording] = import_react44.useState(false);
   async function media3(kind) {
     if (mediaLock.current || busy)
       return;
@@ -102028,6 +102196,16 @@ function Editor({
           editor2.current.insertText(value4.text);
           composer.setDraft(id2, editor2.current.plainText);
         }
+      } else if (kind === "files") {
+        if (!effects?.pickFiles)
+          throw new Error("unavailable");
+        const picked = await effects.pickFiles(cwd);
+        if (!picked.length) {
+          setMediaStatus("");
+          return;
+        }
+        for (const file2 of picked)
+          composer.attachFile(id2, file2);
       } else if (kind === "paste") {
         if (!effects?.pasteImage)
           throw new Error("unavailable");
@@ -102040,7 +102218,7 @@ function Editor({
       setMediaStatus("\u2713");
     } catch (error3) {
       const reason = error3 instanceof Error && error3.message !== "unavailable" ? error3.message : "";
-      setMediaStatus(kind !== "mic" ? `Paste unavailable${reason && ` (${reason})`}: copy text or a PNG up to 2000px / 10 MB.` : `Mic unavailable${reason && ` (${reason})`}; retry when connected.`);
+      setMediaStatus(kind === "files" ? `Attach failed${reason && ` (${reason})`}.` : kind !== "mic" ? `Paste unavailable${reason && ` (${reason})`}: copy text or a PNG up to 2000px / 10 MB.` : `Mic unavailable${reason && ` (${reason})`}; retry when connected.`);
     } finally {
       mediaLock.current = false;
       setMediaBusy(false);
@@ -102052,23 +102230,23 @@ function Editor({
   const shortcut = useClientAtom(client, composer.shortcut);
   useClientAtom(client, client.transcripts);
   const snapshot2 = useClientAtom(client, client.snapshot);
-  const editor2 = import_react43.useRef(null);
-  const [edit, setEdit] = import_react43.useState();
-  const [choices, setChoices] = import_react43.useState([]);
-  const [choice, setChoice] = import_react43.useState(0);
-  const [completionError, setCompletionError] = import_react43.useState("");
-  const [queuedIndex, setQueuedIndex] = import_react43.useState(0);
-  const [cursor, setCursor] = import_react43.useState(0);
+  const editor2 = import_react44.useRef(null);
+  const [edit, setEdit] = import_react44.useState();
+  const [choices, setChoices] = import_react44.useState([]);
+  const [choice, setChoice] = import_react44.useState(0);
+  const [completionError, setCompletionError] = import_react44.useState("");
+  const [queuedIndex, setQueuedIndex] = import_react44.useState(0);
+  const [cursor, setCursor] = import_react44.useState(0);
   const text5 = drafts[id2] ?? "";
   const thread = snapshot2?.threads.find((thread2) => thread2.id === id2);
   const project2 = snapshot2?.projects.find((project3) => project3.id === thread?.projectId);
   const instanceId = thread?.modelSelection.instanceId;
   const cwd = thread?.worktreePath ?? project2?.workspaceRoot;
-  import_react43.useEffect(() => {
+  import_react44.useEffect(() => {
     if (editor2.current && editor2.current.plainText !== text5)
       editor2.current.setText(text5);
   }, [text5]);
-  import_react43.useEffect(() => {
+  import_react44.useEffect(() => {
     let cancelled = false;
     const trigger = completionTrigger(text5, cursor);
     setChoices([]);
@@ -102142,6 +102320,13 @@ function Editor({
       key5.preventDefault();
       onInputFocus?.();
       media3("clipboard");
+      return;
+    }
+    if ((enabled || pasteFromPane) && commandForKey(key5) === "attach" && effects?.pickFiles) {
+      key5.preventDefault();
+      if (!enabled)
+        onInputFocus?.();
+      media3("files");
       return;
     }
     if (!enabled)
@@ -102268,7 +102453,17 @@ function Editor({
           backgroundColor: theme.highlight,
           overflow: "hidden",
           children: [
-            /* @__PURE__ */ import_jsx_runtime.jsx(InlineImage, {
+            image2.upload?.type === "file" ? /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+              width: 6,
+              height: 3,
+              justifyContent: "center",
+              alignItems: "center",
+              children: /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+                selectable: false,
+                fg: fileIcon(image2.upload.name).color,
+                children: fileIcon(image2.upload.name).glyph
+              })
+            }) : /* @__PURE__ */ import_jsx_runtime.jsx(InlineImage, {
               bytes: image2.bytes,
               width: 6,
               height: 3
@@ -102281,7 +102476,8 @@ function Editor({
                 /* @__PURE__ */ import_jsx_runtime.jsx("text", {
                   selectable: false,
                   fg: theme.accent,
-                  children: `clipboard.png ${index3 + 1}`
+                  wrapMode: "none",
+                  children: image2.upload?.name ?? `clipboard.png ${index3 + 1}`
                 }),
                 /* @__PURE__ */ import_jsx_runtime.jsx("text", {
                   fg: theme.plain,
@@ -102325,6 +102521,19 @@ function Editor({
             },
             children: [
               "[Alt+p Paste image]",
+              " "
+            ]
+          }),
+          effects?.pickFiles && /* @__PURE__ */ import_jsx_runtime.jsxs("text", {
+            fg: theme.accent,
+            onMouseUp: (event) => {
+              if (event.button === 0)
+                media3("files");
+            },
+            children: [
+              "[",
+              hintFor("attach") === "none" ? "" : `${hintFor("attach")} `,
+              "Attach]",
               " "
             ]
           }),
@@ -102446,7 +102655,7 @@ function Editor({
 }
 
 // src/client/transcript.tsx
-var import_react48 = __toESM(require_react(), 1);
+var import_react49 = __toESM(require_react(), 1);
 
 // vendor/t3/packages/shared/src/themePalettes.ts
 var BUILT_IN_THEME_IDS = ["t3-chat", "grove", "ocean", "ember", "iris"];
@@ -105092,12 +105301,12 @@ function currentActivity(thread, rows) {
 }
 
 // src/client/activity-row.tsx
-var import_react45 = __toESM(require_react(), 1);
+var import_react46 = __toESM(require_react(), 1);
 var FRAMES = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"];
 function ActivityRow({ activity, width: width2 }) {
-  const [frame, setFrame] = import_react45.useState(0);
+  const [frame, setFrame] = import_react46.useState(0);
   const active2 = activity !== null;
-  import_react45.useEffect(() => {
+  import_react46.useEffect(() => {
     if (!active2)
       return;
     const timer = setInterval(() => setFrame((n) => (n + 1) % FRAMES.length), 100);
@@ -105134,7 +105343,7 @@ function ActivityRow({ activity, width: width2 }) {
 }
 
 // src/client/transcript-viewport.tsx
-var import_react46 = __toESM(require_react(), 1);
+var import_react47 = __toESM(require_react(), 1);
 
 // src/client/vim.ts
 var segmenter2 = new Intl.Segmenter(undefined, { granularity: "grapheme" });
@@ -105320,7 +105529,7 @@ function spanAt(row, cell) {
   }
   return;
 }
-var Row = import_react46.memo(function Row2({
+var Row = import_react47.memo(function Row2({
   row,
   activate,
   focused,
@@ -105332,7 +105541,7 @@ var Row = import_react46.memo(function Row2({
   cursor,
   place
 }) {
-  const down = import_react46.useRef(undefined);
+  const down = import_react47.useRef(undefined);
   const painted = paint(row.spans, from === undefined || to === undefined ? undefined : [from, to], cursor);
   return /* @__PURE__ */ import_jsx_runtime.jsx("text", {
     fg: theme.plain,
@@ -105380,7 +105589,7 @@ var Row = import_react46.memo(function Row2({
     }, index3))
   });
 });
-var SeparatorRow = import_react46.memo(function SeparatorRow2({ row }) {
+var SeparatorRow = import_react47.memo(function SeparatorRow2({ row }) {
   return /* @__PURE__ */ import_jsx_runtime.jsx("text", {
     fg: theme.plain,
     selectable: false,
@@ -105408,11 +105617,11 @@ function TranscriptViewport({
   cwd,
   openFile
 }) {
-  const [target2, setTarget] = import_react46.useState();
-  const [hoveredImage, setHoveredImage] = import_react46.useState();
-  const [feedback, setFeedback] = import_react46.useState("");
-  const busy = import_react46.useRef(false);
-  const nativeSelection = import_react46.useRef(false);
+  const [target2, setTarget] = import_react47.useState();
+  const [hoveredImage, setHoveredImage] = import_react47.useState();
+  const [feedback, setFeedback] = import_react47.useState("");
+  const busy = import_react47.useRef(false);
+  const nativeSelection = import_react47.useRef(false);
   const run3 = (label, task) => {
     if (busy.current)
       return;
@@ -105505,23 +105714,24 @@ function TranscriptViewport({
     if (text5)
       run3("copy", () => effects.copy(text5));
   });
-  const [localCache] = import_react46.useState(() => new MarkdownCache);
+  const [localCache] = import_react47.useState(() => new MarkdownCache);
   const cache3 = measuredCache ?? localCache;
-  const [localAnchor, setLocalAnchor] = import_react46.useState(null);
+  const [localAnchor, setLocalAnchor] = import_react47.useState(null);
   const anchor = anchorState ? anchorState.value : localAnchor;
   const setAnchor = anchorState?.set ?? setLocalAnchor;
-  const rows = import_react46.useMemo(() => cache3.rows(items, width2, Math.max(1, height - (effects ? 3 : 1)), offeredActions(effects)), [cache3, items, width2, height, effects]);
-  const [focus, setFocus] = import_react46.useState(null);
-  const actions = import_react46.useMemo(() => new Set(items.filter((i) => i.action).map((i) => String(i.id))), [items]);
+  const rows = import_react47.useMemo(() => cache3.rows(items, width2, Math.max(1, height - (effects ? 3 : 1)), offeredActions(effects)), [cache3, items, width2, height, effects]);
+  const [focus, setFocus] = import_react47.useState(null);
+  const actions = import_react47.useMemo(() => new Set(items.filter((i) => i.action).map((i) => String(i.id))), [items]);
   const rowMessage = (row) => row.id.slice(0, row.id.lastIndexOf(":", row.id.lastIndexOf(":") - 1));
-  const viewport = Math.max(1, height - (effects ? 3 : 1));
+  const hints = import_react47.useContext(HintsShown);
+  const viewport = Math.max(1, height - (effects ? hints ? 3 : 2 : 1));
   const start = anchorIndex(rows, anchor, viewport);
   const scroll = (delta) => {
     const next2 = Math.max(0, Math.min(Math.max(0, rows.length - viewport), start + delta));
     setAnchor(next2 >= rows.length - viewport ? null : rows[next2]?.id ?? null);
   };
-  const vim = import_react46.useRef({ want: 0 });
-  const [, repaint] = import_react46.useState(0);
+  const vim = import_react47.useRef({ want: 0 });
+  const [, repaint] = import_react47.useState(0);
   const rowIndex = (id3) => anchorIndex(rows, id3, 1);
   const posOf = (at) => at && rows.length ? { row: rowIndex(at.id), col: at.col } : undefined;
   const put3 = (next2, sticky = false) => {
@@ -105837,36 +106047,43 @@ function TranscriptViewport({
         ]
       }),
       effects && /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
-        height: 2,
+        height: hints ? 2 : 1,
         flexShrink: 0,
         flexDirection: "column",
         children: [
-          /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+          /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
             height: 1,
             flexDirection: "row",
-            children: target2 ? [
-              ...target2.kind === "image" ? mediaActions(effects, mediaKind(target2.text)) : target2.kind === "code" ? target2.actions ?? [] : [
-                target2.kind === "file" ? "copy path" : "copy",
-                ...target2.kind === "inline" ? offeredActions(effects).filter((a) => a !== "run") : []
-              ],
-              ...["file", "url"].includes(target2.kind) ? ["open", ...effects.send ? ["send"] : []] : target2.kind === "page" ? ["open"] : []
-            ].map((action) => /* @__PURE__ */ import_jsx_runtime.jsx("box", {
-              onMouseUp: (e) => {
-                if (enabled && e.button === 0)
-                  perform(action);
-              },
-              children: /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+            children: [
+              target2 ? [
+                ...target2.kind === "image" ? mediaActions(effects, mediaKind(target2.text)) : target2.kind === "code" ? target2.actions ?? [] : [
+                  target2.kind === "file" ? "copy path" : "copy",
+                  ...target2.kind === "inline" ? offeredActions(effects).filter((a) => a !== "run") : []
+                ],
+                ...["file", "url"].includes(target2.kind) ? ["open", ...effects.send ? ["send"] : []] : target2.kind === "page" ? ["open"] : []
+              ].map((action) => /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+                onMouseUp: (e) => {
+                  if (enabled && e.button === 0)
+                    perform(action);
+                },
+                children: /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+                  selectable: false,
+                  fg: theme.accent,
+                  children: `[${action}] `
+                })
+              }, action)) : hints ? /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+                fg: theme.plain,
                 selectable: false,
-                fg: theme.accent,
-                children: `[${action}] `
+                children: "Hover / click text \xB7 [ / ] focus block"
+              }) : null,
+              !hints && /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+                fg: theme.plain,
+                selectable: false,
+                children: feedback || modeLabel
               })
-            }, action)) : /* @__PURE__ */ import_jsx_runtime.jsx("text", {
-              fg: theme.plain,
-              selectable: false,
-              children: "Hover / click text \xB7 [ / ] focus block"
-            })
+            ]
           }),
-          /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+          hints && /* @__PURE__ */ import_jsx_runtime.jsx("text", {
             fg: theme.plain,
             selectable: false,
             children: feedback || (target2?.kind === "image" ? `l / Enter open image \xB7 y copy${effects.copyImageTo ? keyHints(effects, ["tmux", "run", "send"]) : ""}` : modeLabel ? `${modeLabel}y yank${keyHints(effects, ["run"])} \xB7 Esc cancel` : `hjkl wbe move \xB7 v/V select \xB7 y yank${keyHints(effects, ["run"])} \xB7 Y block`)
@@ -105925,13 +106142,13 @@ function ThreadTranscript({
   const states = useClientAtom(client, client.transcripts);
   const shell2 = useClientAtom(client, client.snapshot);
   const status2 = useClientAtom(client, client.status);
-  const [caches] = import_react48.useState(() => new Map);
-  const [anchors, setAnchors] = import_react48.useState(new Map);
+  const [caches] = import_react49.useState(() => new Map);
+  const [anchors, setAnchors] = import_react49.useState(new Map);
   const state2 = id3 ? states.get(id3) : undefined;
-  const [expanded, setExpanded] = import_react48.useState(new Set);
-  const [details, setDetails] = import_react48.useState(new Map);
-  const visibleRows = import_react48.useMemo(() => state2?.projection?.visibleTurnItems ?? [], [state2?.projection]);
-  const items = import_react48.useMemo(() => {
+  const [expanded, setExpanded] = import_react49.useState(new Set);
+  const [details, setDetails] = import_react49.useState(new Map);
+  const visibleRows = import_react49.useMemo(() => state2?.projection?.visibleTurnItems ?? [], [state2?.projection]);
+  const items = import_react49.useMemo(() => {
     const rows = visibleRows.map((row) => {
       const detail = details.get(`${row.sourceThreadId}/${row.sourceItemId}`);
       return detail?.item && detail.revision === turnItemDetailRevision(row.item) ? { ...row, item: detail.item } : row;
@@ -106047,7 +106264,7 @@ ${detail.message}` } : message;
 }
 
 // src/client/frame.tsx
-var import_react50 = __toESM(require_react(), 1);
+var import_react51 = __toESM(require_react(), 1);
 function rightWidth(kind2, width2) {
   if (kind2 === "terminal")
     return Math.max(24, Math.floor(width2 * 0.5));
@@ -106076,7 +106293,7 @@ function AppFrame({
   const selectedId = useClientAtom(client, client.selectedThreadId);
   const snapshot2 = useClientAtom(client, client.snapshot);
   useClientAtom(client, client.transcripts);
-  const [agentStack, setAgentStack] = import_react50.useState([]);
+  const [agentStack, setAgentStack] = import_react51.useState([]);
   const agentId = agentStack.at(-1) ?? null;
   const agentCard = agentId ? pendingCard(client.getThread(agentId).projection) : undefined;
   const hasCard = !!(agentId ? agentCard : selectedId && pendingCard(client.getThread(selectedId).projection));
@@ -106094,14 +106311,19 @@ function AppFrame({
     ...wrapName(`${logo?.glyph} ${selected.modelSelection.model} \xB7 effort ${effort ?? "default"} \xB7 ${context4}`, width2),
     ...wrapName(`${paneGlyphs.branch} ${selected.branch ?? "branch unknown"} \xB7 ${selected.worktreePath ?? snapshot2?.projects.find((p) => p.id === selected.projectId)?.workspaceRoot ?? "workspace unknown"}`, width2)
   ] : [];
-  const notice = import_react50.useContext(ServerNotice);
+  const notice = import_react51.useContext(ServerNotice);
   const noticeRows = notice ? wrapName(`! ${notice.text} [ Dismiss${hintFor("dismissNotice") === "none" ? "" : ` (${hintFor("dismissNotice")})`} ]`, width2) : [];
   const topRows = headerRows.length + noticeRows.length;
-  const [sidebarWanted, setSidebar] = import_react50.useState(true);
-  const [narrowSidebar, setNarrowSidebar] = import_react50.useState(false);
+  const [hintsShown, setHintsShown] = import_react51.useState(true);
+  import_react51.useEffect(() => {
+    client.boundary.showHints?.().then(setHintsShown).catch(() => {});
+  }, [client]);
+  const chromeRows = topRows + (hintsShown ? 2 : 0);
+  const [sidebarWanted, setSidebar] = import_react51.useState(true);
+  const [narrowSidebar, setNarrowSidebar] = import_react51.useState(false);
   const sidebar = width2 >= 70 ? sidebarWanted : narrowSidebar;
-  const [focus, setFocusPane] = import_react50.useState("sidebar");
-  const [sent, setSent] = import_react50.useState(false);
+  const [focus, setFocusPane] = import_react51.useState("sidebar");
+  const [sent, setSent] = import_react51.useState(false);
   const setFocus = (next2) => {
     if (next2 === "composer")
       setSent(false);
@@ -106109,19 +106331,19 @@ function AppFrame({
   };
   const hasQueued = !agentId && !!selectedId && !!client.getThread(selectedId).projection?.runs.some((run3) => run3.status === "queued");
   const composerCollapsed = !hasCard && !hasQueued && (!!agentId || focus !== "composer" || sent);
-  const composerHeight = hasCard ? Math.min(17, Math.max(13, height - 7 - topRows)) : composerCollapsed ? 3 : 9;
-  const [filePath, setFilePath] = import_react50.useState();
-  const [diffTarget, setDiffTarget] = import_react50.useState();
-  const [diffSerial, setDiffSerial] = import_react50.useState(0);
-  const [right, setRight] = import_react50.useState(null);
-  const [overlay, setOverlay] = import_react50.useState(null);
-  const actions = import_react50.useMemo(() => createThreadActions(client), [client]);
-  import_react50.useEffect(() => {
+  const composerHeight = hasCard ? Math.min(17, Math.max(13, height - 5 - chromeRows)) : composerCollapsed ? 3 : 9;
+  const [filePath, setFilePath] = import_react51.useState();
+  const [diffTarget, setDiffTarget] = import_react51.useState();
+  const [diffSerial, setDiffSerial] = import_react51.useState(0);
+  const [right, setRight] = import_react51.useState(null);
+  const [overlay, setOverlay] = import_react51.useState(null);
+  const actions = import_react51.useMemo(() => createThreadActions(client), [client]);
+  import_react51.useEffect(() => {
     client.viewThread(agentId);
   }, [client, agentId]);
-  import_react50.useEffect(() => setAgentStack([]), [selectedId]);
+  import_react51.useEffect(() => setAgentStack([]), [selectedId]);
   const agentCardKey = agentId && agentCard ? `${agentId}:${requestKey(agentCard)}` : undefined;
-  import_react50.useEffect(() => {
+  import_react51.useEffect(() => {
     if (agentCardKey)
       setFocus("composer");
   }, [agentCardKey]);
@@ -106134,17 +106356,17 @@ function AppFrame({
     setAgentStack((stack) => stack.slice(0, -1));
     setFocus("transcript");
   };
-  const [menuTarget, setMenuTarget] = import_react50.useState();
-  const [actionError, setActionError] = import_react50.useState("");
-  import_react50.useEffect(() => onMediaNotice(setActionError), []);
-  const [quitArmed, setQuitArmed] = import_react50.useState(false);
-  import_react50.useEffect(() => {
+  const [menuTarget, setMenuTarget] = import_react51.useState();
+  const [actionError, setActionError] = import_react51.useState("");
+  import_react51.useEffect(() => onMediaNotice(setActionError), []);
+  const [quitArmed, setQuitArmed] = import_react51.useState(false);
+  import_react51.useEffect(() => {
     setNarrowSidebar(false);
     if (width2 < 70)
       setFocus(right ? "right" : "transcript");
   }, [width2, right]);
-  const center = import_react50.useRef("transcript");
-  import_react50.useEffect(() => {
+  const center = import_react51.useRef("transcript");
+  import_react51.useEffect(() => {
     if (focus === "transcript" || focus === "composer")
       center.current = focus;
   }, [focus]);
@@ -106181,6 +106403,12 @@ function AppFrame({
     setQuitArmed(false);
     if (command2 === "dismissNotice") {
       notice?.dismiss();
+      return;
+    }
+    if (command2 === "attach")
+      return;
+    if (command2 === "hints") {
+      setHintsShown(!hintsShown);
       return;
     }
     if (command2 === "dictation") {
@@ -106263,7 +106491,7 @@ function AppFrame({
   };
   useKeyboard((key5) => {
     const found = commandForKey(key5);
-    const command2 = found === "shell" && !effects?.shell || found === "dictation" && !effects?.toggleDictation || found === "dismissNotice" && !notice ? undefined : found;
+    const command2 = found === "shell" && !effects?.shell || found === "dictation" && !effects?.toggleDictation || found === "attach" && !effects?.pickFiles || found === "dismissNotice" && !notice ? undefined : found;
     if (key5.defaultPrevented)
       return;
     if (focus === "right" && right === "terminal" && !overlay && !key5.meta)
@@ -106290,7 +106518,12 @@ function AppFrame({
     } else
       setQuitArmed(false);
   });
-  const helpLines = cheatSheet(keymap(), { shell: !!effects?.shell, dictation: !!effects?.toggleDictation, notice: !!notice }, targetKeys(effects)).flatMap((part, i) => [
+  const helpLines = cheatSheet(keymap(), {
+    shell: !!effects?.shell,
+    dictation: !!effects?.toggleDictation,
+    notice: !!notice,
+    attach: !!effects?.pickFiles
+  }, targetKeys(effects)).flatMap((part, i) => [
     ...i ? [{ text: "", title: false }] : [],
     { text: part.title, title: true },
     ...part.rows.map((row) => ({ text: `${row.keys.padEnd(20)}${row.label}`, title: false }))
@@ -106327,332 +106560,336 @@ function AppFrame({
       children: children2
     })
   });
-  return /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
-    width: "100%",
-    height: "100%",
-    flexDirection: "column",
-    backgroundColor: theme.canvas,
-    children: [
-      /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
-        height: 1,
-        flexShrink: 0,
-        flexDirection: "row",
-        children: [
-          /* @__PURE__ */ import_jsx_runtime.jsxs("text", {
-            fg: theme.text,
-            children: [
-              "tercet \xB7 ",
-              status2,
-              " \xB7 threads=",
-              count,
-              selected ? ` \xB7 ${runtimeModeLabels[selected.runtimeMode] ?? selected.runtimeMode}` : ""
-            ]
-          }),
-          runningAgents > 0 && /* @__PURE__ */ import_jsx_runtime.jsx("box", {
-            marginLeft: 2,
-            onMouseUp: (event) => {
-              if (event.button === 0 && !overlay)
-                openRight("launchers");
-            },
-            children: /* @__PURE__ */ import_jsx_runtime.jsxs("text", {
-              fg: theme.accent,
-              selectable: false,
+  return /* @__PURE__ */ import_jsx_runtime.jsx(HintsShown.Provider, {
+    value: hintsShown,
+    children: /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
+      width: "100%",
+      height: "100%",
+      flexDirection: "column",
+      backgroundColor: theme.canvas,
+      children: [
+        /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
+          height: 1,
+          flexShrink: 0,
+          flexDirection: "row",
+          children: [
+            /* @__PURE__ */ import_jsx_runtime.jsxs("text", {
+              fg: theme.text,
               children: [
-                runningAgents,
-                " ",
-                runningAgents === 1 ? "agent" : "agents",
-                " running"
+                "tercet \xB7 ",
+                status2,
+                " \xB7 threads=",
+                count,
+                selected ? ` \xB7 ${runtimeModeLabels[selected.runtimeMode] ?? selected.runtimeMode}` : ""
               ]
-            })
-          })
-        ]
-      }),
-      noticeRows.length > 0 && /* @__PURE__ */ import_jsx_runtime.jsx("box", {
-        flexDirection: "column",
-        flexShrink: 0,
-        onMouseUp: (event) => {
-          if (event.button === 0)
-            notice?.dismiss();
-        },
-        children: noticeRows.map((row, i) => /* @__PURE__ */ import_jsx_runtime.jsx("text", {
-          height: 1,
-          fg: theme.yellow,
-          children: row
-        }, i))
-      }),
-      headerRows.map((row) => /* @__PURE__ */ import_jsx_runtime.jsx("text", {
-        height: 1,
-        flexShrink: 0,
-        fg: fill?.level === "full" ? theme.red : theme.accent,
-        children: logo && row.startsWith(logo.glyph) ? /* @__PURE__ */ import_jsx_runtime.jsxs(import_jsx_runtime.Fragment, {
-          children: [
-            /* @__PURE__ */ import_jsx_runtime.jsx("span", {
-              fg: logo.color,
-              children: logo.glyph
             }),
-            row.slice(logo.glyph.length)
-          ]
-        }) : row
-      }, row)),
-      /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
-        flexGrow: 1,
-        minHeight: 0,
-        flexDirection: "row",
-        children: [
-          sidebar && pane("sidebar", "Threads", content.sidebar ?? /* @__PURE__ */ import_jsx_runtime.jsx(ThreadSidebar, {
-            client,
-            width: (width2 < 100 ? 22 : 30) - 2,
-            height: Math.max(1, height - 7 - topRows),
-            enabled: !overlay,
-            keyboardEnabled: focus === "sidebar",
-            onOpen: () => {
-              if (width2 >= 70 || !right)
-                setFocus("transcript");
-            },
-            onMenu: (id3) => {
-              setMenuTarget(allThreads(client).find((t) => t.id === id3));
-              setOverlay("menu");
-            }
-          }), { width: width2 < 100 ? 22 : 30 }),
-          /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
-            flexGrow: 1,
-            minWidth: 0,
-            flexDirection: "column",
-            visible: width2 >= 70 || !right,
-            children: [
-              pane("transcript", agentId ? `Agent \xB7 ${agentThread ? formatSubagentDisplayTitle(agentThread.title) : "thread"} \xB7 read-only` : "Transcript", content.transcript ?? (status2 === "live" || selectedId ? /* @__PURE__ */ import_jsx_runtime.jsx(ThreadTranscript, {
-                effects,
-                threadId: agentId ?? undefined,
-                openAgent,
-                openDiff: agentId ? undefined : (target2) => {
-                  setDiffTarget(target2);
-                  setDiffSerial((n) => n + 1);
-                  setRight("diff");
-                  setFocus("right");
-                },
-                openFile: agentId ? undefined : (path) => {
-                  setFilePath((previous) => ({
-                    threadId: selectedId,
-                    path,
-                    serial: (previous?.serial ?? 0) + 1
-                  }));
-                  setRight("files");
-                  setFocus("right");
-                },
-                client,
-                width: Math.max(2, width2 - (sidebar ? width2 < 100 ? 22 : 30 : 0) - (right ? rightWidth(right, width2) : 0) - 2),
-                height: Math.max(2, height - 15 - topRows - (composerHeight - 9)),
-                enabled: !overlay,
-                keyboardEnabled: focus === "transcript"
-              }) : /* @__PURE__ */ import_jsx_runtime.jsx(ConnectionScreen, {
-                client,
-                keyboardEnabled: !overlay
-              })), { flexGrow: 1 }),
-              pane("composer", agentId ? "Agent \xB7 read-only" : "Composer", content.composer ?? /* @__PURE__ */ import_jsx_runtime.jsxs(import_jsx_runtime.Fragment, {
-                children: [
-                  /* @__PURE__ */ import_jsx_runtime.jsx("box", {
-                    visible: !agentId,
-                    height: "100%",
-                    children: /* @__PURE__ */ import_jsx_runtime.jsx(ThreadComposer, {
-                      client,
-                      effects,
-                      enabled: !overlay && focus === "composer" && !agentId,
-                      pasteEnabled: !overlay && !agentId && (width2 >= 70 || !right) && !(focus === "right" && right === "terminal"),
-                      collapsed: composerCollapsed,
-                      onSent: () => setSent(true),
-                      onInputFocus: () => setFocus("composer")
-                    })
-                  }),
-                  agentId && /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
-                    flexDirection: "column",
-                    height: "100%",
-                    children: [
-                      agentCard && /* @__PURE__ */ import_jsx_runtime.jsx(RequestPanel, {
-                        client,
-                        id: agentId,
-                        card: agentCard,
-                        enabled: !overlay && focus === "composer",
-                        onEscape: closeAgent
-                      }, agentCardKey),
-                      /* @__PURE__ */ import_jsx_runtime.jsx("box", {
-                        height: 1,
-                        flexShrink: 0,
-                        onMouseUp: (event) => {
-                          if (event.button === 0 && !overlay)
-                            closeAgent();
-                        },
-                        children: /* @__PURE__ */ import_jsx_runtime.jsx("text", {
-                          fg: theme.accent,
-                          selectable: false,
-                          children: "Read-only agent view \xB7 [Esc Back]"
-                        })
-                      })
-                    ]
-                  })
-                ]
-              }), { height: composerHeight })
-            ]
-          }),
-          right && pane("right", right === "files" ? "Files" : right === "diff" ? "Diff" : right === "terminal" ? "Terminal" : "Launchers", content.right ?? (right === "terminal" ? /* @__PURE__ */ import_jsx_runtime.jsx(TerminalPanel, {
-            client,
-            threadId: selectedId ?? undefined,
-            cwd: selected?.worktreePath ?? snapshot2?.projects.find((p) => p.id === selected?.projectId)?.workspaceRoot,
-            worktreePath: selected?.worktreePath ?? null,
-            enabled: !overlay && focus === "right",
-            height: height - 8 - topRows,
-            width: (width2 < 70 ? Math.max(1, width2 - (sidebar ? 22 : 0)) : rightWidth("terminal", width2)) - 2,
-            close: () => {
-              setRight(null);
-              setFocus("transcript");
-            }
-          }) : right === "launchers" ? /* @__PURE__ */ import_jsx_runtime.jsx(LaunchersPanel, {
-            open: openRight,
-            shell: effects?.shell ? runShell : undefined,
-            agents,
-            openAgent,
-            now: client.now,
-            enabled: !overlay && focus === "right",
-            close: () => {
-              setRight(null);
-              setFocus("transcript");
-            }
-          }, selectedId) : right === "files" ? /* @__PURE__ */ import_jsx_runtime.jsx(FilesPanel, {
-            api: client.files,
-            cwd: selected?.worktreePath ?? snapshot2?.projects.find((p) => p.id === selected?.projectId)?.workspaceRoot,
-            path: filePath?.threadId === selectedId ? filePath.path : undefined,
-            enabled: !overlay && focus === "right",
-            effects,
-            height: height - 7 - topRows,
-            width: (width2 < 70 ? Math.max(1, width2 - (sidebar ? 22 : 0)) : rightWidth("files", width2)) - 2,
-            close: () => {
-              setRight(null);
-              setFocus("transcript");
-            }
-          }, `${selectedId}:${filePath?.serial ?? 0}`) : /* @__PURE__ */ import_jsx_runtime.jsx(DiffPanel, {
-            client,
-            target: diffTarget,
-            enabled: !overlay && focus === "right",
-            height: height - 7 - topRows,
-            close: () => {
-              setRight(null);
-              setFocus("transcript");
-            }
-          }, `${selectedId}:${diffSerial}`)), {
-            width: width2 < 70 ? Math.max(1, width2 - (sidebar ? 22 : 0)) : rightWidth(right, width2)
-          })
-        ]
-      }),
-      /* @__PURE__ */ import_jsx_runtime.jsx("text", {
-        height: 1,
-        flexShrink: 0,
-        fg: theme.accent,
-        children: actionError || (quitArmed ? "Press Ctrl+c again to quit; any other key cancels" : `Focus: ${focus}`)
-      }),
-      /* @__PURE__ */ import_jsx_runtime.jsx("box", {
-        height: 2,
-        flexShrink: 0,
-        flexDirection: "row",
-        flexWrap: "wrap",
-        children: keymap().filter((binding) => binding.chord && [
-          "sidebar",
-          "web",
-          "launchers",
-          "model",
-          "effort",
-          "palette",
-          "help",
-          "leave",
-          "close"
-        ].includes(binding.id)).map((binding) => /* @__PURE__ */ import_jsx_runtime.jsx("box", {
-          height: 1,
-          marginRight: 2,
-          onMouseUp: (event) => {
-            if (event.button === 0)
-              dispatch2(binding.id);
-          },
-          children: /* @__PURE__ */ import_jsx_runtime.jsxs("text", {
-            fg: theme.text,
-            selectable: false,
-            children: [
-              binding.hint,
-              " ",
-              binding.label
-            ]
-          })
-        }, binding.id))
-      }),
-      (overlay === "palette" || overlay === "search" || overlay === "menu") && /* @__PURE__ */ import_jsx_runtime.jsx(ThreadPalette, {
-        client,
-        mode: overlay,
-        target: menuTarget,
-        actions,
-        newThread: () => setOverlay("workspace"),
-        close: () => setOverlay(null),
-        width: width2,
-        height
-      }, overlay),
-      (overlay === "model" || overlay === "effort") && /* @__PURE__ */ import_jsx_runtime.jsx(ModelPicker, {
-        client,
-        effort: overlay === "effort",
-        close: () => setOverlay(null),
-        width: width2,
-        height
-      }, overlay),
-      overlay === "workspace" && /* @__PURE__ */ import_jsx_runtime.jsx(NewThreadPicker, {
-        client,
-        target: menuTarget,
-        actions,
-        close: () => setOverlay(null),
-        created: () => {
-          setOverlay("model");
-          if (width2 >= 70 || !right)
-            setFocus("composer");
-        }
-      }),
-      overlay === "help" && /* @__PURE__ */ import_jsx_runtime.jsx("box", {
-        position: "absolute",
-        left: 0,
-        top: 0,
-        width: "100%",
-        height: "100%",
-        children: /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
-          position: "absolute",
-          left: Math.max(0, Math.floor((width2 - Math.min(60, width2)) / 2)),
-          top: Math.max(0, Math.floor((height - 4 - Math.min(height - 4, helpLines.length + 3)) / 2)),
-          width: Math.min(60, width2),
-          height: Math.min(height - 4, helpLines.length + 3),
-          border: true,
-          borderStyle: "rounded",
-          borderColor: theme.accent,
-          backgroundColor: theme.canvas,
-          title: "Keys",
-          flexDirection: "column",
-          children: [
-            /* @__PURE__ */ import_jsx_runtime.jsx("scrollbox", {
-              scrollY: true,
-              scrollX: false,
-              flexGrow: 1,
-              children: helpLines.map((line, i) => /* @__PURE__ */ import_jsx_runtime.jsx("text", {
-                fg: line.title ? theme.accent : theme.text,
-                children: line.text
-              }, i))
-            }),
-            /* @__PURE__ */ import_jsx_runtime.jsx("box", {
-              height: 1,
+            runningAgents > 0 && /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+              marginLeft: 2,
               onMouseUp: (event) => {
-                if (event.button === 0)
-                  dispatch2("close");
+                if (event.button === 0 && !overlay)
+                  openRight("launchers");
               },
-              children: /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+              children: /* @__PURE__ */ import_jsx_runtime.jsxs("text", {
                 fg: theme.accent,
                 selectable: false,
-                children: "[ Esc Close ]"
+                children: [
+                  runningAgents,
+                  " ",
+                  runningAgents === 1 ? "agent" : "agents",
+                  " running"
+                ]
               })
             })
           ]
+        }),
+        noticeRows.length > 0 && /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+          flexDirection: "column",
+          flexShrink: 0,
+          onMouseUp: (event) => {
+            if (event.button === 0)
+              notice?.dismiss();
+          },
+          children: noticeRows.map((row, i) => /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+            height: 1,
+            fg: theme.yellow,
+            children: row
+          }, i))
+        }),
+        headerRows.map((row) => /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+          height: 1,
+          flexShrink: 0,
+          fg: fill?.level === "full" ? theme.red : theme.accent,
+          children: logo && row.startsWith(logo.glyph) ? /* @__PURE__ */ import_jsx_runtime.jsxs(import_jsx_runtime.Fragment, {
+            children: [
+              /* @__PURE__ */ import_jsx_runtime.jsx("span", {
+                fg: logo.color,
+                children: logo.glyph
+              }),
+              row.slice(logo.glyph.length)
+            ]
+          }) : row
+        }, row)),
+        /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
+          flexGrow: 1,
+          minHeight: 0,
+          flexDirection: "row",
+          children: [
+            sidebar && pane("sidebar", "Threads", content.sidebar ?? /* @__PURE__ */ import_jsx_runtime.jsx(ThreadSidebar, {
+              client,
+              width: (width2 < 100 ? 22 : 30) - 2,
+              height: Math.max(1, height - 5 - chromeRows),
+              enabled: !overlay,
+              keyboardEnabled: focus === "sidebar",
+              onOpen: () => {
+                if (width2 >= 70 || !right)
+                  setFocus("transcript");
+              },
+              onMenu: (id3) => {
+                setMenuTarget(allThreads(client).find((t) => t.id === id3));
+                setOverlay("menu");
+              }
+            }), { width: width2 < 100 ? 22 : 30 }),
+            /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
+              flexGrow: 1,
+              minWidth: 0,
+              flexDirection: "column",
+              visible: width2 >= 70 || !right,
+              children: [
+                pane("transcript", agentId ? `Agent \xB7 ${agentThread ? formatSubagentDisplayTitle(agentThread.title) : "thread"} \xB7 read-only` : "Transcript", content.transcript ?? (status2 === "live" || selectedId ? /* @__PURE__ */ import_jsx_runtime.jsx(ThreadTranscript, {
+                  effects,
+                  threadId: agentId ?? undefined,
+                  openAgent,
+                  openDiff: agentId ? undefined : (target2) => {
+                    setDiffTarget(target2);
+                    setDiffSerial((n) => n + 1);
+                    setRight("diff");
+                    setFocus("right");
+                  },
+                  openFile: agentId ? undefined : (path) => {
+                    setFilePath((previous) => ({
+                      threadId: selectedId,
+                      path,
+                      serial: (previous?.serial ?? 0) + 1
+                    }));
+                    setRight("files");
+                    setFocus("right");
+                  },
+                  client,
+                  width: Math.max(2, width2 - (sidebar ? width2 < 100 ? 22 : 30 : 0) - (right ? rightWidth(right, width2) : 0) - 2),
+                  height: Math.max(2, height - 13 - chromeRows - (composerHeight - 9)),
+                  enabled: !overlay,
+                  keyboardEnabled: focus === "transcript"
+                }) : /* @__PURE__ */ import_jsx_runtime.jsx(ConnectionScreen, {
+                  client,
+                  keyboardEnabled: !overlay
+                })), { flexGrow: 1 }),
+                pane("composer", agentId ? "Agent \xB7 read-only" : "Composer", content.composer ?? /* @__PURE__ */ import_jsx_runtime.jsxs(import_jsx_runtime.Fragment, {
+                  children: [
+                    /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+                      visible: !agentId,
+                      height: "100%",
+                      children: /* @__PURE__ */ import_jsx_runtime.jsx(ThreadComposer, {
+                        client,
+                        effects,
+                        enabled: !overlay && focus === "composer" && !agentId,
+                        pasteEnabled: !overlay && !agentId && (width2 >= 70 || !right) && !(focus === "right" && right === "terminal"),
+                        collapsed: composerCollapsed,
+                        onSent: () => setSent(true),
+                        onInputFocus: () => setFocus("composer")
+                      })
+                    }),
+                    agentId && /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
+                      flexDirection: "column",
+                      height: "100%",
+                      children: [
+                        agentCard && /* @__PURE__ */ import_jsx_runtime.jsx(RequestPanel, {
+                          client,
+                          id: agentId,
+                          card: agentCard,
+                          enabled: !overlay && focus === "composer",
+                          onEscape: closeAgent
+                        }, agentCardKey),
+                        /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+                          height: 1,
+                          flexShrink: 0,
+                          onMouseUp: (event) => {
+                            if (event.button === 0 && !overlay)
+                              closeAgent();
+                          },
+                          children: /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+                            fg: theme.accent,
+                            selectable: false,
+                            children: "Read-only agent view \xB7 [Esc Back]"
+                          })
+                        })
+                      ]
+                    })
+                  ]
+                }), { height: composerHeight })
+              ]
+            }),
+            right && pane("right", right === "files" ? "Files" : right === "diff" ? "Diff" : right === "terminal" ? "Terminal" : "Launchers", content.right ?? (right === "terminal" ? /* @__PURE__ */ import_jsx_runtime.jsx(TerminalPanel, {
+              client,
+              threadId: selectedId ?? undefined,
+              cwd: selected?.worktreePath ?? snapshot2?.projects.find((p) => p.id === selected?.projectId)?.workspaceRoot,
+              worktreePath: selected?.worktreePath ?? null,
+              enabled: !overlay && focus === "right",
+              height: height - 6 - chromeRows,
+              width: (width2 < 70 ? Math.max(1, width2 - (sidebar ? 22 : 0)) : rightWidth("terminal", width2)) - 2,
+              close: () => {
+                setRight(null);
+                setFocus("transcript");
+              }
+            }) : right === "launchers" ? /* @__PURE__ */ import_jsx_runtime.jsx(LaunchersPanel, {
+              open: openRight,
+              shell: effects?.shell ? runShell : undefined,
+              agents,
+              openAgent,
+              now: client.now,
+              enabled: !overlay && focus === "right",
+              close: () => {
+                setRight(null);
+                setFocus("transcript");
+              }
+            }, selectedId) : right === "files" ? /* @__PURE__ */ import_jsx_runtime.jsx(FilesPanel, {
+              api: client.files,
+              cwd: selected?.worktreePath ?? snapshot2?.projects.find((p) => p.id === selected?.projectId)?.workspaceRoot,
+              path: filePath?.threadId === selectedId ? filePath.path : undefined,
+              enabled: !overlay && focus === "right",
+              effects,
+              height: height - 5 - chromeRows,
+              width: (width2 < 70 ? Math.max(1, width2 - (sidebar ? 22 : 0)) : rightWidth("files", width2)) - 2,
+              close: () => {
+                setRight(null);
+                setFocus("transcript");
+              }
+            }, `${selectedId}:${filePath?.serial ?? 0}`) : /* @__PURE__ */ import_jsx_runtime.jsx(DiffPanel, {
+              client,
+              target: diffTarget,
+              enabled: !overlay && focus === "right",
+              height: height - 5 - chromeRows,
+              close: () => {
+                setRight(null);
+                setFocus("transcript");
+              }
+            }, `${selectedId}:${diffSerial}`)), {
+              width: width2 < 70 ? Math.max(1, width2 - (sidebar ? 22 : 0)) : rightWidth(right, width2)
+            })
+          ]
+        }),
+        /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+          height: 1,
+          flexShrink: 0,
+          fg: theme.accent,
+          children: actionError || (quitArmed ? "Press Ctrl+c again to quit; any other key cancels" : `Focus: ${focus}${hintsShown || hintFor("hints") === "none" ? "" : ` \xB7 ${hintFor("hints")} hints`}`)
+        }),
+        hintsShown && /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+          height: 2,
+          flexShrink: 0,
+          flexDirection: "row",
+          flexWrap: "wrap",
+          children: keymap().filter((binding) => binding.chord && [
+            "sidebar",
+            "web",
+            "launchers",
+            "model",
+            "effort",
+            "palette",
+            "help",
+            "leave",
+            "close",
+            "hints"
+          ].includes(binding.id)).map((binding) => /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+            height: 1,
+            marginRight: 2,
+            onMouseUp: (event) => {
+              if (event.button === 0)
+                dispatch2(binding.id);
+            },
+            children: /* @__PURE__ */ import_jsx_runtime.jsxs("text", {
+              fg: theme.text,
+              selectable: false,
+              children: [
+                binding.hint,
+                " ",
+                binding.id === "hints" ? "Hide hints" : binding.label
+              ]
+            })
+          }, binding.id))
+        }),
+        (overlay === "palette" || overlay === "search" || overlay === "menu") && /* @__PURE__ */ import_jsx_runtime.jsx(ThreadPalette, {
+          client,
+          mode: overlay,
+          target: menuTarget,
+          actions,
+          newThread: () => setOverlay("workspace"),
+          close: () => setOverlay(null),
+          width: width2,
+          height
+        }, overlay),
+        (overlay === "model" || overlay === "effort") && /* @__PURE__ */ import_jsx_runtime.jsx(ModelPicker, {
+          client,
+          effort: overlay === "effort",
+          close: () => setOverlay(null),
+          width: width2,
+          height
+        }, overlay),
+        overlay === "workspace" && /* @__PURE__ */ import_jsx_runtime.jsx(NewThreadPicker, {
+          client,
+          target: menuTarget,
+          actions,
+          close: () => setOverlay(null),
+          created: () => {
+            setOverlay("model");
+            if (width2 >= 70 || !right)
+              setFocus("composer");
+          }
+        }),
+        overlay === "help" && /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+          position: "absolute",
+          left: 0,
+          top: 0,
+          width: "100%",
+          height: "100%",
+          children: /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
+            position: "absolute",
+            left: Math.max(0, Math.floor((width2 - Math.min(60, width2)) / 2)),
+            top: Math.max(0, Math.floor((height - 4 - Math.min(height - 4, helpLines.length + 3)) / 2)),
+            width: Math.min(60, width2),
+            height: Math.min(height - 4, helpLines.length + 3),
+            border: true,
+            borderStyle: "rounded",
+            borderColor: theme.accent,
+            backgroundColor: theme.canvas,
+            title: "Keys",
+            flexDirection: "column",
+            children: [
+              /* @__PURE__ */ import_jsx_runtime.jsx("scrollbox", {
+                scrollY: true,
+                scrollX: false,
+                flexGrow: 1,
+                children: helpLines.map((line, i) => /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+                  fg: line.title ? theme.accent : theme.text,
+                  children: line.text
+                }, i))
+              }),
+              /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+                height: 1,
+                onMouseUp: (event) => {
+                  if (event.button === 0)
+                    dispatch2("close");
+                },
+                children: /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+                  fg: theme.accent,
+                  selectable: false,
+                  children: "[ Esc Close ]"
+                })
+              })
+            ]
+          })
         })
-      })
-    ]
+      ]
+    })
   });
 }
 
@@ -106670,7 +106907,7 @@ async function runKeys(env = process.env, home = homedir3()) {
     const { settings: settings5 } = await loadSettings(settingsDir(env, home), readOptional, home);
     applyLook(settings5);
     const effects = hostActions({ settings: settings5, host: systemHost(), writeTerminal: () => {} });
-    const sheet = cheatSheet(keymap(), { shell: !!effects.shell, dictation: !!effects.toggleDictation }, targetKeys(effects));
+    const sheet = cheatSheet(keymap(), { shell: !!effects.shell, dictation: !!effects.toggleDictation, attach: !!effects.pickFiles }, targetKeys(effects));
     console.log(cheatSheetText(sheet, true));
     console.log(`
 Rebind with the name in the last column, e.g. "keys": { "palette": "Ctrl+k" }.`);
