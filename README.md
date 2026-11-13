@@ -1,0 +1,162 @@
+# tercet
+
+A terminal client for [T3 Code](https://github.com/pingdotgg/t3code): your threads, transcripts
+and composer in a TUI, next to the web app, on the same server.
+
+![tercet: opening a thread, a diff, the palette and a reply](docs/media/demo.gif)
+
+- **The web app's behavior, in a terminal.** Same thread list, shelves and models, live
+  streaming, a composer with `@file`, `/skill` and `:emoji`, diffs and the files panel. Mouse
+  and keyboard (vim keys in the transcript) both work.
+- **Images in any terminal.** Kitty graphics where the terminal has them, Sixel, colored blocks
+  everywhere else, and a plain placeholder when you ask for one, rather than an empty box.
+- **Your machine stays yours.** Shell, editor, clipboard targets, openers and your own commands
+  live in one settings file. Anything you don't set up has no button, and `tercet doctor`
+  tells you what works on your setup.
+
+```bash
+bun install -g github:Steven-ODell/tercet
+```
+
+You need [Bun](https://bun.com) (tested with 1.4.0) and a T3 Code server, 0.1.8 or a later
+0.1 release, on the same machine. No Bun yet? `curl -fsSL https://bun.com/install | bash`, or
+use the install script, which checks for Bun first and then runs the line above:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Steven-ODell/tercet/main/install.sh | sh
+```
+
+Updating, removing and running from a checkout: [docs/install.md](docs/install.md).
+
+Then:
+
+```bash
+tercet doctor   # what tercet found: server, token, terminal, images, clipboard
+tercet          # open it
+```
+
+## Run it on the machine that has your T3 server
+
+tercet talks to `http://127.0.0.1:3773` by default, the address `t3` serves on. On first start
+it asks the local `t3` command for a session token (`t3 auth session issue`) and keeps it in
+`~/.config/tercet/token`, so the `t3` command must be on PATH.
+
+tercet works with the projects and agents your server already has. Add a project in the web
+app or with `t3 project add <folder>`, and set up at least one provider (Codex, Claude and so
+on) there too.
+
+To use it from another computer, SSH to the server machine and run `tercet` there. Use whatever
+you already use to reach that machine; tercet adds no tunnels or pairing. Copying text still
+reaches the computer you type on through OSC 52 if your terminal allows it. For a server
+elsewhere, set `server.url` and a `server.tokenFile` you issued yourself.
+
+## Terminals
+
+| Terminal                | Images                              | Tested                                      |
+| ----------------------- | ----------------------------------- | ------------------------------------------- |
+| Ghostty on Linux        | Kitty graphics                      | yes, daily use                              |
+| kitty                   | Kitty graphics, expected            | untested                                    |
+| WezTerm                 | Kitty graphics, expected            | untested                                    |
+| foot                    | Sixel, expected                     | untested                                    |
+| iTerm2                  | Sixel if it reports it, else blocks | untested                                    |
+| Alacritty               | colored blocks, expected            | untested                                    |
+| macOS Terminal          | colored blocks, expected            | untested                                    |
+| tmux 3.8 inside Ghostty | Kitty graphics through passthrough  | yes, `tercet doctor` and the acceptance run |
+| zellij, screen          | colored blocks, expected            | untested                                    |
+
+macOS is tested in CI only (typecheck, unit tests, the bundle). Windows is not supported.
+"Expected" follows from how tercet detects images: it asks the terminal, and uses whatever the
+terminal answers. Run `tercet doctor` in yours and see the `images` line. Reports of other
+terminals are welcome.
+
+## Settings
+
+One JSON-with-comments file, `~/.config/tercet/settings.json` (or under `$XDG_CONFIG_HOME`).
+Every key is optional, and a typo stops startup with the line and key named. For example:
+
+```jsonc
+{
+  "defaults": { "provider": "codex", "model": "gpt-5.5", "sendShortcut": "enter" },
+  "theme": { "preset": "cyberdream" }, // or "light", or "ansi" for 16-color terminals
+  "icons": "unicode", // "nerd" with a Nerd Font, "ascii" for no glyphs at all
+  "keys": { "palette": "Ctrl+k", "focusUp": "Alt+k" },
+  "launchers": { "terminal": ["foot", "-D", "{cwd}"], "editor": "nvim" },
+  "commands": {
+    // A [run] button on shell code blocks: runs the block in a new foot window, in the
+    // thread's folder, and leaves a shell open there.
+    "run": ["foot", "-D", "{cwd}", "bash", "-c", "eval \"$1\"; exec bash", "run", "{text}"],
+  },
+}
+```
+
+Commands run without a shell, and thread text always stays one argument. Every key, the command
+templates and their placeholders: [docs/settings.md](docs/settings.md). Images and video:
+[docs/media.md](docs/media.md).
+
+## Keys
+
+`?` shows the cheat sheet in the app and `tercet keys` prints it, both built from your current
+bindings. The defaults:
+
+| Key                                   | Does                                             |
+| ------------------------------------- | ------------------------------------------------ |
+| `Ctrl+p`                              | palette: jump to a thread or run a thread action |
+| `Ctrl+n`                              | new thread                                       |
+| `Ctrl+/`                              | search threads                                   |
+| `Alt+m`, `Alt+e`                      | model, effort and permissions                    |
+| `Alt+f`, `Alt+d`                      | files, diff                                      |
+| `Alt+j`                               | the thread's terminal                            |
+| `Alt+h`, `Ctrl+j`, `Ctrl+k`, `Ctrl+l` | move between panes                               |
+| `Esc`                                 | close an overlay, or go to the next pane         |
+| `h j k l w b e`, `gg G`               | move in the transcript                           |
+| `v V`, `y yy`                         | select, yank                                     |
+| `i a o`                               | write in the composer                            |
+| `Y`, `O`                              | copy or open the block, link or selection        |
+| `Ctrl+c` twice                        | quit                                             |
+
+Alt keys need your terminal to send Esc for Alt (on macOS: "Use Option as Meta key" or
+similar). More on [keys that depend on the
+terminal](docs/settings.md#keys-that-depend-on-the-terminal).
+
+## Troubleshooting
+
+- **If you use tmux.** tercet runs fine in it, but images and the Ctrl+Shift keys need two
+  lines in `~/.tmux.conf`, then a tmux restart:
+
+  ```
+  set -g allow-passthrough on
+  set -s extended-keys on
+  ```
+
+  Without passthrough tercet draws images as colored blocks, says so on the status bar once,
+  and `tercet doctor` shows the setting. Other multiplexers (zellij, screen) are untested.
+- **Boxes or question marks instead of icons.** `"icons": "nerd"` needs a Nerd Font in the
+  terminal that draws the screen (over SSH, the one you type on). Use `"unicode"`, the default,
+  or `"ascii"`.
+- **A terminal that claims more than it can do.** Some terminals answer the image queries and
+  then draw nothing, or draw garbage. Set `"media": { "protocol": "blocks" }`, or `"none"` for
+  placeholders.
+- **"Unsupported server version".** tercet checks the T3 version before it opens. Update T3
+  Code or tercet; `tercet --ignore-version` continues at your own risk.
+- **Can't connect.** `tercet doctor` checks the server and token. A server on another port or
+  host needs `server.url`; one started with another `--base-dir` needs `server.baseDir`.
+
+## Known limits
+
+- Windows is not supported.
+- Over SSH tercet can write your local clipboard (OSC 52) but not read it, so paste from the
+  computer you type on goes through your terminal's own paste. A `commands.paste` template can
+  fetch it another way.
+- T3 Code's RPC is not a public, stable API. tercet pins the T3 versions it was tested with and
+  says so plainly when the server is newer; expect an update after a T3 release.
+- No plan-mode UI. Approvals are minimal. Browser and device views open the web app.
+
+## Credits
+
+tercet is built on [OpenTUI](https://github.com/anomalyco/opentui) and React, and vendors part of
+[T3 Code](https://github.com/pingdotgg/t3code) (MIT, T3 Tools Inc.) to speak its protocol; see
+[THIRD_PARTY.md](THIRD_PARTY.md). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+tercet is an unofficial, community client. It is not made by or affiliated with T3 Tools Inc.
+
+MIT License, Steven O'Dell.

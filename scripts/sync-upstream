@@ -1,0 +1,200 @@
+#!/usr/bin/env bun
+// Vendors the files tercet imports from upstream T3 Code (pingdotgg/t3code) into vendor/t3.
+//
+//   scripts/sync-upstream                 re-vendor the pinned tag (vendor/t3/UPSTREAM)
+//   scripts/sync-upstream v0.1.9          move the pin to another tag
+//   scripts/sync-upstream --from <dir>    use a local checkout of that tag instead of cloning
+//   scripts/sync-upstream --check         print the pinned tag and exit
+//
+// Only the transitive closure of files reached from src/ and scripts/ is copied, with each
+// package's manifest trimmed to name, version and export map. Vendored source is never edited;
+// vendor/t3/exports-patch.json adds the few subpath exports upstream has files for but does not
+// export. Running it twice with the same tag leaves the tree unchanged.
+import { spawnSync } from "node:child_process";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join, relative, resolve } from "node:path";
+
+const UPSTREAM_REPO = "https://github.com/pingdotgg/t3code";
+const root = resolve(import.meta.dir, "..");
+const vendor = join(root, "vendor/t3");
+const pinFile = join(vendor, "UPSTREAM");
+
+type Exports = Record<string, string | Record<string, string>>;
+type Manifest = { name: string; version?: string; private?: boolean; type?: string; exports?: Exports };
+
+function fail(message: string): never {
+  console.error(`sync-upstream: ${message}`);
+  process.exit(1);
+}
+
+function git(cwd: string, ...args: string[]): string {
+  const result = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
+  if (result.status !== 0) fail(`git ${args.join(" ")} failed in ${cwd}: ${result.stderr.trim()}`);
+  return result.stdout.trim();
+}
+
+function pinned(): { tag: string; commit: string } | null {
+  if (!existsSync(pinFile)) return null;
+  const fields = Object.fromEntries(
+    readFileSync(pinFile, "utf8")
+      .split("\n")
+      .filter((line) => line.includes("="))
+      .map((line) => line.split("=", 2).map((part) => part.trim()) as [string, string]),
+  );
+  return fields.tag ? { tag: fields.tag, commit: fields.commit ?? "" } : null;
+}
+
+const args = process.argv.slice(2);
+let from: string | undefined;
+let tag: string | undefined;
+for (let i = 0; i < args.length; i++) {
+  const arg = args[i]!;
+  if (arg === "--from") from = args[++i] ?? fail("--from needs a directory");
+  else if (arg === "--check") {
+    const pin = pinned() ?? fail("no pin yet; run with a tag");
+    console.log(`pinned upstream: ${pin.tag} (${pin.commit})`);
+    process.exit(0);
+  } else if (arg.startsWith("-")) fail(`unknown flag ${arg}`);
+  else tag = arg;
+}
+tag ??= pinned()?.tag ?? fail("no pinned tag; pass one, e.g. scripts/sync-upstream v0.1.8");
+
+// A local checkout must sit exactly on the tag with clean packages; otherwise clone the tag.
+let source: string;
+if (from) {
+  source = resolve(from);
+  const head = git(source, "rev-parse", "HEAD");
+  const want = git(source, "rev-parse", `${tag}^{commit}`);
+  if (head !== want) fail(`${source} is at ${head.slice(0, 11)}, not ${tag} (${want.slice(0, 11)})`);
+  if (git(source, "status", "--porcelain", "--", "packages", "LICENSE") !== "")
+    fail(`${source} has local changes under packages/; use a clean checkout`);
+} else {
+  const cache = join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "tercet", `upstream-${tag}`);
+  if (!existsSync(join(cache, ".git"))) {
+    mkdirSync(dirname(cache), { recursive: true });
+    const clone = spawnSync(
+      "git",
+      ["clone", "--quiet", "--depth", "1", "--branch", tag, UPSTREAM_REPO, cache],
+      { stdio: "inherit" },
+    );
+    if (clone.status !== 0) fail(`could not clone ${UPSTREAM_REPO} at ${tag}`);
+  }
+  source = cache;
+}
+const commit = git(source, "rev-parse", "HEAD");
+
+// Upstream package manifests by name.
+const packages = new Map<string, { dir: string; manifest: Manifest }>();
+for (const entry of readdirSync(join(source, "packages"))) {
+  const file = join(source, "packages", entry, "package.json");
+  if (!existsSync(file)) continue;
+  const manifest = JSON.parse(readFileSync(file, "utf8")) as Manifest;
+  packages.set(manifest.name, { dir: join(source, "packages", entry), manifest });
+}
+const patch = JSON.parse(readFileSync(join(vendor, "exports-patch.json"), "utf8")) as Record<
+  string,
+  Exports
+>;
+const exportsOf = (name: string): Exports => ({
+  ...packages.get(name)!.manifest.exports,
+  ...patch[name],
+});
+
+const EXTENSIONS = ["", ".ts", ".tsx", "/index.ts"];
+const asFile = (path: string) =>
+  EXTENSIONS.map((ext) => path + ext).find((f) => existsSync(f) && statSync(f).isFile()) ?? null;
+const target = (entry: string | Record<string, string> | undefined) =>
+  typeof entry === "string" ? entry : (entry?.types ?? entry?.import ?? entry?.default);
+
+const unresolved = new Set<string>();
+function resolveSpecifier(spec: string, from: string): string | null {
+  if (spec.startsWith(".")) return asFile(resolve(dirname(from), spec));
+  const match = spec.match(/^(@t3tools\/[^/]+)(\/.*)?$/);
+  if (!match || !packages.has(match[1]!)) return null;
+  const name = match[1]!;
+  const sub = "." + (match[2] ?? "");
+  const exports = exportsOf(name);
+  let entry = target(exports[sub]);
+  if (!entry)
+    for (const [key, value] of Object.entries(exports))
+      if (key.endsWith("/*") && sub.startsWith(key.slice(0, -1)))
+        entry = target(value)?.replace("*", sub.slice(key.length - 1));
+  if (!entry) {
+    unresolved.add(spec);
+    return null;
+  }
+  return asFile(join(packages.get(name)!.dir, entry));
+}
+
+// Walk imports (static, type-only, re-exports, dynamic and import() type queries).
+const IMPORT =
+  /(?:import|export)\s+(?:type\s+)?(?:[^'"]*?\s+from\s+)?["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)/g;
+const queue: string[] = [];
+const walk = (dir: string) => {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) walk(path);
+    else if (/\.tsx?$/.test(entry.name)) queue.push(path);
+  }
+};
+walk(join(root, "src"));
+walk(join(root, "scripts"));
+const seen = new Set<string>();
+while (queue.length > 0) {
+  const file = queue.pop()!;
+  if (seen.has(file)) continue;
+  seen.add(file);
+  for (const match of readFileSync(file, "utf8").matchAll(IMPORT)) {
+    const next = resolveSpecifier((match[1] ?? match[2])!, file);
+    if (next) queue.push(next);
+  }
+}
+if (unresolved.size > 0)
+  fail(`not exported upstream at ${tag}: ${[...unresolved].sort().join(", ")}`);
+
+const packagesDir = join(source, "packages");
+const files = [...seen].filter((f) => f.startsWith(packagesDir + "/")).sort();
+const used = new Set(files.map((f) => relative(packagesDir, f).split("/")[0]!));
+
+// Build into a sibling directory, then swap it in, so a failed run leaves the old copy.
+const next = join(vendor, "packages.next");
+rmSync(next, { recursive: true, force: true });
+for (const file of files) {
+  const out = join(next, relative(packagesDir, file));
+  mkdirSync(dirname(out), { recursive: true });
+  copyFileSync(file, out);
+}
+for (const { dir, manifest } of packages.values()) {
+  const folder = relative(packagesDir, dir);
+  if (!used.has(folder)) continue;
+  const trimmed: Manifest = {
+    name: manifest.name,
+    ...(manifest.version ? { version: manifest.version } : {}),
+    private: true,
+    type: manifest.type ?? "module",
+    exports: exportsOf(manifest.name),
+  };
+  writeFileSync(join(next, folder, "package.json"), JSON.stringify(trimmed, null, 2) + "\n");
+}
+rmSync(join(vendor, "packages"), { recursive: true, force: true });
+renameSync(next, join(vendor, "packages"));
+copyFileSync(join(source, "LICENSE"), join(vendor, "LICENSE"));
+const bytes = files.reduce((sum, f) => sum + statSync(f).size, 0);
+writeFileSync(
+  pinFile,
+  `# Written by scripts/sync-upstream. Source: ${UPSTREAM_REPO}\ntag=${tag}\ncommit=${commit}\nfiles=${files.length}\nbytes=${bytes}\n`,
+);
+console.log(
+  `pinned upstream: ${tag} (${commit}); vendored ${files.length} files, ${bytes} bytes, ${used.size} packages`,
+);

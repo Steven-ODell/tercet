@@ -1,0 +1,31 @@
+{
+  "name": "@t3tools/provider-acp-registry",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./client": {
+      "types": "./src/client.ts",
+      "import": "./src/client.ts"
+    },
+    "./settings": {
+      "types": "./src/settings.ts",
+      "import": "./src/settings.ts"
+    },
+    "./server": {
+      "types": "./src/server.ts",
+      "import": "./src/server.ts"
+    },
+    "./testing": {
+      "types": "./src/testing.ts",
+      "import": "./src/testing.ts"
+    },
+    "./server/AcpRegistrySupport": {
+      "types": "./src/server/AcpRegistrySupport.ts",
+      "import": "./src/server/AcpRegistrySupport.ts"
+    },
+    "./server/AcpRegistryRuntimeCoordinator": {
+      "types": "./src/server/AcpRegistryRuntimeCoordinator.ts",
+      "import": "./src/server/AcpRegistryRuntimeCoordinator.ts"
+    }
+  }
+}

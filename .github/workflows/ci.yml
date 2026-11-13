@@ -1,0 +1,60 @@
+# Typecheck and tests on Linux and macOS, plus a canary that re-vendors upstream T3 Code's main
+# branch and typechecks against it. The canary may fail without failing the run: it only shows
+# early when upstream is about to break tercet. Nothing here opens issues or pushes.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    if: github.event_name != 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      # The same Bun as the one that built dist/tercet.js, so the bundle check compares like with like.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      # tmux rigs skip where tmux is missing; sandbox tests need TERCET_SANDBOX_TEST=1 and skip here.
+      - run: bun test
+      - name: dist/tercet.js matches the source
+        run: scripts/build --check
+      - name: the bundle starts
+        run: dist/tercet.js --version
+
+  canary:
+    name: canary (upstream main)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      # Clones upstream's main and rewrites vendor/t3 in this throwaway checkout only.
+      - run: scripts/sync-upstream main
+      - run: bun install
+      - run: bun run typecheck

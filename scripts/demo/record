@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Records the README demo: drives scripts/demo/app.tsx (made-up threads, no server) in a private
+# tmux server, saves `capture-pane -e` after every step, then render.py draws the frames and the
+# GIF. Nothing appears on screen. Needs tmux, bun and uv (render.py uses pyte and Pillow).
+#   scripts/demo/record [OUT_DIR]   default /tmp/tercet-demo; writes demo.gif and png/*.png there
+set -euo pipefail
+R=$(cd "$(dirname "$0")/../.." && pwd)
+DIR=${1:-/tmp/tercet-demo}
+OUT=$DIR/frames
+XDG=$(mktemp -d)
+T() { tmux -L tercet-demo "$@"; }
+T kill-server 2>/dev/null || true
+rm -rf "$DIR"; mkdir -p "$OUT"; : > $DIR/durations
+T -f /dev/null new -d -s demo -x 120 -y 38 -c "$R" \
+  "COLORTERM=truecolor XDG_CONFIG_HOME=$XDG bun scripts/demo/app.tsx 2>$DIR/app.log"
+T set -g status off
+sleep 3
+i=0
+shot() { sleep "${2:-0.35}"; T capture-pane -e -p -t demo > "$OUT/$(printf %03d $i).ans"; echo "$1" >> $DIR/durations; i=$((i+1)); }
+key() { T send -t demo "$@"; }
+typeit() { local s=$1 c; for ((k=0;k<${#s};k++)); do c=${s:k:1}; T send -t demo -l "$c"; shot "${2:-0.09}" 0.06; done; }
+shot 1.5 0
+key j; shot 0.3; key j; shot 0.3
+key Enter; shot 2.2 0.6
+key C-l; shot 0.4; key ']'; shot 1.5
+key M-h; shot 0.3; key j; shot 0.3; key Enter; shot 2.3 0.8
+key j; shot 0.3; key Enter; shot 0.6; key M-d; shot 0.8 0.8; key Enter; shot 2.2 0.6
+key M-c; shot 0.4
+key C-p; shot 0.5; typeit "retry" 0.1; shot 0.8; key Enter; shot 0.8 0.5
+key C-j; shot 0.3; typeit "Looks good, ship it" 0.05; shot 1.5
+T kill-server
+rm -rf "$XDG"
+uv run -q --no-project --with pyte --with pillow python "$R/scripts/demo/render.py" "$OUT" "$DIR/durations" "$DIR/demo.gif" --png-dir "$DIR/png"

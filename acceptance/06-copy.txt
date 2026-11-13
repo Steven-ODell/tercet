@@ -1,0 +1,40 @@
+tercet · live · threads=1 · Supervised
+› opencode/flint-40b-free · effort high · ○ Context unknown
+↱ branch unknown · /tmp/tercet-sandbox.XXXXXX/work/demo-app
+╭─≡ Threads──────────────────╮╭─● ¶ Transcript─────────────────────────────────────────────────────────────────────────╮
+│[h] All threads             ││user                                                                                    │
+│                            ││Reply exactly acceptance-stream-ok. Do not use tools or change files.                   │
+│  tercet acceptance sandbox ││                                                                                        │
+│  › · ■ demo-app         now││────────────────────────────────────────────────────────────────────────────────────────│
+│  ▸ Settled (0)             ││[+] Thought · 1 work items                                                              │
+│                            ││assistant                                                                               │
+│                            ││acceptance-stream-ok                                                                    │
+│                            ││[+] checkpoint · completed · checkpoint                                                 │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││[copy]                                                                                  │
+│                            ││✓ yank                                                                                  │
+│                            ││Following tail · {/} work · Enter expand                                                │
+│                            ││                                                                                        │
+│                            │╰────────────────────────────────────────────────────────────────────────────────────────╯
+│                            │╭─» Composer─────────────────────────────────────────────────────────────────────────────╮
+│                            ││Message · @file · /skill · :emoji                                                       │
+╰────────────────────────────╯╰────────────────────────────────────────────────────────────────────────────────────────╯
+Focus: transcript
+Alt+o Web  Alt+l Launchers  Alt+b Sidebar  Alt+m Model  Alt+e Effort / Permissions  Ctrl+p Palette  ? Help
+Alt+c Close side panel  Esc Close overlay / next pane

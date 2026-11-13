@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Typecheck, unit tests, the dist/tercet.js freshness check and the vanilla-server acceptance run
+# (when `bgrun` is installed).
+# Each step's output goes to a log; a failing step prints its tail. The last line is the summary
+# with the real exit status.
+set -uo pipefail
+root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
+logs=$(mktemp -d /tmp/tercet-check.XXXXXX)
+summary=()
+status=0
+step() {
+  local name=$1; shift
+  (cd "$root" && "$@") > "$logs/$name.log" 2>&1
+  local code=$?
+  summary+=("$name=$code")
+  if [[ $code != 0 ]]; then
+    status=1
+    echo "--- $name failed (exit $code), last lines of $logs/$name.log:"
+    tail -n 30 "$logs/$name.log"
+  fi
+}
+step typecheck bun run typecheck
+step test bun test
+step bundle scripts/build --check
+# The acceptance rig runs its jobs through the maintainer's `bgrun` (off-screen, muted, killable).
+# Without it the step is skipped, and the summary says so; CI does not run it either.
+if command -v bgrun >/dev/null 2>&1; then
+  step acceptance bash scripts/acceptance.sh
+else
+  summary+=("acceptance=skipped(no-bgrun)")
+fi
+tests=$(grep -E '^ *[0-9]+ (pass|skip|fail)$' "$logs/test.log" | awk '{printf "%s%s %s", (NR>1?", ":""), $1, $2}')
+echo "check: ${summary[*]}${tests:+ ($tests)} logs $logs -> exit $status"
+exit "$status"

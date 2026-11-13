@@ -1,0 +1,15 @@
+{
+  "name": "@t3tools/source-control-bitbucket",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./shared/definition": {
+      "types": "./src/shared/definition.ts",
+      "import": "./src/shared/definition.ts"
+    },
+    "./server/driver": {
+      "types": "./src/server/driver.ts",
+      "import": "./src/server/driver.ts"
+    }
+  }
+}

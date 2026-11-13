@@ -1,0 +1,13 @@
+{
+  "@t3tools/client-runtime": {
+    "./rpc/session": { "types": "./src/rpc/session.ts", "default": "./src/rpc/session.ts" },
+    "./state/shell-reducer": {
+      "types": "./src/state/shellReducer.ts",
+      "default": "./src/state/shellReducer.ts"
+    },
+    "./state/thread-shell": {
+      "types": "./src/state/threadShell.ts",
+      "default": "./src/state/threadShell.ts"
+    }
+  }
+}

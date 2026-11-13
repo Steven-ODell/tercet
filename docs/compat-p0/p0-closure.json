@@ -1,0 +1,123 @@
+{
+ "files": 269,
+ "bytes": 2539364,
+ "tests": 0,
+ "byPkg": {
+  "contracts": [
+   78,
+   1061117
+  ],
+  "client-runtime": [
+   101,
+   930948
+  ],
+  "shared": [
+   49,
+   413685
+  ],
+  "source-control-core": [
+   2,
+   45728
+  ],
+  "source-control-definitions": [
+   1,
+   1804
+  ],
+  "source-control-gitcafe": [
+   2,
+   4127
+  ],
+  "source-control-gitlab": [
+   3,
+   7623
+  ],
+  "source-control-github": [
+   4,
+   12532
+  ],
+  "source-control-forgejo": [
+   2,
+   6550
+  ],
+  "source-control-cursor-origin": [
+   2,
+   4101
+  ],
+  "source-control-bitbucket": [
+   2,
+   6071
+  ],
+  "source-control-azure-devops": [
+   2,
+   12417
+  ],
+  "provider-pi": [
+   2,
+   2063
+  ],
+  "provider-core": [
+   2,
+   4567
+  ],
+  "provider-opencode": [
+   2,
+   2579
+  ],
+  "provider-muse": [
+   2,
+   3595
+  ],
+  "provider-kiro": [
+   2,
+   3367
+  ],
+  "provider-grok": [
+   2,
+   2341
+  ],
+  "provider-fx": [
+   2,
+   2736
+  ],
+  "provider-cursor": [
+   2,
+   2251
+  ],
+  "provider-acp-registry": [
+   2,
+   5641
+  ],
+  "secret-provider-definitions": [
+   1,
+   309
+  ],
+  "secret-provider-onepassword": [
+   1,
+   1794
+  ],
+  "secret-provider-core": [
+   1,
+   1418
+  ]
+ },
+ "missing": [],
+ "externalFromPackages": [
+  "@noble/hashes"
+ ],
+ "externalAll": [
+  "@noble/hashes",
+  "@opentui/core",
+  "@opentui/react",
+  "@xterm/headless",
+  "bun:test",
+  "effect",
+  "node:child_process",
+  "node:events",
+  "node:fs",
+  "node:os",
+  "node:path",
+  "node:stream",
+  "node:url",
+  "react"
+ ]
+}

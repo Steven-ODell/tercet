@@ -1,0 +1,5 @@
+node_modules/
+.t3/
+/*.log
+.DS_Store
+/vendor/t3/packages.next/

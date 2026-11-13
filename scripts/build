@@ -1,0 +1,54 @@
+#!/usr/bin/env bun
+// Bundles src/main.tsx into dist/tercet.js, the file `bun install -g github:...` runs.
+//
+//   scripts/build           rebuild dist/tercet.js
+//   scripts/build --check   rebuild into a temp dir and exit 1 if dist/tercet.js differs
+//
+// dist/tercet.js is committed because a global git install runs no lifecycle scripts (Bun blocks
+// them) and cannot resolve the workspace:* vendored packages, so it cannot build anything
+// itself. Everything is inlined except @opentui/core, which loads its platform's native library
+// and parser worker from its own package at runtime; it is the one runtime dependency.
+//
+// NODE_ENV is defined as "production" here, so the bundle carries React's production build.
+// Bun fixes NODE_ENV when it transpiles; setting it at runtime does nothing. Tests and fixture
+// apps run from source and stay on the development build, which act() needs.
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+
+const root = resolve(import.meta.dir, "..");
+const outfile = join(root, "dist/tercet.js");
+const check = process.argv.includes("--check");
+const unknown = process.argv.slice(2).filter((arg) => arg !== "--check");
+if (unknown.length > 0) {
+  console.error(`build: unknown argument ${unknown[0]}; usage: scripts/build [--check]`);
+  process.exit(2);
+}
+
+const outdir = check ? mkdtempSync(join(tmpdir(), "tercet-build.")) : join(root, "dist");
+const result = await Bun.build({
+  entrypoints: [join(root, "src/main.tsx")],
+  outdir,
+  naming: "tercet.js",
+  target: "bun",
+  define: { "process.env.NODE_ENV": '"production"' },
+  external: ["@opentui/core", "@opentui/core/*"],
+  banner: "#!/usr/bin/env bun",
+});
+if (!result.success) {
+  for (const log of result.logs) console.error(log);
+  process.exit(1);
+}
+const built = join(outdir, "tercet.js");
+if (check) {
+  const same = existsSync(outfile) && readFileSync(built).equals(readFileSync(outfile));
+  rmSync(outdir, { recursive: true, force: true });
+  if (!same) {
+    console.error("build: dist/tercet.js is stale; run `bun run build` and commit it");
+    process.exit(1);
+  }
+  console.log("build: dist/tercet.js is up to date");
+} else {
+  await Bun.$`chmod 755 ${built}`;
+  console.log(`build: wrote dist/tercet.js (${(Bun.file(built).size / 1e6).toFixed(2)} MB)`);
+}

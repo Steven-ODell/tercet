@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Cuts a release on the local main branch: sets the version, rebuilds dist/tercet.js, runs the
+# full check, prepends release notes to CHANGELOG.md, commits and makes an annotated tag whose
+# message is the same notes. It never pushes; it prints the commands that publish.
+#
+#   scripts/release 0.1.0               release v0.1.0
+#   scripts/release 0.1.0 --dry-run     print the notes and change nothing
+#   scripts/release 0.1.0 --skip-check  skip `bun run check` (only right after it passed)
+#
+# The notes list every commit subject since the previous v* tag (or since the start).
+set -euo pipefail
+root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
+
+usage() { echo 'usage: scripts/release VERSION [--dry-run] [--skip-check]' >&2; exit 2; }
+version=''
+dry=0
+skip_check=0
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) dry=1 ;;
+    --skip-check) skip_check=1 ;;
+    -*) usage ;;
+    *) [[ -z "$version" ]] || usage; version=$arg ;;
+  esac
+done
+[[ -n "$version" ]] || usage
+version=${version#v}
+fail() { echo "release: $*" >&2; exit 1; }
+
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || fail "$version is not X.Y.Z"
+tag="v$version"
+branch=$(git -C "$root" symbolic-ref --short HEAD 2>/dev/null || echo detached)
+[[ "$branch" == main ]] || fail "on $branch; releases are cut from main"
+[[ -z "$(git -C "$root" status --porcelain)" ]] || fail "the working tree has changes; commit or stash them"
+git -C "$root" rev-parse -q --verify "refs/tags/$tag" >/dev/null && fail "tag $tag already exists"
+
+previous=$(git -C "$root" describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+range=${previous:+$previous..}HEAD
+changes=$(git -C "$root" log --no-merges --format='- %s (%h)' "$range" | grep -v '^- release v' || true)
+[[ -n "$changes" ]] || fail "no commits since $previous"
+server=$(grep -E '^export const (supportedRange|PINNED_SERVER_VERSION)' "$root/src/client/compat.ts" \
+  | sed -E 's/.*(supportedRange|PINNED_SERVER_VERSION) = "([^"]*)".*/\1=\2/')
+range_line=$(sed -n 's/^supportedRange=//p' <<<"$server")
+pinned_line=$(sed -n 's/^PINNED_SERVER_VERSION=//p' <<<"$server")
+[[ -n "$range_line" && -n "$pinned_line" ]] || fail "could not read the supported T3 range from src/client/compat.ts"
+
+notes=$(cat <<EOF
+## tercet $version ($(date +%Y-%m-%d))
+
+Works with T3 Code servers $range_line, tested on $pinned_line.
+
+Changes${previous:+ since $previous}:
+
+$changes
+EOF
+)
+
+if [[ $dry == 1 ]]; then
+  printf '%s\n' "$notes"
+  echo
+  echo "release: dry run; nothing changed (would commit 'release $tag' and tag $tag)"
+  exit 0
+fi
+
+(cd "$root" && bun -e '
+  const file = "package.json";
+  const text = await Bun.file(file).text();
+  const next = text.replace(/("version":\s*)"[^"]*"/, `$1"${process.argv[1]}"`);
+  if (next === text && !text.includes(`"version": "${process.argv[1]}"`)) throw new Error("no version field");
+  await Bun.write(file, next);
+' "$version")
+"$root/scripts/build"
+built=$("$root/dist/tercet.js" --version | head -n 1)
+[[ "$built" == "tercet $version" ]] || fail "dist/tercet.js reports '$built', expected 'tercet $version'"
+if [[ $skip_check == 0 ]]; then
+  "$root/scripts/check" || fail "bun run check failed; package.json and dist/tercet.js are modified, nothing committed"
+fi
+
+changelog="$root/CHANGELOG.md"
+{
+  echo '# Changelog'
+  echo
+  printf '%s\n' "$notes"
+  if [[ -f "$changelog" ]]; then
+    echo
+    tail -n +3 "$changelog"
+  fi
+} > "$changelog.next"
+mv "$changelog.next" "$changelog"
+
+git -C "$root" add package.json dist/tercet.js CHANGELOG.md
+git -C "$root" commit -q -m "release $tag"
+git -C "$root" tag -a "$tag" --cleanup=whitespace -F - <<<"$notes"
+echo "release: committed 'release $tag' and tagged $tag (nothing pushed). To publish:"
+echo
+echo "  git push origin main $tag"
+echo "  gh release create $tag --verify-tag --notes-from-tag"

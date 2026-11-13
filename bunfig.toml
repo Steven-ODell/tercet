@@ -1,0 +1,3 @@
+[install]
+# Vendored T3 packages declare no dependencies; they resolve effect and each other from the root.
+linker = "hoisted"

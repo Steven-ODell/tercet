@@ -1,0 +1,40 @@
+tercet · live · threads=1 · Supervised
+› opencode/flint-40b-free · effort default · ○ Context unknown
+↱ branch unknown · /tmp/tercet-sandbox.XXXXXX/work/demo-app
+╭─● ≡ Threads────────────────╮╭─¶ Transcript───────────────────────────────────────────────────────────────────────────╮
+│[h] All threads             ││tercet acceptance sandbox                                                               │
+│                            ││Loading transcript…                                                                     │
+│  tercet acceptance sandbox ││                                                                                        │
+│  › · ■ demo-app         now││                                                                                        │
+│  ▸ Settled (0)             ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            ││                                                                                        │
+│                            │╰────────────────────────────────────────────────────────────────────────────────────────╯
+│                            │╭─» Composer─────────────────────────────────────────────────────────────────────────────╮
+│                            ││Message · @file · /skill · :emoji                                                       │
+╰────────────────────────────╯╰────────────────────────────────────────────────────────────────────────────────────────╯
+Focus: sidebar
+Alt+o Web  Alt+l Launchers  Alt+b Sidebar  Alt+m Model  Alt+e Effort / Permissions  Ctrl+p Palette  ? Help
+Alt+c Close side panel  Esc Close overlay / next pane
