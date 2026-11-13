@@ -1,6 +1,6 @@
 import { access } from "node:fs/promises";
 import { homedir, release } from "node:os";
-import { connectionConfig, type Config } from "./client/config";
+import { connectionConfig, isLoopback, type Config } from "./client/config";
 import { readOptional } from "./client/platform";
 import {
   SettingsError,
@@ -170,7 +170,7 @@ const imagesReport = (
 
 async function serverReport(config: Config, probes: DoctorProbes): Promise<DoctorReport["server"]> {
   const tokenPresent = await probes.exists(config.tokenFile);
-  const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(new URL(config.url).hostname);
+  const local = isLoopback(new URL(config.url).hostname);
   const token = tokenPresent
     ? "present"
     : config.managedToken && local

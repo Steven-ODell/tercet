@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { measureMarkdown } from "./markdown";
 import { TranscriptViewport } from "./transcript-viewport";
-import { loadPreviewImage, attachmentSource } from "./image-preview-source";
+import { assertPublicUrl, loadPreviewImage, attachmentSource } from "./image-preview-source";
+import { media, setMedia } from "./media";
 
 const text = "![shore](/tmp/shore.jpg)\n![file URL](file:///tmp/shore.jpg)";
 test("local Markdown images reserve stable rows, preserve file URLs, and ignore code fences", () => {
@@ -172,5 +173,103 @@ test("speaker alignment moves the entire image box and its clickable corner acti
     });
     expect(opened).toHaveLength(3);
     view.renderer.destroy();
+  }
+});
+
+test("remote images never reach loopback or private addresses, redirects included", async () => {
+  const hits: string[] = [];
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch(request): Response {
+      const path = new URL(request.url).pathname;
+      hits.push(path);
+      return path === "/start"
+        ? Response.redirect(`http://127.0.0.1:${server.port}/secret`, 302)
+        : new Response("secret");
+    },
+  });
+  const mint = async () => "unused";
+  try {
+    for (const url of [
+      `http://127.0.0.1:${server.port}/secret`,
+      `http://[::ffff:127.0.0.1]:${server.port}/secret`,
+      "http://[::1]/x",
+      "http://10.1.2.3/x",
+      "http://169.254.169.254/latest/meta-data",
+      "http://192.168.1.1/x",
+      "http://100.100.100.100/x",
+      "http://[fd00::1]/x",
+    ])
+      await expect(loadPreviewImage(url, undefined, mint)).rejects.toThrow("private network");
+    // A name that resolves to a private address is refused before any request.
+    await expect(
+      assertPublicUrl(new URL("http://intranet.example/"), async () => ["10.0.0.7"]),
+    ).rejects.toThrow("private network");
+    await assertPublicUrl(new URL("https://example.com/"), async () => ["93.184.215.14"]);
+    // "localhost" passes as public here only so the first hop reaches the server; its redirect
+    // to 127.0.0.1 is checked again and refused.
+    await expect(
+      loadPreviewImage(`http://localhost:${server.port}/start`, undefined, mint, async () => [
+        "93.184.215.14",
+      ]),
+    ).rejects.toThrow("private network");
+    expect(hits).toEqual(["/start"]);
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("remote images wait for [load] and never load when media.protocol is none", async () => {
+  const calls: string[] = [];
+  const effects = {
+    copy() {},
+    loadImage: async (source: string) => {
+      calls.push(source);
+      throw Error("offline");
+    },
+  };
+  const source = "https://tracker.example/pixel.png";
+  const items = [{ id: "a", kind: "assistant", text: `![pixel](${source})\n/local\n` }];
+  const view = await testRender(
+    <TranscriptViewport items={items} width={60} height={16} effects={effects} />,
+    { width: 60, height: 16 },
+  );
+  await act(async () => view.renderOnce());
+  expect(calls).toEqual([]);
+  await act(async () => {
+    await view.mockInput.pressKey("g");
+    await view.mockInput.pressKey("g");
+  });
+  await act(async () => view.renderOnce());
+  expect(view.captureCharFrame()).toContain("[image pixel] (remote)");
+  const lines = view.captureCharFrame().split("\n");
+  const y = lines.findIndex((line) => line.includes("[load]"));
+  await act(async () => {
+    await view.mockMouse.click(lines[y]!.indexOf("[load]") + 1, y);
+  });
+  await act(async () => view.renderOnce());
+  expect(calls).toEqual([source]);
+  view.renderer.destroy();
+
+  const before = media();
+  setMedia({ rung: "none", reason: "test" });
+  try {
+    // Even the image the user already let in stays unloaded: there is nothing to draw it with.
+    const plain = await testRender(
+      <TranscriptViewport items={items} width={60} height={16} effects={effects} />,
+      { width: 60, height: 16 },
+    );
+    await act(async () => {
+      await plain.mockInput.pressKey("g");
+      await plain.mockInput.pressKey("g");
+    });
+    await act(async () => plain.renderOnce());
+    expect(calls).toEqual([source]);
+    expect(plain.captureCharFrame()).toContain("[image pixel] (remote)");
+    expect(plain.captureCharFrame()).not.toContain("[load]");
+    plain.renderer.destroy();
+  } finally {
+    setMedia(before, before.video);
   }
 });

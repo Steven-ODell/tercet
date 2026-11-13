@@ -23,3 +23,17 @@ test.skipIf(!existsSync(join(root, "dist/tercet.js")))("the bundle is the produc
   expect(code).toBe(0);
   expect(out).toBe(`tercet ${version}\n${rangeLine}\n`);
 });
+
+test("--help prints usage and exits 0; an unknown option says what was wrong", () => {
+  const help = run([process.execPath, "src/main.tsx", "--help"]);
+  expect(help.code).toBe(0);
+  expect(help.out).toContain("Usage: tercet [options]");
+  expect(help.out).toContain("--token-file PATH");
+  const bad = Bun.spawnSync([process.execPath, "src/main.tsx", "--wat"], {
+    cwd: root,
+    env,
+    stderr: "pipe",
+  });
+  expect(bad.exitCode).toBe(1);
+  expect(bad.stderr.toString()).toContain("tercet: unknown option --wat; see tercet --help");
+});

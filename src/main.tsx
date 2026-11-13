@@ -4,7 +4,7 @@ import {
   clearKittyBeforeSwitch,
   kittyStdout,
 } from "./kitty-output";
-import { loadPreviewImage, attachmentSource } from "./client/image-preview-source";
+import { loadPreviewImage, attachmentSource, isRemoteSource } from "./client/image-preview-source";
 import { imageOpenAction, resolveMediaTarget } from "./client/image-open";
 import {
   decideMedia,
@@ -23,7 +23,7 @@ import { createRoot } from "@opentui/react";
 import { sshHostLookup, terminalActions } from "./actions";
 import { hostActions, systemHost } from "./portable";
 import { Hello } from "./hello";
-import { connectionConfig } from "./client/config";
+import { ConfigError, USAGE, connectionConfig, isLoopback } from "./client/config";
 import { SettingsError, migrateLegacyDir } from "./client/settings";
 import { TERCET_VERSION, runDoctor } from "./doctor";
 import { platform, readOptional } from "./client/platform";
@@ -44,10 +44,13 @@ import { asciiFrame, iconMode } from "./client/icons";
 import { theme } from "./client/theme";
 import { runKeys } from "./keys";
 
+const args = process.argv.slice(2);
+if (args.includes("--help") || args.includes("-h")) {
+  console.log(USAGE);
+  process.exit(0);
+}
 // Before anything reads the settings directory, so doctor and keys see the moved one too.
-const migrated = process.argv.includes("--version")
-  ? undefined
-  : migrateLegacyDir(process.env, homedir());
+const migrated = args.includes("--version") ? undefined : migrateLegacyDir(process.env, homedir());
 if (migrated) process.stderr.write(`${migrated}\n`);
 
 if (process.argv[2] === "doctor") process.exit(await runDoctor(process.argv.slice(3)));
@@ -203,7 +206,7 @@ try {
         return openUrl(attachment ? await client!.pageUrl(attachment.id, attachment.mime) : source);
       };
     }
-    const attachmentsDir = new URL(config.url).hostname.match(/^(localhost|127\.0\.0\.1|\[::1\])$/)
+    const attachmentsDir = isLoopback(new URL(config.url).hostname)
       ? `${config.baseDir}/userdata/attachments`
       : undefined;
     if (effects.openPath)
@@ -212,10 +215,11 @@ try {
       resolveMediaTarget(source, cwd, attachmentsDir, (id, mime) => client!.pageUrl(id, mime));
     const playable = (source: string) => ["video", "audio"].includes(mediaKind(source));
     // A missing ffmpeg leaves probeMedia out: the card shows name and size, never an error.
+    // A transcript's own http(s) URL is never probed: ffmpeg would fetch it, redirects and all.
     effects.inspectMedia = async (source, cwd) => {
       const { target, size } = await mediaTarget(source, cwd);
       const probed =
-        playable(source) && effects.probeMedia
+        playable(source) && effects.probeMedia && !isRemoteSource(source)
           ? await effects.probeMedia(target).catch(() => ({}))
           : {};
       return { ...probed, size };
@@ -263,7 +267,7 @@ try {
 } catch (error) {
   activeRenderer?.destroy();
   console.error(
-    error instanceof SettingsError
+    error instanceof SettingsError || error instanceof ConfigError
       ? `tercet: ${error.message}`
       : "tercet: connection/configuration failed; check --url, --base-dir and --token-file.",
   );

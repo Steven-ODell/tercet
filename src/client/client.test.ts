@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import { AuthStandardClientScopes, type OrchestrationV2ShellSnapshot } from "@t3tools/contracts";
-import { connectionConfig } from "./config";
+import { ConfigError, connectionConfig } from "./config";
 import {
   createClient,
   UNREADABLE_SERVER,
@@ -371,4 +371,32 @@ test("CLI token parser excludes startup notices and rejects missing/ambiguous cr
   expect(() => issuedToken("Startup notice only")).toThrow();
   expect(() => issuedToken(`${token}\n${token}`)).toThrow();
   expect(() => issuedToken("bad.signature")).toThrow();
+});
+
+test("a server on another machine needs https and its own token file", async () => {
+  const read = async () => undefined;
+  const reject = (args: string[]) => expect(connectionConfig(args, read, "/fake", {})).rejects;
+  // The default token file holds the local server's credential and never goes elsewhere.
+  await reject(["--url", "https://box:3773"]).toThrow("pass --token-file");
+  await reject(["--url", "https://box:3773", "--read-only"]).toThrow("pass --token-file");
+  await reject(["--url", "http://box:3773", "--token-file", "/t"]).toThrow("needs https://");
+  await reject(["--url", "http://10.0.0.5:3773", "--token-file", "/t"]).toThrow("needs https://");
+  await reject(["--url", "http://secret:hunter2@box"]).toThrow(ConfigError);
+  await connectionConfig(["--url", "http://secret:hunter2@box"], read, "/fake", {}).catch(
+    (error: Error) => expect(error.message).not.toContain("hunter2"),
+  );
+  await reject(["--url", "not a url"]).toThrow("--url is not a valid URL");
+  await reject(["--help-me"]).toThrow("unknown option --help-me; see tercet --help");
+  const remote = await connectionConfig(
+    ["--url", "https://box:3773", "--token-file", "/t"],
+    read,
+    "/fake",
+    {},
+  );
+  expect(remote).toMatchObject({ url: "https://box:3773", managedToken: false, autostart: false });
+  for (const url of ["http://localhost:4000", "http://127.0.0.2:4000", "http://[::1]:4000"]) {
+    const local = await connectionConfig(["--url", url], read, "/fake", {});
+    expect(local.managedToken).toBe(true);
+    expect(local.tokenFile).toBe("/fake/.config/tercet/token");
+  }
 });

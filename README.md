@@ -48,7 +48,8 @@ on) there too.
 To use it from another computer, SSH to the server machine and run `tercet` there. Use whatever
 you already use to reach that machine; tercet adds no tunnels or pairing. Copying text still
 reaches the computer you type on through OSC 52 if your terminal allows it. For a server
-elsewhere, set `server.url` and a `server.tokenFile` you issued yourself.
+elsewhere, set an `https://` `server.url` and a `server.tokenFile` you issued yourself; tercet
+will not send this machine's token anywhere but loopback.
 
 ## Terminals
 

@@ -15,6 +15,13 @@ method that works in your terminal, so a terminal without graphics still gets so
 
 Every card has `[open]`, which opens the file with your opener or player.
 
+An http(s) image linked in a message's markdown is not fetched until you click `[load]` on its
+card, since anyone who can write to the conversation could point it at a tracker or at a
+service on your machine. Once loaded it stays loaded for the session. Even then tercet refuses
+loopback, private, link-local and CGNAT addresses (Tailscale's included), checking every
+redirect. With `none` such images never load. Linked video and audio are never probed with
+ffmpeg; `[open]` still plays them. Attachments come from your own server and load as before.
+
 Terminals with Kitty graphics include kitty, Ghostty and WezTerm; foot is one with Sixel.
 Everything else gets blocks, which work in any terminal with 256 colors or true color.
 

@@ -8,7 +8,7 @@ import * as Schema from "effect/Schema";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { AuthStandardClientScopes } from "@t3tools/contracts";
-import type { Config } from "./config";
+import { isLoopback, type Config } from "./config";
 import {
   listPreviews,
   terminalSession,
@@ -153,7 +153,7 @@ export function platform(config: Config) {
     issueToken: () =>
       Effect.tryPromise(async () => {
         if (!config.managedToken) throw new Error("Supply a fresh --token-file");
-        if (!["127.0.0.1", "localhost", "[::1]"].includes(new URL(config.url).hostname))
+        if (!isLoopback(new URL(config.url).hostname))
           throw new Error("Remote servers require --token-file");
         const child = Bun.spawn(["t3", ...tokenIssueArgs(config)], {
           stdout: "pipe",

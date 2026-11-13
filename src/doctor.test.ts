@@ -140,7 +140,7 @@ test("outside tmux on a kitty terminal with settings, a flagged URL and an untes
     environment: async () => ({ serverVersion: "0.1.9", orchestrationProtocolVersion: 2 }),
   });
   const report = await doctorReport(
-    ["--json", "--url", "http://box:3773", "--token-file", "/tok"],
+    ["--json", "--url", "https://box:3773", "--token-file", "/tok"],
     probes,
   );
   expect(runs.map((r) => r.join(" "))).toEqual(["tmux -V"]);
@@ -152,7 +152,7 @@ test("outside tmux on a kitty terminal with settings, a flagged URL and an untes
   });
   expect(report.opener.configured).toBe("firefox");
   expect(report.server).toMatchObject({
-    url: "http://box:3773",
+    url: "https://box:3773",
     supported: "untested",
     token: "present",
   });
@@ -221,7 +221,7 @@ test("a bad settings file, bad flags and an unreachable or newer server still gi
   expect(text).toContain("unreachable: connect ECONNREFUSED");
 
   const flagged = await doctorReport(["--wat"], machine().probes);
-  expect(flagged.settings.error).toBe("ignored arguments: Unknown option: --wat");
+  expect(flagged.settings.error).toBe("ignored arguments: unknown option --wat; see tercet --help");
 
   const newer = await doctorReport(
     [],

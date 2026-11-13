@@ -30072,11 +30072,59 @@ function clearKittyBeforeSwitch(out, repaint, onFocus) {
 }
 
 // src/client/image-preview-source.ts
+import { lookup } from "dns/promises";
 import { constants } from "fs";
 import { open } from "fs/promises";
+import { BlockList, isIP } from "net";
 import { resolve } from "path";
 import { fileURLToPath } from "url";
 var MAX_PREVIEW_BYTES = 32 * 1024 * 1024;
+var MAX_REDIRECTS = 5;
+var PRIVATE = new BlockList;
+for (const [net, bits] of [
+  ["0.0.0.0", 8],
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10],
+  ["127.0.0.0", 8],
+  ["169.254.0.0", 16],
+  ["172.16.0.0", 12],
+  ["192.0.0.0", 24],
+  ["192.168.0.0", 16],
+  ["198.18.0.0", 15],
+  ["224.0.0.0", 3]
+])
+  PRIVATE.addSubnet(net, bits, "ipv4");
+for (const [net, bits] of [
+  ["::", 127],
+  ["64:ff9b::", 96],
+  ["fc00::", 7],
+  ["fe80::", 10],
+  ["ff00::", 8]
+])
+  PRIVATE.addSubnet(net, bits, "ipv6");
+var systemLookup = async (hostname) => (await lookup(hostname, { all: true, verbatim: true })).map((entry) => entry.address);
+async function assertPublicUrl(url, resolveHost = systemLookup) {
+  if (!["http:", "https:"].includes(url.protocol))
+    throw new Error("Unsupported image source");
+  const host = url.hostname.replace(/^\[(.*)\]$/, "$1");
+  const addresses = isIP(host) ? [host] : await resolveHost(host);
+  if (!addresses.length || addresses.some((address) => PRIVATE.check(address, isIP(address) === 6 ? "ipv6" : "ipv4")))
+    throw new Error("Image blocked: private network address");
+}
+async function fetchPublic(source, signal, resolveHost) {
+  let url = new URL(source);
+  for (let hop = 0;hop <= MAX_REDIRECTS; hop++) {
+    await assertPublicUrl(url, resolveHost);
+    const response = await fetch(url, { redirect: "manual", signal });
+    const location2 = response.headers.get("location");
+    if (response.status < 300 || response.status > 399 || !location2)
+      return response;
+    await response.body?.cancel();
+    url = new URL(location2, url);
+  }
+  throw new Error("Image unavailable: too many redirects");
+}
+var isRemoteSource = (source) => /^https?:\/\//i.test(source);
 function attachmentSource(source) {
   if (!source.startsWith("tercet-image:"))
     return null;
@@ -30085,12 +30133,13 @@ function attachmentSource(source) {
     throw new Error("Invalid image attachment");
   return { id: value.id, mime: value.mime };
 }
-async function loadPreviewImage(source, cwd, attachmentUrl) {
+async function loadPreviewImage(source, cwd, attachmentUrl, resolveHost = systemLookup) {
   const attachment = attachmentSource(source);
   if (attachment)
     source = await attachmentUrl(attachment.id, attachment.mime);
   if (/^https?:\/\//i.test(source)) {
-    const response = await fetch(source, { signal: AbortSignal.timeout(15000) });
+    const signal = AbortSignal.timeout(15000);
+    const response = attachment ? await fetch(source, { signal }) : await fetchPublic(source, signal, resolveHost);
     if (!response.ok || !response.headers.get("content-type")?.startsWith("image/")) {
       await response.body?.cancel();
       throw new Error("Image unavailable");
@@ -32166,7 +32215,7 @@ var withFlat = (self2, f) => {
   return makeImpl(undefined, map2, undefined, 0, self2.maxDepth);
 };
 var notFound = /* @__PURE__ */ Symbol();
-var lookup = (self2, key) => {
+var lookup2 = (self2, key) => {
   const impl = self2;
   for (let overlay = impl.overlay;overlay; overlay = overlay.parent) {
     if (overlay.key === key)
@@ -32245,11 +32294,11 @@ var addUnsafe = (self2, key, service) => {
 };
 var getOrUndefined2 = /* @__PURE__ */ dual(2, (self2, key) => getOrUndefinedUnsafe(self2, key.key));
 var getOrUndefinedUnsafe = (self2, key) => {
-  const value = lookup(self2, key);
+  const value = lookup2(self2, key);
   return value === notFound ? undefined : value;
 };
 var getUnsafe = /* @__PURE__ */ dual(2, (self2, service) => {
-  const value = lookup(self2, service.key);
+  const value = lookup2(self2, service.key);
   if (value === notFound) {
     if (isReference(service))
       return getDefaultValue(service);
@@ -32277,7 +32326,7 @@ var serviceNotFoundError = (service) => {
   return error;
 };
 var getOption = /* @__PURE__ */ dual(2, (self2, service) => {
-  const value = lookup(self2, service.key);
+  const value = lookup2(self2, service.key);
   if (value !== notFound)
     return some2(value);
   return isReference(service) ? some2(getDefaultValue(service)) : none2();
@@ -39469,6 +39518,23 @@ function Hello({ actions }) {
 // src/client/config.ts
 import { homedir } from "os";
 import { join as join3, resolve as resolve4 } from "path";
+class ConfigError extends Error {
+}
+var isLoopback = (hostname) => hostname === "localhost" || hostname === "[::1]" || /^127(\.\d{1,3}){3}$/.test(hostname);
+var USAGE = `Usage: tercet [options]
+       tercet doctor [--json] [options]
+       tercet keys
+
+Options:
+  --url ORIGIN        The T3 server, e.g. http://127.0.0.1:3773
+  --base-dir DIR      The server's data directory (default ~/.t3)
+  --token-file PATH   Read the token from this file; required for a server on another machine
+  --read-only         Block sending, shell, run, open and copy-to actions
+  --ignore-version    Start on a server with another protocol or no version
+  --dump-status       Connect, print "live threads=N" and exit
+  --hello             A server-free demo screen for checking the terminal
+  --version           Print tercet's version and the supported T3 versions
+  -h, --help          Print this help`;
 async function connectionConfig(args2, read, home = homedir(), env = process.env, loaded) {
   const flags = new Map;
   let dumpStatus = false;
@@ -39488,30 +39554,51 @@ async function connectionConfig(args2, read, home = homedir(), env = process.env
     else if (["--url", "--base-dir", "--token-file"].includes(flag)) {
       const value = args2[++i];
       if (!value || value.startsWith("--"))
-        throw new Error(`Missing value for ${flag}`);
+        throw new ConfigError(`missing value for ${flag}`);
       flags.set(flag, value);
     } else
-      throw new Error(`Unknown option: ${flag}`);
+      throw new ConfigError(`unknown option ${flag}; see tercet --help`);
   }
   const { settings, dir, path, found } = loaded ?? await loadSettings(settingsDir(env, home), read, home);
   const baseDir = resolve4(flags.get("--base-dir") ?? settings.server.baseDir ?? join3(home, ".t3"));
   let origin2 = settings.server.url ?? "http://127.0.0.1:3773";
+  let source = flags.has("--url") ? "--url" : settings.server.url ? "server.url" : "default";
   if (!flags.has("--url") && !settings.server.url) {
-    const persisted = await read(join3(baseDir, "userdata/server-runtime.json"));
+    const runtimePath = join3(baseDir, "userdata/server-runtime.json");
+    const persisted = await read(runtimePath);
     if (persisted) {
-      const state = JSON.parse(persisted);
-      if (typeof state === "object" && state !== null && "origin" in state && typeof state.origin === "string")
+      let state;
+      try {
+        state = JSON.parse(persisted);
+      } catch {
+        throw new ConfigError(`${runtimePath} is not valid JSON`);
+      }
+      if (typeof state === "object" && state !== null && "origin" in state && typeof state.origin === "string") {
         origin2 = state.origin;
+        source = runtimePath;
+      }
     }
   }
-  const url = new URL(flags.get("--url") ?? origin2);
+  let url;
+  try {
+    url = new URL(flags.get("--url") ?? origin2);
+  } catch {
+    throw new ConfigError(`${source} is not a valid URL`);
+  }
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== "/")
-    throw new Error("Expected an HTTP server origin without credentials or a path");
+    throw new ConfigError(`${source}: expected an http(s) server origin without credentials or a path`);
+  const explicitToken = flags.has("--token-file") || !!settings.server.tokenFile;
+  if (!isLoopback(url.hostname)) {
+    if (url.protocol !== "https:")
+      throw new ConfigError(`${url.origin} is not on this machine, so it needs https:// (the token would travel in the clear)`);
+    if (!explicitToken)
+      throw new ConfigError(`${url.origin} is not on this machine: pass --token-file or set server.tokenFile to a token issued for it`);
+  }
   return {
     url: url.origin,
     baseDir,
     tokenFile: resolve4(flags.get("--token-file") ?? settings.server.tokenFile ?? join3(dir, "token")),
-    managedToken: !readOnly && !flags.has("--token-file") && !settings.server.tokenFile,
+    managedToken: !readOnly && !explicitToken,
     autostart: !readOnly && url.origin === "http://127.0.0.1:3773",
     dumpStatus,
     hello,
@@ -51197,7 +51284,7 @@ var isUnspecified = (self2) => {
   } = ipv6Words(self2);
   return w0 === 0 && w1 === 0 && w2 === 0 && w3 === 0;
 };
-var isLoopback = (self2) => {
+var isLoopback2 = (self2) => {
   if (isIpv4Address(self2))
     return ipv4Value(self2) >>> 24 === 127;
   const {
@@ -54818,8 +54905,8 @@ var Ipv4BroadcastAddress = /* @__PURE__ */ netAddressRefinement(Ipv4Address, isB
 var Ipv4BroadcastAddressFromString = /* @__PURE__ */ netAddressRefinement(Ipv4AddressFromString, isBroadcast, "a broadcast address", "Ipv4BroadcastAddressFromString");
 var MacBroadcastAddress = /* @__PURE__ */ netAddressRefinement(MacAddress, isMacBroadcast, "a broadcast address", "MacBroadcastAddress");
 var MacBroadcastAddressFromString = /* @__PURE__ */ netAddressRefinement(MacAddressFromString, isMacBroadcast, "a broadcast address", "MacBroadcastAddressFromString");
-var IpLoopbackAddress = /* @__PURE__ */ netAddressRefinement(IpAddress, isLoopback, "a loopback address", "IpLoopbackAddress");
-var IpLoopbackAddressFromString = /* @__PURE__ */ netAddressRefinement(IpAddressFromString, isLoopback, "a loopback address", "IpLoopbackAddressFromString");
+var IpLoopbackAddress = /* @__PURE__ */ netAddressRefinement(IpAddress, isLoopback2, "a loopback address", "IpLoopbackAddress");
+var IpLoopbackAddressFromString = /* @__PURE__ */ netAddressRefinement(IpAddressFromString, isLoopback2, "a loopback address", "IpLoopbackAddressFromString");
 var IpLinkLocalAddress = /* @__PURE__ */ netAddressRefinement(IpAddress, isLinkLocal, "a link-local address", "IpLinkLocalAddress");
 var IpLinkLocalAddressFromString = /* @__PURE__ */ netAddressRefinement(IpAddressFromString, isLinkLocal, "a link-local address", "IpLinkLocalAddressFromString");
 var IpUnspecifiedAddress = /* @__PURE__ */ netAddressRefinement(IpAddress, isUnspecified, "an unspecified address", "IpUnspecifiedAddress");
@@ -91757,7 +91844,7 @@ function platform(config) {
     issueToken: () => tryPromise2(async () => {
       if (!config.managedToken)
         throw new Error("Supply a fresh --token-file");
-      if (!["127.0.0.1", "localhost", "[::1]"].includes(new URL(config.url).hostname))
+      if (!isLoopback(new URL(config.url).hostname))
         throw new Error("Remote servers require --token-file");
       const child = Bun.spawn(["t3", ...tokenIssueArgs(config)], {
         stdout: "pipe",
@@ -91997,7 +92084,7 @@ async function tmuxReport(probes, tmuxPath) {
 var imagesReport = ({ rung, ...decision }, setting) => ({ protocol: rung, setting, ...decision });
 async function serverReport(config, probes) {
   const tokenPresent = await probes.exists(config.tokenFile);
-  const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(new URL(config.url).hostname);
+  const local = isLoopback(new URL(config.url).hostname);
   const token = tokenPresent ? "present" : config.managedToken && local ? "issued on first start" : "missing";
   const base = { url: config.url, tokenFile: config.tokenFile, token };
   let descriptor2;
@@ -97556,6 +97643,7 @@ function anchorIndex(rows, anchor, height) {
 
 // src/client/image-preview.tsx
 var import_react31 = __toESM(require_react(), 1);
+var loadedRemote = new Set;
 function ImagePreview({
   image: image2,
   width: width2,
@@ -97572,7 +97660,11 @@ function ImagePreview({
   const [bytes2, setBytes] = import_react31.useState();
   const [info, setInfo] = import_react31.useState();
   const [failed, setFailed] = import_react31.useState(false);
-  const load = kind === "image" ? effects?.loadImage : undefined;
+  const [, consent] = import_react31.useState(0);
+  const remote2 = isRemoteSource(image2.source);
+  const drawable = media().rung !== "none";
+  const allowed = !remote2 || drawable && loadedRemote.has(image2.source);
+  const load = kind === "image" && allowed ? effects?.loadImage : undefined;
   const inspect2 = kind === "image" ? undefined : effects?.inspectMedia;
   import_react31.useEffect(() => {
     let active2 = true;
@@ -97599,7 +97691,8 @@ function ImagePreview({
   const left = image2.right ? width2 - cells : 0;
   const inner = { width: Math.max(1, cells - 4), height: Math.max(1, image2.height - 2) };
   const size6 = info?.size ?? fileSource(image2.source)?.size;
-  const label = `[${kind} ${image2.alt}]${failed ? " (unavailable)" : ""}`;
+  const askToLoad = kind === "image" && remote2 && drawable && !allowed && !!effects?.loadImage;
+  const label = `[${kind} ${image2.alt}]${failed ? " (unavailable)" : kind === "image" && !allowed ? " (remote)" : ""}`;
   const detail = mediaDetail({ ...info, size: size6 });
   return /* @__PURE__ */ import_jsx_runtime.jsx("box", {
     height: visibleHeight,
@@ -97620,22 +97713,36 @@ function ImagePreview({
       onMouseMove: hover,
       onMouseOut: unhover,
       children: [
-        /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+        /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
           position: "absolute",
           top: -1,
           right: 1,
           height: 1,
           flexDirection: "row",
-          children: mediaActions(effects, kind).map((action) => /* @__PURE__ */ import_jsx_runtime.jsx("text", {
-            selectable: false,
-            fg: theme.accent,
-            attributes: 1,
-            onMouseUp: (event) => {
-              if (event.button === 0 && !event.modifiers.shift)
-                perform?.(action);
-            },
-            children: `[${action}] `
-          }, action))
+          children: [
+            askToLoad ? /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+              selectable: false,
+              fg: theme.accent,
+              attributes: 1,
+              onMouseUp: (event) => {
+                if (event.button !== 0 || event.modifiers.shift)
+                  return;
+                loadedRemote.add(image2.source);
+                consent((n) => n + 1);
+              },
+              children: "[load] "
+            }) : null,
+            mediaActions(effects, kind).map((action) => /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+              selectable: false,
+              fg: theme.accent,
+              attributes: 1,
+              onMouseUp: (event) => {
+                if (event.button === 0 && !event.modifiers.shift)
+                  perform?.(action);
+              },
+              children: `[${action}] `
+            }, action))
+          ]
         }),
         kind === "image" ? /* @__PURE__ */ import_jsx_runtime.jsx(InlineImage, {
           bytes: failed ? undefined : bytes2,
@@ -106577,7 +106684,12 @@ Rebind with the name in the last column, e.g. "keys": { "palette": "Ctrl+k" }.`)
 }
 
 // src/main.tsx
-var migrated = process.argv.includes("--version") ? undefined : migrateLegacyDir(process.env, homedir4());
+var args2 = process.argv.slice(2);
+if (args2.includes("--help") || args2.includes("-h")) {
+  console.log(USAGE);
+  process.exit(0);
+}
+var migrated = args2.includes("--version") ? undefined : migrateLegacyDir(process.env, homedir4());
 if (migrated)
   process.stderr.write(`${migrated}
 `);
@@ -106639,8 +106751,8 @@ ${lines.join(`
       await client.dispose();
     }
   } else {
-    const probe = async (args2) => {
-      const child = Bun.spawn(args2, { stdout: "pipe", stderr: "ignore", timeout: 3000 });
+    const probe = async (args3) => {
+      const child = Bun.spawn(args3, { stdout: "pipe", stderr: "ignore", timeout: 3000 });
       const stdout2 = await new Response(child.stdout).text();
       return { code: await child.exited, stdout: stdout2 };
     };
@@ -106672,11 +106784,11 @@ ${lines.join(`
     }
     const kittyReset = media().rung !== "kitty" ? "" : process.env.TMUX ? KITTY_CLEAR_PLACEMENTS : KITTY_CLEAR_DIRECT;
     terminalLifecycle(renderer, async () => client?.dispose(), kittyReset);
-    const output = async (args2) => {
-      const child = Bun.spawn(args2, { stdout: "pipe", stderr: "ignore" });
+    const output = async (args3) => {
+      const child = Bun.spawn(args3, { stdout: "pipe", stderr: "ignore" });
       const text5 = await new Response(child.stdout).text();
       if (await child.exited !== 0)
-        throw new Error(`${args2[0]} failed`);
+        throw new Error(`${args3[0]} failed`);
       return text5;
     };
     const loadImage = (source, cwd) => loadPreviewImage(source, cwd, (id3, mime) => client.pageUrl(id3, mime));
@@ -106707,14 +106819,14 @@ ${lines.join(`
         return openUrl(attachment ? await client.pageUrl(attachment.id, attachment.mime) : source);
       };
     }
-    const attachmentsDir = new URL(config.url).hostname.match(/^(localhost|127\.0\.0\.1|\[::1\])$/) ? `${config.baseDir}/userdata/attachments` : undefined;
+    const attachmentsDir = isLoopback(new URL(config.url).hostname) ? `${config.baseDir}/userdata/attachments` : undefined;
     if (effects.openPath)
       effects.openImage = imageOpenAction(loadImage, attachmentsDir, effects.openPath);
     const mediaTarget = (source, cwd) => resolveMediaTarget(source, cwd, attachmentsDir, (id3, mime) => client.pageUrl(id3, mime));
     const playable = (source) => ["video", "audio"].includes(mediaKind(source));
     effects.inspectMedia = async (source, cwd) => {
       const { target: target2, size: size6 } = await mediaTarget(source, cwd);
-      const probed = playable(source) && effects.probeMedia ? await effects.probeMedia(target2).catch(() => ({})) : {};
+      const probed = playable(source) && effects.probeMedia && !isRemoteSource(source) ? await effects.probeMedia(target2).catch(() => ({})) : {};
       return { ...probed, size: size6 };
     };
     const { play, playHere, openPath } = effects;
@@ -106760,6 +106872,6 @@ ${lines.join(`
   }
 } catch (error2) {
   activeRenderer?.destroy();
-  console.error(error2 instanceof SettingsError ? `tercet: ${error2.message}` : "tercet: connection/configuration failed; check --url, --base-dir and --token-file.");
+  console.error(error2 instanceof SettingsError || error2 instanceof ConfigError ? `tercet: ${error2.message}` : "tercet: connection/configuration failed; check --url, --base-dir and --token-file.");
   process.exitCode = 1;
 }

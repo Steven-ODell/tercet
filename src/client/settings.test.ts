@@ -154,14 +154,14 @@ test("syntax errors give the line", () => {
 test("settings feed the connection; flags still win", async () => {
   const files: Record<string, string> = {
     "/xdg/tercet/settings.json": JSON.stringify({
-      server: { url: "http://box:4000", tokenFile: "token-for-box" },
+      server: { url: "https://box:4000", tokenFile: "token-for-box" },
     }),
   };
   const reads: string[] = [];
   const read = async (path: string) => (reads.push(path), files[path]);
   const config = await connectionConfig([], read, "/home/u", { XDG_CONFIG_HOME: "/xdg" });
   expect(config).toMatchObject({
-    url: "http://box:4000",
+    url: "https://box:4000",
     tokenFile: "/xdg/tercet/token-for-box",
     managedToken: false,
     autostart: false,

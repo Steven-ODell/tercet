@@ -2,6 +2,7 @@ import { theme } from "./theme";
 import { useEffect, useState } from "react";
 import { mediaActions, type Actions } from "../actions";
 import type { MarkdownRow } from "./markdown";
+import { isRemoteSource } from "./image-preview-source";
 import {
   fileSource,
   imageSize,
@@ -13,6 +14,9 @@ import {
 } from "./media";
 
 type Inspected = MediaProbe & { size?: number };
+
+/** Remote images the user chose to load this session, so scrolling away and back keeps the choice. */
+const loadedRemote = new Set<string>();
 
 /**
  * One clipped media card per visible source; unmounting deletes its Kitty placement. Images draw
@@ -46,7 +50,14 @@ export function ImagePreview({
   const [bytes, setBytes] = useState<Uint8Array>();
   const [info, setInfo] = useState<Inspected>();
   const [failed, setFailed] = useState(false);
-  const load = kind === "image" ? effects?.loadImage : undefined;
+  const [, consent] = useState(0);
+  // A transcript's http(s) image could be a tracker or point at this machine: it waits for a click,
+  // and with nothing to draw on (media.protocol "none") it never loads. Local files still load,
+  // for the placeholder's size line.
+  const remote = isRemoteSource(image.source);
+  const drawable = media().rung !== "none";
+  const allowed = !remote || (drawable && loadedRemote.has(image.source));
+  const load = kind === "image" && allowed ? effects?.loadImage : undefined;
   const inspect = kind === "image" ? undefined : effects?.inspectMedia;
   useEffect(() => {
     let active = true;
@@ -70,7 +81,8 @@ export function ImagePreview({
   const left = image.right ? width - cells : 0;
   const inner = { width: Math.max(1, cells - 4), height: Math.max(1, image.height - 2) };
   const size = info?.size ?? fileSource(image.source)?.size;
-  const label = `[${kind} ${image.alt}]${failed ? " (unavailable)" : ""}`;
+  const askToLoad = kind === "image" && remote && drawable && !allowed && !!effects?.loadImage;
+  const label = `[${kind} ${image.alt}]${failed ? " (unavailable)" : kind === "image" && !allowed ? " (remote)" : ""}`;
   const detail = mediaDetail({ ...info, size });
   return (
     <box height={visibleHeight} flexShrink={0} width={width}>
@@ -90,6 +102,20 @@ export function ImagePreview({
         onMouseOut={unhover}
       >
         <box position="absolute" top={-1} right={1} height={1} flexDirection="row">
+          {askToLoad ? (
+            <text
+              selectable={false}
+              fg={theme.accent}
+              attributes={1}
+              onMouseUp={(event) => {
+                if (event.button !== 0 || event.modifiers.shift) return;
+                loadedRemote.add(image.source);
+                consent((n) => n + 1);
+              }}
+            >
+              {"[load] "}
+            </text>
+          ) : null}
           {mediaActions(effects, kind).map((action) => (
             <text
               key={action}

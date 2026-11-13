@@ -94,6 +94,10 @@ so a typo shows up now rather than later.
 A token file you name in `server.tokenFile` or `--token-file` is yours: tercet reads it but never
 issues a new token into it or changes its permissions.
 
+The default token file holds the credential for the T3 server on this machine, so it is only
+used for loopback addresses (`localhost`, `127.x.x.x`, `[::1]`). A server anywhere else needs
+`https://` and a token file you name; tercet refuses to start otherwise.
+
 ## Theme
 
 | Preset       | What it is                                                                          |
@@ -279,6 +283,7 @@ of them there is no open button.
 | `--dump-status`     | Connect, print `live threads=N` and exit, with no TUI.                |
 | `--hello`           | A server-free demo screen for checking the terminal.                  |
 | `--version`         | Print tercet's version and the T3 server versions it supports.        |
+| `--help`, `-h`      | Print the flags and exit.                                             |
 
 tercet checks the server before it opens. Only two things stop it: a server it cannot reach (it
 checks again every 2 s) and a server on another orchestration protocol, which client-runtime would
