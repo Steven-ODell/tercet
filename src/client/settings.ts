@@ -65,7 +65,7 @@ export const settingsTargetKeys = (settings: Pick<Settings, "targets">) =>
   );
 
 export interface Settings {
-  server: { url?: string; tokenFile?: string; baseDir?: string };
+  server: { url?: string; tokenFile?: string; baseDir?: string; ignoreVersion?: boolean };
   theme: { preset?: PresetName; accent?: string };
   /** Command name to key, e.g. `"palette": "Ctrl+k"`; `"none"` unbinds. */
   keys: Record<string, string>;
@@ -459,7 +459,7 @@ const list =
   };
 
 const schema = struct({
-  server: struct({ url: origin, tokenFile: text, baseDir: text }),
+  server: struct({ url: origin, tokenFile: text, baseDir: text, ignoreVersion: bool }),
   theme: struct({ preset: oneOf(PRESET_NAMES), accent: color }),
   keys: record(/^[A-Za-z][\w.-]*$/, "action names use letters, digits, ., _ and -", text),
   icons: oneOf(ICON_MODES),

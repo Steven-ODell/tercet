@@ -96,6 +96,8 @@ test("each message names what was found, what is supported and what to do, in AS
   expect(text).toContain(supportedRange);
   expect(text).toContain("--ignore-version");
   expect(text).toContain("What to do");
+  // The supported range is said once, not again as the reason.
+  expect(text.split(supportedRange).length - 1).toBe(1);
   const missing = compatMessage(checkDescriptor({}), url);
   expect(missing.title).toBe("The server did not report a version");
   expect(missing.lines.join("\n")).toContain("--ignore-version");

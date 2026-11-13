@@ -17,7 +17,8 @@ export async function runKeys(env = process.env, home = homedir()) {
       { shell: !!effects.shell, dictation: !!effects.toggleDictation },
       targetKeys(effects),
     );
-    console.log(cheatSheetText(sheet));
+    console.log(cheatSheetText(sheet, true));
+    console.log('\nRebind with the name in the last column, e.g. "keys": { "palette": "Ctrl+k" }.');
     return 0;
   } catch (error) {
     if (!(error instanceof SettingsError)) throw error;

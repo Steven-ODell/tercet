@@ -93,7 +93,9 @@ export function compatMessage(check: ServerCheck, url: string): { title: string;
         title: "Unsupported server version",
         lines: [
           `Server: ${url} runs T3 ${check.version} (protocol ${check.protocol}).`,
-          `Supported: T3 ${supportedRange}, tested on ${PINNED_SERVER_VERSION}. ${check.reason}.`,
+          `Supported: T3 ${supportedRange}, tested on ${PINNED_SERVER_VERSION}.` +
+            // The range case is already said above; only a protocol mismatch adds its reason.
+            (check.protocol === ORCHESTRATION_PROTOCOL_VERSION ? "" : ` ${check.reason}.`),
           "What to do: use a tercet release made for this server, or run a supported server",
           `(\`npx t3@${PINNED_SERVER_VERSION}\`). \`tercet --ignore-version\` continues at your own risk:`,
           "items this tercet does not know are dropped and screens may break.",

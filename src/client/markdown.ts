@@ -150,21 +150,31 @@ function blockTop(language: string, block: Target, width: number, id: string): M
 }
 function inline(text: string): Span[] {
   return text
-    .split(/(`[^`]*`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g)
+    .split(/(`[^`]*`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\)|https?:\/\/[^\s<>`]+)/g)
     .filter(Boolean)
+    .flatMap(bareUrl)
     .map((part) =>
-      part.startsWith("`")
-        ? { text: part.slice(1, -1), color: theme.cyan, target: inlineTarget(part.slice(1, -1)) }
-        : part.startsWith("**")
-          ? { text: part.slice(2, -2), bold: true }
-          : part.startsWith("[")
-            ? {
-                text: part.replace(/^\[([^\]]+)\]\(([^)]+)\)$/, "$1 ($2)"),
-                color: theme.cyan,
-                target: linkTarget(part.slice(part.indexOf("](") + 2, -1)),
-              }
-            : { text: part },
+      typeof part !== "string"
+        ? part
+        : part.startsWith("`")
+          ? { text: part.slice(1, -1), color: theme.cyan, target: inlineTarget(part.slice(1, -1)) }
+          : part.startsWith("**")
+            ? { text: part.slice(2, -2), bold: true }
+            : part.startsWith("[")
+              ? {
+                  text: part.replace(/^\[([^\]]+)\]\(([^)]+)\)$/, "$1 ($2)"),
+                  color: theme.cyan,
+                  target: linkTarget(part.slice(part.indexOf("](") + 2, -1)),
+                }
+              : { text: part },
     );
+}
+/** A bare http(s) URL in prose becomes a link span; trailing punctuation stays plain text. */
+function bareUrl(part: string): (string | Span)[] {
+  if (!/^https?:\/\//.test(part)) return [part];
+  const url = part.replace(/[.,;:!?'"\])}]+$/, "");
+  const link: Span = { text: url, color: theme.cyan, target: linkTarget(url) };
+  return url.length < part.length ? [link, { text: part.slice(url.length) }] : [link];
 }
 export function inlineTarget(text: string): Target {
   return /^(?:\.?\.?\/|~\/|[\w.-]+\/)[^\s]+$/.test(text) ||

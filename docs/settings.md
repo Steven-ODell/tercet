@@ -27,6 +27,8 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
     // "~/" is your home; other relative paths are relative to this directory.
     "tokenFile": "~/.config/tercet/token",
     "baseDir": "~/.t3",
+    // Start on a server outside the supported version range (same as --ignore-version).
+    "ignoreVersion": false,
   },
   "defaults": {
     // New threads start with this model when an enabled provider offers it.
@@ -63,13 +65,14 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
 }
 ```
 
-## Keys
+## Setting keys
 
 | Key                                                   | Type                                                            | Default                                    | Read from |
 | ----------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------ | --------- |
 | `server.url`                                          | http(s) origin                                                  | runtime file, then `http://127.0.0.1:3773` | now       |
 | `server.tokenFile`                                    | path                                                            | `<settings dir>/token`                     | now       |
 | `server.baseDir`                                      | path                                                            | `~/.t3`                                    | now       |
+| `server.ignoreVersion`                                | true or false                                                   | `false`                                    | now       |
 | `defaults.provider`                                   | provider instance id                                            | any                                        | now       |
 | `defaults.model`                                      | model slug                                                      | the thread's or project's model            | now       |
 | `defaults.mode`                                       | `approval-required`, `auto-accept-edits`, `auto`, `full-access` | per provider                               | now       |
@@ -278,8 +281,9 @@ of them there is no open button.
 
 tercet checks the server's version before it opens. A version outside the supported range (now
 `>=0.1.8 <0.2.0`, tested on 0.1.8), another protocol, or a missing version stops on a full-screen
-message that says what was found and what to do; `--ignore-version` continues at your own risk.
-An unreachable server gets its own message, and tercet checks again every 2 s.
+message that says what was found and what to do. `--ignore-version`, or `"ignoreVersion": true`
+under `server` in the settings file, continues at your own risk. An unreachable server gets its
+own message, and tercet checks again every 2 s.
 
 ## tercet doctor
 

@@ -11,7 +11,7 @@ export interface Config {
   dumpStatus: boolean;
   hello: boolean;
   readOnly: boolean;
-  /** Start even when the server's version is outside `supportedRange` or missing. */
+  /** Start even when the server's version is outside `supportedRange` or missing (flag or setting). */
   ignoreVersion: boolean;
   settings: Settings;
   /** Where the settings file is or would be, and whether it exists. */
@@ -87,7 +87,7 @@ export async function connectionConfig(
     dumpStatus,
     hello,
     readOnly,
-    ignoreVersion,
+    ignoreVersion: ignoreVersion || settings.server.ignoreVersion === true,
     settings,
     settingsPath: path,
     settingsFound: found,

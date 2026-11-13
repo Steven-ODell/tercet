@@ -51,6 +51,14 @@ for (const [name, overrides] of [
     expect(cheatSheetText(sheet)).toContain("  D                   desk block, link or selection");
   });
 
+test("the cheat sheet text can name each command for the keys setting", () => {
+  const text = cheatSheetText(cheatSheet(resolveKeymap(), {}, {}), true);
+  expect(text).toMatch(/Ctrl\+p +Palette +palette\n/);
+  expect(text).toMatch(/Ctrl\+n +New thread +newThread\n/);
+  expect(text).toMatch(/Esc +Close overlay \/ next pane +\(fixed\)\n/);
+  expect(cheatSheetText(cheatSheet(resolveKeymap(), {}, {}))).not.toContain("newThread");
+});
+
 test("optional commands leave the sheet when their action is missing", () => {
   const rows = cheatSheet(resolveKeymap(), {}, {})[0]!.rows.map((row) => row.label);
   expect(rows).not.toContain("Shell");

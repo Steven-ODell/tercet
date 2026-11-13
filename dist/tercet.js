@@ -38610,7 +38610,12 @@ function cheatSheet(bindings, available, targets) {
   return [
     {
       title: "Anywhere",
-      rows: bindings.filter((b) => b.chord && (!b.needs || available[b.needs])).map((b) => ({ keys: b.hint, label: b.label }))
+      rows: bindings.filter((b) => b.chord && (!b.needs || available[b.needs])).map((b) => ({
+        keys: b.hint,
+        label: b.label,
+        id: b.id,
+        fixed: COMMANDS.some((c2) => c2.id === b.id && ("fixed" in c2))
+      }))
     },
     {
       title: "Transcript",
@@ -38628,7 +38633,15 @@ function cheatSheet(bindings, available, targets) {
     }
   ];
 }
-var cheatSheetText = (sheet) => sheet.map((part) => [part.title, ...part.rows.map((r) => `  ${r.keys.padEnd(20)}${r.label}`)].join(`
+var cheatSheetText = (sheet, names = false) => sheet.map((part) => [
+  part.title,
+  ...part.rows.map((r) => {
+    const line = `  ${r.keys.padEnd(20)}${r.label}`;
+    if (!names || !r.id)
+      return line;
+    return `${line.padEnd(52)}${r.fixed ? "(fixed)" : r.id}`;
+  })
+].join(`
 `)).join(`
 
 `);
@@ -38934,7 +38947,7 @@ var list = (item) => (value, path, problem) => {
   return value.map((entry, index2) => item(entry, `${path}[${index2}]`, problem));
 };
 var schema = struct({
-  server: struct({ url: origin, tokenFile: text2, baseDir: text2 }),
+  server: struct({ url: origin, tokenFile: text2, baseDir: text2, ignoreVersion: bool }),
   theme: struct({ preset: oneOf(PRESET_NAMES), accent: color }),
   keys: record(/^[A-Za-z][\w.-]*$/, "action names use letters, digits, ., _ and -", text2),
   icons: oneOf(ICON_MODES),
@@ -39500,7 +39513,7 @@ async function connectionConfig(args2, read, home = homedir(), env = process.env
     dumpStatus,
     hello,
     readOnly,
-    ignoreVersion,
+    ignoreVersion: ignoreVersion || settings.server.ignoreVersion === true,
     settings,
     settingsPath: path,
     settingsFound: found
@@ -91876,7 +91889,7 @@ function compatMessage(check2, url) {
         title: "Unsupported server version",
         lines: [
           `Server: ${url} runs T3 ${check2.version} (protocol ${check2.protocol}).`,
-          `Supported: T3 ${supportedRange}, tested on ${PINNED_SERVER_VERSION}. ${check2.reason}.`,
+          `Supported: T3 ${supportedRange}, tested on ${PINNED_SERVER_VERSION}.` + (check2.protocol === ORCHESTRATION_PROTOCOL_VERSION ? "" : ` ${check2.reason}.`),
           "What to do: use a tercet release made for this server, or run a supported server",
           `(\`npx t3@${PINNED_SERVER_VERSION}\`). \`tercet --ignore-version\` continues at your own risk:`,
           "items this tercet does not know are dropped and screens may break."
@@ -97177,11 +97190,18 @@ function blockTop(language, block, width2, id2) {
   return rows;
 }
 function inline(text5) {
-  return text5.split(/(`[^`]*`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g).filter(Boolean).map((part) => part.startsWith("`") ? { text: part.slice(1, -1), color: theme.cyan, target: inlineTarget(part.slice(1, -1)) } : part.startsWith("**") ? { text: part.slice(2, -2), bold: true } : part.startsWith("[") ? {
+  return text5.split(/(`[^`]*`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\)|https?:\/\/[^\s<>`]+)/g).filter(Boolean).flatMap(bareUrl).map((part) => typeof part !== "string" ? part : part.startsWith("`") ? { text: part.slice(1, -1), color: theme.cyan, target: inlineTarget(part.slice(1, -1)) } : part.startsWith("**") ? { text: part.slice(2, -2), bold: true } : part.startsWith("[") ? {
     text: part.replace(/^\[([^\]]+)\]\(([^)]+)\)$/, "$1 ($2)"),
     color: theme.cyan,
     target: linkTarget(part.slice(part.indexOf("](") + 2, -1))
   } : { text: part });
+}
+function bareUrl(part) {
+  if (!/^https?:\/\//.test(part))
+    return [part];
+  const url = part.replace(/[.,;:!?'"\])}]+$/, "");
+  const link2 = { text: url, color: theme.cyan, target: linkTarget(url) };
+  return url.length < part.length ? [link2, { text: part.slice(url.length) }] : [link2];
 }
 function inlineTarget(text5) {
   return /^(?:\.?\.?\/|~\/|[\w.-]+\/)[^\s]+$/.test(text5) || /^[\w.-]+\.[a-zA-Z]+(?::\d+(?::\d+)?)?$/.test(text5) ? { kind: "file", text: text5 } : { kind: "inline", text: text5 };
@@ -106503,7 +106523,9 @@ async function runKeys(env = process.env, home = homedir3()) {
     applyLook(settings5);
     const effects = hostActions({ settings: settings5, host: systemHost(), writeTerminal: () => {} });
     const sheet = cheatSheet(keymap(), { shell: !!effects.shell, dictation: !!effects.toggleDictation }, targetKeys(effects));
-    console.log(cheatSheetText(sheet));
+    console.log(cheatSheetText(sheet, true));
+    console.log(`
+Rebind with the name in the last column, e.g. "keys": { "palette": "Ctrl+k" }.`);
     return 0;
   } catch (error2) {
     if (!(error2 instanceof SettingsError))

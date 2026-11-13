@@ -29,6 +29,27 @@ test("measured blocks retain exact commands and distinct inline/link targets thr
   );
 });
 
+test("bare URLs in prose are link targets and trailing punctuation stays outside them", () => {
+  const rows = measureMarkdown(
+    {
+      id: "a",
+      kind: "assistant",
+      text: "Open http://127.0.0.1:3773/, or (https://github.com/pingdotgg/t3code). See `src/main.ts` and [x](https://example.com/a).",
+    },
+    200,
+  );
+  const spans = rows.flatMap((r) => r.spans);
+  const urls = spans.filter((s) => s.target?.kind === "url");
+  expect(urls.map((s) => s.target?.text)).toEqual([
+    "http://127.0.0.1:3773/",
+    "https://github.com/pingdotgg/t3code",
+    "https://example.com/a",
+  ]);
+  expect(urls[0]!.text).toBe("http://127.0.0.1:3773/");
+  expect(spans.find((s) => s.target?.kind === "file")?.target?.text).toBe("src/main.ts");
+  expect(spans.map((s) => s.text).join("")).toContain("t3code).");
+});
+
 test("OpenTUI buttons and focused keys call fake Actions exactly; drag copies and errors stay visible", async () => {
   const calls: unknown[] = [];
   let finish: (() => void) | undefined;

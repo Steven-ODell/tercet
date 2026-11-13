@@ -191,6 +191,26 @@ test("settings feed the connection; flags still win", async () => {
   );
 });
 
+test("server.ignoreVersion in the settings file matches --ignore-version", async () => {
+  const env = { XDG_CONFIG_HOME: "/xdg" };
+  const withFile = (text?: string) => async (path: string) =>
+    path === "/xdg/tercet/settings.json" ? text : undefined;
+  const on = await connectionConfig(
+    [],
+    withFile('{ "server": { "ignoreVersion": true } }'),
+    "/home/u",
+    env,
+  );
+  expect(on.ignoreVersion).toBe(true);
+  expect((await connectionConfig([], withFile(), "/home/u", env)).ignoreVersion).toBe(false);
+  expect(
+    (await connectionConfig(["--ignore-version"], withFile(), "/home/u", env)).ignoreVersion,
+  ).toBe(true);
+  await expect(
+    connectionConfig([], withFile('{ "server": { "ignoreVersion": "yes" } }'), "/home/u", env),
+  ).rejects.toThrow("server.ignoreVersion: expected true or false");
+});
+
 const provider = (instanceId: string, slugs: string[], extra: Partial<ServerProvider> = {}) =>
   ({
     instanceId,

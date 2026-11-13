@@ -71,8 +71,19 @@ terminals are welcome.
 
 ## Settings
 
-One JSON-with-comments file, `~/.config/tercet/settings.json` (or under `$XDG_CONFIG_HOME`).
-Every key is optional, and a typo stops startup with the line and key named. For example:
+T3's own settings (projects, providers, models, permissions) come from the T3 server, so there
+is nothing to copy over. The settings file holds only what belongs to tercet: keys, look,
+commands and images. It is one JSON-with-comments file, `~/.config/tercet/settings.json` (or
+under `$XDG_CONFIG_HOME`), and it does not exist at first. Create it yourself:
+
+```sh
+mkdir -p ~/.config/tercet
+$EDITOR ~/.config/tercet/settings.json
+```
+
+Every key is optional and a missing key means the default. A typo stops startup with the line and
+key named. tercet reads the file at startup, so restart it after editing, and run `tercet doctor`
+to check the file (the `settings` line should say `ok`). For example:
 
 ```jsonc
 {
@@ -114,6 +125,13 @@ bindings. The defaults:
 | `Y`, `O`                              | copy or open the block, link or selection        |
 | `Ctrl+c` twice                        | quit                                             |
 
+To rebind, name the command in the `keys` setting. `tercet keys` prints each command's name in
+its last column (`palette`, `focusUp`, `newThread` and so on), and `"none"` unbinds one:
+
+```jsonc
+"keys": { "palette": "Ctrl+k", "newThread": "Ctrl+t", "search": "none" }
+```
+
 Alt keys need your terminal to send Esc for Alt (on macOS: "Use Option as Meta key" or
 similar). More on [keys that depend on the
 terminal](docs/settings.md#keys-that-depend-on-the-terminal).
@@ -137,7 +155,8 @@ terminal](docs/settings.md#keys-that-depend-on-the-terminal).
   then draw nothing, or draw garbage. Set `"media": { "protocol": "blocks" }`, or `"none"` for
   placeholders.
 - **"Unsupported server version".** tercet checks the T3 version before it opens. Update T3
-  Code or tercet; `tercet --ignore-version` continues at your own risk.
+  Code or tercet; `tercet --ignore-version`, or `"ignoreVersion": true` under `server` in the
+  settings file, continues at your own risk.
 - **Can't connect.** `tercet doctor` checks the server and token. A server on another port or
   host needs `server.url`; one started with another `--base-dir` needs `server.baseDir`.
 

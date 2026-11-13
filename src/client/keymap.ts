@@ -247,7 +247,8 @@ export function commandForKey(key: KeyEvent, bindings = active): Command | undef
 
 export interface CheatSheet {
   title: string;
-  rows: { keys: string; label: string }[];
+  /** `id` is the command's name in the `keys` setting; `fixed` ones cannot be rebound. */
+  rows: { keys: string; label: string; id?: string; fixed?: boolean }[];
 }
 
 /**
@@ -264,7 +265,12 @@ export function cheatSheet(
       title: "Anywhere",
       rows: bindings
         .filter((b) => b.chord && (!b.needs || available[b.needs]))
-        .map((b) => ({ keys: b.hint, label: b.label })),
+        .map((b) => ({
+          keys: b.hint,
+          label: b.label,
+          id: b.id,
+          fixed: COMMANDS.some((c) => c.id === b.id && "fixed" in c),
+        })),
     },
     {
       title: "Transcript",
@@ -283,9 +289,17 @@ export function cheatSheet(
   ];
 }
 
-export const cheatSheetText = (sheet: readonly CheatSheet[]) =>
+/** With `names`, a last column gives each command's name for the `keys` setting. */
+export const cheatSheetText = (sheet: readonly CheatSheet[], names = false) =>
   sheet
     .map((part) =>
-      [part.title, ...part.rows.map((r) => `  ${r.keys.padEnd(20)}${r.label}`)].join("\n"),
+      [
+        part.title,
+        ...part.rows.map((r) => {
+          const line = `  ${r.keys.padEnd(20)}${r.label}`;
+          if (!names || !r.id) return line;
+          return `${line.padEnd(52)}${r.fixed ? "(fixed)" : r.id}`;
+        }),
+      ].join("\n"),
     )
     .join("\n\n");
