@@ -37892,6 +37892,7 @@ function terminalActions(write) {
     }
   };
 }
+var hasDictation = (effects) => !!(effects?.toggleDictation || effects?.record);
 var targetNames = (effects) => effects?.copyTo ? (effects.targets ?? []).map((t) => t.name) : [];
 var imageActions = (effects) => [
   ...effects?.copyImage ? ["copy"] : [],
@@ -37954,8 +37955,193 @@ function threadWebUrl(origin, environmentId, threadId) {
 }
 
 // src/portable.ts
-import { spawn } from "child_process";
+import { spawn as spawn2 } from "child_process";
 import { readFile, stat as stat2 } from "fs/promises";
+
+// src/dictation.ts
+import { spawn } from "child_process";
+var SAMPLE_RATE = 16000;
+var MAX_RECORDING_BYTES = SAMPLE_RATE * Float32Array.BYTES_PER_ELEMENT * 5 * 60;
+var RAW = ["--rate=16000", "--channels=1"];
+var RECORDER_TOOLS = [
+  {
+    name: "pw-record",
+    program: "pw-record",
+    platforms: ["linux"],
+    args: ["pw-record", "--rate", "16000", "--channels", "1", "--format", "f32", "--raw", "-"]
+  },
+  {
+    name: "parecord",
+    program: "parecord",
+    platforms: ["linux"],
+    args: ["parecord", ...RAW, "--format=float32le", "--raw", "--latency-msec=100"]
+  },
+  {
+    name: "arecord",
+    program: "arecord",
+    platforms: ["linux"],
+    args: ["arecord", "-q", "-t", "raw", "-f", "FLOAT_LE", "-r", "16000", "-c", "1"]
+  },
+  {
+    name: "ffmpeg (pulse)",
+    program: "ffmpeg",
+    platforms: ["linux"],
+    args: [
+      ...["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin"],
+      ...["-f", "pulse", "-i", "default", "-ac", "1", "-ar", "16000", "-f", "f32le", "pipe:1"]
+    ]
+  },
+  {
+    name: "ffmpeg (avfoundation)",
+    program: "ffmpeg",
+    platforms: ["darwin"],
+    args: [
+      ...["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin"],
+      ...["-f", "avfoundation", "-i", ":default", "-ac", "1", "-ar", "16000", "-f", "f32le"],
+      "pipe:1"
+    ]
+  },
+  {
+    name: "sox",
+    program: "rec",
+    platforms: ["linux", "darwin"],
+    args: [
+      "rec",
+      "-q",
+      "-r",
+      "16000",
+      "-c",
+      "1",
+      "-b",
+      "32",
+      "-e",
+      "floating-point",
+      "-t",
+      "raw",
+      "-"
+    ]
+  }
+];
+var isRemoteSession = (env) => !!(env.SSH_CONNECTION || env.SSH_CLIENT || env.SSH_TTY);
+var NO_RECORDER = "no recorder found; install pipewire-tools (pw-record), pulseaudio-utils (parecord), alsa-utils (arecord), ffmpeg or sox";
+function recorderStatus(host, custom) {
+  if (custom?.length) {
+    return host.which(custom[0]) ? { ready: true, name: custom[0], args: [...custom], custom: true } : { ready: false, reason: `dictation.recorder: ${custom[0]} is not installed` };
+  }
+  if (isRemoteSession(host.env))
+    return {
+      ready: false,
+      reason: "this is an SSH session, which does not forward your microphone; set commands.dictation or dictation.recorder to choose one"
+    };
+  const tool = RECORDER_TOOLS.find((candidate) => candidate.platforms.includes(host.platform) && host.which(candidate.program));
+  if (!tool) {
+    return host.platform === "linux" || host.platform === "darwin" ? { ready: false, reason: NO_RECORDER } : { ready: false, reason: "built-in dictation supports Linux and macOS" };
+  }
+  return { ready: true, name: tool.name, args: [...tool.args], custom: false };
+}
+var live = new Set;
+var exitHook = false;
+function track(child) {
+  live.add(child);
+  child.once("close", () => live.delete(child));
+  if (!exitHook) {
+    exitHook = true;
+    process.once("exit", () => {
+      for (const running of live)
+        running.kill("SIGKILL");
+    });
+  }
+}
+function sanitizePcm(bytes) {
+  const whole = bytes.length - bytes.length % Float32Array.BYTES_PER_ELEMENT;
+  const samples = new Float32Array(whole / Float32Array.BYTES_PER_ELEMENT);
+  new Uint8Array(samples.buffer).set(bytes.subarray(0, whole));
+  for (let i = 0;i < samples.length; i++) {
+    const sample = samples[i];
+    samples[i] = Number.isFinite(sample) ? Math.max(-1, Math.min(1, sample)) : 0;
+  }
+  return new Uint8Array(samples.buffer);
+}
+var tail = (text) => text.trim().split(`
+`).at(-1)?.slice(0, 200) ?? "";
+function startRecording(host, args2, options = {}) {
+  const [program, ...rest] = args2;
+  const stopGraceMs = options.stopGraceMs ?? 3000;
+  const startGraceMs = options.startGraceMs ?? 400;
+  return new Promise((resolve3, reject) => {
+    const child = spawn(host.which(program) ?? program, rest, {
+      env: host.env,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    track(child);
+    const chunks = [];
+    let size = 0;
+    let limited = false;
+    let stderr = "";
+    let stopping = false;
+    let cancelled = false;
+    let stopped;
+    let exit3;
+    const closed = new Promise((done4) => {
+      child.once("close", (code, signal) => {
+        exit3 = { code, signal };
+        done4();
+      });
+    });
+    child.stdout.on("data", (chunk) => {
+      if (cancelled)
+        return;
+      const room = MAX_RECORDING_BYTES - size;
+      if (room <= 0)
+        return;
+      const kept = chunk.length > room ? chunk.subarray(0, room) : chunk;
+      chunks.push(kept);
+      size += kept.length;
+      if (size >= MAX_RECORDING_BYTES && !limited) {
+        limited = true;
+        options.onLimit?.();
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr = (stderr + chunk.toString()).slice(-2000);
+    });
+    const failure = () => new Error(`${program} ${exit3?.signal ? `was stopped by ${exit3.signal}` : `exited with ${exit3?.code}`}${tail(stderr) && `: ${tail(stderr)}`}`);
+    const recording = {
+      stop() {
+        return stopped ??= (async () => {
+          stopping = true;
+          if (!exit3) {
+            child.kill("SIGINT");
+            const kill = setTimeout(() => child.kill("SIGKILL"), stopGraceMs);
+            await closed;
+            clearTimeout(kill);
+          }
+          const audio = Buffer.concat(chunks);
+          chunks.length = 0;
+          if (!audio.length)
+            throw exit3?.code ? failure() : new Error("No audio was captured");
+          return sanitizePcm(audio);
+        })();
+      },
+      cancel() {
+        cancelled = true;
+        stopping = true;
+        chunks.length = 0;
+        if (!exit3)
+          child.kill("SIGKILL");
+      }
+    };
+    child.once("error", (error) => reject(new Error(`${program}: ${error.message}`)));
+    child.once("spawn", () => {
+      const timer = setTimeout(() => resolve3(recording), startGraceMs);
+      child.once("close", () => {
+        clearTimeout(timer);
+        if (!stopping)
+          reject(failure());
+      });
+    });
+  });
+}
 
 // src/client/settings.ts
 import { lstatSync, renameSync, symlinkSync } from "fs";
@@ -38743,7 +38929,8 @@ var defaultSettings = () => ({
   launchers: {},
   media: { protocol: "auto", video: "player" },
   commands: {},
-  targets: {}
+  targets: {},
+  dictation: { language: "auto" }
 });
 
 class SettingsError extends Error {
@@ -39023,7 +39210,8 @@ var schema = struct({
   launchers: struct(Object.fromEntries(Object.entries(LAUNCHER_PLACEHOLDERS).map(([name, vars]) => [name, withHost(vars)]))),
   media: struct({ protocol: oneOf(MEDIA_PROTOCOLS), video: oneOf(VIDEO_MODES) }),
   commands: struct(Object.fromEntries(Object.entries(COMMANDS2).map(([name, vars]) => [name, withHost(vars)]))),
-  targets
+  targets,
+  dictation: struct({ language: expect("a language code (2\u201316 characters)", (v) => typeof v === "string" && v.length >= 2 && v.length <= 16), recorder: template([]) })
 });
 var expandPath = (path, home, dir) => path === "~" ? home : path.startsWith("~/") ? join2(home, path.slice(2)) : resolve3(dir, path);
 function parseSettings(source, path, where) {
@@ -39049,7 +39237,8 @@ function parseSettings(source, path, where) {
     launchers: { ...base.launchers, ...raw.launchers },
     media: { ...base.media, ...raw.media },
     commands: { ...base.commands, ...raw.commands },
-    targets: { ...base.targets, ...raw.targets }
+    targets: { ...base.targets, ...raw.targets },
+    dictation: { ...base.dictation, ...raw.dictation }
   };
   try {
     resolveKeymap(settings.keys, settingsTargetKeys(settings));
@@ -39278,7 +39467,7 @@ function runBoth(host, args2, timeoutMs) {
   if (!program)
     return Promise.reject(new Error(`${name ?? "command"} not found`));
   return new Promise((resolve4, reject) => {
-    const child = spawn(program, rest, {
+    const child = spawn2(program, rest, {
       env: host.env,
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -39306,7 +39495,7 @@ function runArgs(host, args2, options = {}) {
   if (!program)
     return Promise.reject(new Error(`${name ?? "command"} not found`));
   return new Promise((resolve4, reject) => {
-    const child = spawn(program, rest, {
+    const child = spawn2(program, rest, {
       cwd: options.cwd,
       env: host.env,
       detached: options.graceMs !== undefined,
@@ -39526,7 +39715,7 @@ function hostActions(deps) {
     };
   if (host.which("mpv"))
     actions.playHere = (target2, vo) => new Promise((resolve4, reject) => {
-      const child = spawn(host.which("mpv"), [`--vo=${vo}`, "--really-quiet", "--", target2], {
+      const child = spawn2(host.which("mpv"), [`--vo=${vo}`, "--really-quiet", "--", target2], {
         env: host.env,
         stdio: "inherit"
       });
@@ -39571,6 +39760,11 @@ function hostActions(deps) {
       recording = said === "recording" ? true : said === "idle" ? false : !recording;
       return { recording };
     };
+  } else {
+    const custom = settings.dictation.recorder;
+    const recorder = recorderStatus(host, custom ? expand(custom, {}) : undefined);
+    if (recorder.ready)
+      actions.record = (input) => startRecording(host, recorder.args, { onLimit: input?.onLimit });
   }
   return actions;
 }
@@ -40340,9 +40534,9 @@ var toExponential = (n) => {
   const digits = `${normalized.value}`;
   const point = normalized.value < bigint03 ? 2 : 1;
   const head2 = digits.slice(0, point);
-  const tail = digits.slice(point);
-  const exp = tail.length - normalized.scale;
-  return `${head2}${tail === "" ? "" : `.${tail}`}e${exp >= 0 ? "+" : ""}${exp}`;
+  const tail2 = digits.slice(point);
+  const exp = tail2.length - normalized.scale;
+  return `${head2}${tail2 === "" ? "" : `.${tail2}`}e${exp >= 0 ? "+" : ""}${exp}`;
 };
 var isZero2 = (n) => n.value === bigint03;
 
@@ -50361,8 +50555,8 @@ function recur(ast) {
     case "Arrays": {
       const elements = ast.elements.map(recur);
       const rest = ast.rest.map(recur);
-      const [head2, ...tail] = rest;
-      const tailLength = tail.length;
+      const [head2, ...tail2] = rest;
+      const tailLength = tail2.length;
       return make((a, b) => {
         if (!Array.isArray(a) || !Array.isArray(b)) {
           return false;
@@ -50384,7 +50578,7 @@ function recur(ast) {
             }
           }
           for (let j = 0;j < tailLength; j++) {
-            if (!tail[j](a[i + j], b[i + j])) {
+            if (!tail2[j](a[i + j], b[i + j])) {
               return false;
             }
           }
@@ -50657,8 +50851,8 @@ function toFormatter(ast, options) {
       case "Arrays": {
         const elements = ast2.elements.map((element) => recur2(element));
         const rest = ast2.rest.map(recur2);
-        const [head2, ...tail] = rest;
-        const tailLength = tail.length;
+        const [head2, ...tail2] = rest;
+        const tailLength = tail2.length;
         return (value3) => {
           const out = [];
           let i = 0;
@@ -50676,7 +50870,7 @@ function toFormatter(ast, options) {
               out.push(head2(value3[i]));
             }
             for (let j = 0;j < tailLength; j++) {
-              out.push(tail[j](value3[i + j]));
+              out.push(tail2[j](value3[i + j]));
             }
           }
           return "[" + out.join(", ") + "]";
@@ -51308,14 +51502,14 @@ var parseIpv6Segments = (input) => {
   if (halves.length > 2)
     return addressError(input, "only one compression marker is allowed");
   const head2 = halves[0] === "" ? [] : halves[0].split(":");
-  const tail = halves.length === 2 && halves[1] !== "" ? halves[1].split(":") : [];
-  if (head2.some((part) => part === "") || tail.some((part) => part === "")) {
+  const tail2 = halves.length === 2 && halves[1] !== "" ? halves[1].split(":") : [];
+  if (head2.some((part) => part === "") || tail2.some((part) => part === "")) {
     return addressError(input, "empty segments are only valid in the compression marker");
   }
-  const trailing = tail.length > 0 ? tail[tail.length - 1] : head2.length > 0 ? head2[head2.length - 1] : "";
+  const trailing = tail2.length > 0 ? tail2[tail2.length - 1] : head2.length > 0 ? head2[head2.length - 1] : "";
   let embedded;
   if (trailing.includes(".")) {
-    if (halves.length === 2 && tail.length === 0) {
+    if (halves.length === 2 && tail2.length === 0) {
       return addressError(input, "embedded IPv4 syntax must be trailing");
     }
     const parsed = map2(ipv4FromString(trailing), (address) => {
@@ -51325,18 +51519,18 @@ var parseIpv6Segments = (input) => {
     if (isFailure2(parsed))
       return parsed;
     embedded = parsed.success;
-    if (tail.length > 0)
-      tail.pop();
+    if (tail2.length > 0)
+      tail2.pop();
     else
       head2.pop();
   }
-  const explicit = head2.length + tail.length + (embedded ? 2 : 0);
+  const explicit = head2.length + tail2.length + (embedded ? 2 : 0);
   if (halves.length === 1 ? explicit !== 8 : explicit >= 8) {
     return addressError(input, halves.length === 1 ? "expected eight segments" : "compression must replace at least one segment");
   }
   const parse = (part) => /^[0-9a-fA-F]{1,4}$/.test(part) ? Number.parseInt(part, 16) : undefined;
   const parsedHead = head2.map(parse);
-  const parsedTail = tail.map(parse);
+  const parsedTail = tail2.map(parse);
   if (parsedHead.some((part) => part === undefined) || parsedTail.some((part) => part === undefined)) {
     return addressError(input, "segments must contain one through four hexadecimal digits");
   }
@@ -51421,8 +51615,8 @@ var formatIp = (self2) => {
   if (bestLength < 2)
     return segments.map((segment) => segment.toString(16)).join(":");
   const head2 = segments.slice(0, bestStart).map((segment) => segment.toString(16)).join(":");
-  const tail = segments.slice(bestStart + bestLength).map((segment) => segment.toString(16)).join(":");
-  return `${head2}::${tail}`;
+  const tail2 = segments.slice(bestStart + bestLength).map((segment) => segment.toString(16)).join(":");
+  return `${head2}::${tail2}`;
 };
 var isUnspecified = (self2) => {
   if (isIpv4Address(self2))
@@ -64319,6 +64513,14 @@ var SpeechTranscriptionOptions = Struct({
   speechCorrectionWord: optionalKey2(SpeechCorrectionCue),
   speechSilenceFiltering: Boolean3.pipe(withDecodingDefault(succeed7(true)))
 });
+var DEFAULT_SPEECH_TRANSCRIPTION_OPTIONS = {
+  speechLanguage: "auto",
+  speechTranslateToEnglish: false,
+  speechCustomWords: [],
+  speechRemoveFillerWords: true,
+  speechSilenceFiltering: true
+};
+var SPEECH_MAX_OPTIONS_BYTES = 128000;
 var SpeechPostProcessingOptions = Struct({
   speechCustomWords: SpeechCustomWords,
   speechPostProcessingPrompt: SpeechPostProcessingPromptSettings,
@@ -80206,6 +80408,106 @@ function clientRpcRequiredScopes(method, input) {
 import { chmod, mkdir as mkdir2, readFile as readFile2, rename, writeFile as writeFile2 } from "fs/promises";
 import { dirname as dirname2 } from "path";
 
+// vendor/t3/packages/shared/src/speech.ts
+var decodeOptions = decodeUnknownSync2(fromJsonString2(SpeechTranscriptionOptions));
+var encodeOptions = encodeSync2(fromJsonString2(SpeechTranscriptionOptions));
+var cloudSpeechLanguages = {
+  supportsLanguageDetection: true,
+  languages: "ar bg ca cs da de el en es fa fi fr hi hr hu id it ja ko mk ms nl pl pt ro ru sk sv th tr uk ur vi zh".split(" ")
+};
+function encodeSpeechPcmRequest(pcm, options2) {
+  const metadata = new TextEncoder().encode(encodeOptions(options2));
+  if (metadata.byteLength > SPEECH_MAX_OPTIONS_BYTES)
+    throw new Error("Speech options are too large.");
+  const body = new Uint8Array(4 + metadata.byteLength + pcm.byteLength);
+  new DataView(body.buffer).setUint32(0, metadata.byteLength, true);
+  body.set(metadata, 4);
+  body.set(pcm, 4 + metadata.byteLength);
+  return body;
+}
+
+// src/client/speech.ts
+class SpeechError extends Error {
+  kind;
+  name = "SpeechError";
+  constructor(kind, message) {
+    super(message);
+    this.kind = kind;
+  }
+}
+var SPEECH_SETUP_ROUTE = "open T3's web app, Settings, Voice";
+var decodeStatus = decodeUnknownSync2(EnvironmentSpeechStatus);
+function speechSetupProblem(status2) {
+  if (!status2.supported)
+    return `This T3 server cannot transcribe speech (${status2.reason}).`;
+  if (status2.state === "missing-model")
+    return `No speech model is installed on the T3 server: ${SPEECH_SETUP_ROUTE} to download one.`;
+  return;
+}
+var REASONS = {
+  invalid_audio: new SpeechError("failed", "The server rejected the audio (empty or over 5 minutes)."),
+  speech_unavailable: new SpeechError("setup", `This T3 server cannot transcribe speech.`),
+  speech_busy: new SpeechError("busy", "The speech service is busy; try again in a moment.")
+};
+async function failure(response) {
+  if (response.status === 401)
+    return new SpeechError("auth", "T3 rejected the token. Retry with a fresh token file (r).");
+  if (response.status === 403)
+    return new SpeechError("auth", "The token is not allowed to use speech on this T3 server.");
+  if (response.status === 404)
+    return new SpeechError("setup", "This T3 server has no speech service (update T3).");
+  const body = await response.json().catch(() => {
+    return;
+  });
+  return (typeof body?.reason === "string" ? REASONS[body.reason] : undefined) ?? new SpeechError("failed", `Transcription failed (server answered ${response.status}).`);
+}
+async function send(url, token, path, init) {
+  let response;
+  try {
+    response = await fetch(new URL(path, url), {
+      method: init.method,
+      headers: {
+        authorization: `Bearer ${token}`,
+        ...init.body ? { "content-type": "application/octet-stream" } : {}
+      },
+      body: init.body ? Buffer.from(init.body) : undefined,
+      redirect: "error",
+      signal: init.signal
+    });
+  } catch (error) {
+    if (init.signal?.aborted)
+      throw error;
+    throw new SpeechError("offline", "Could not reach the T3 server; retry when connected.");
+  }
+  if (!response.ok)
+    throw await failure(response);
+  return response;
+}
+async function speechStatus(url, token, signal) {
+  const response = await send(url, token, "/api/voice/status", { method: "GET", signal });
+  try {
+    return decodeStatus(await response.json());
+  } catch {
+    throw new SpeechError("failed", "The server's speech status is unreadable (a newer T3?).");
+  }
+}
+async function transcribeSpeech(url, token, pcm, options2, signal) {
+  const body = encodeSpeechPcmRequest(pcm, {
+    ...DEFAULT_SPEECH_TRANSCRIPTION_OPTIONS,
+    speechRemoveFillerWords: false,
+    ...options2
+  });
+  const response = await send(url, token, "/api/voice/transcribe", {
+    method: "POST",
+    body,
+    signal
+  });
+  const { text: text4 } = await response.json().catch(() => ({}));
+  if (typeof text4 !== "string")
+    throw new SpeechError("failed", "The server's transcript is unreadable (a newer T3?).");
+  return text4.trim();
+}
+
 // vendor/t3/packages/client-runtime/src/connection/model.ts
 var ConnectionTargetBase = {
   environmentId: EnvironmentId,
@@ -81372,7 +81674,7 @@ var fetch2 = /* @__PURE__ */ make35((request, url, signal, fiber2) => {
   }
   let uploadController;
   const stopUpload = sync2(() => uploadController?.abort());
-  const send = (body) => map7(tryPromise2({
+  const send2 = (body) => map7(tryPromise2({
     try: () => fetch3(url, {
       ...options2,
       method: request.method,
@@ -81405,9 +81707,9 @@ var fetch2 = /* @__PURE__ */ make35((request, url, signal, fiber2) => {
   switch (request.body._tag) {
     case "Raw":
     case "Uint8Array":
-      return send(request.body.body);
+      return send2(request.body.body);
     case "FormData":
-      return send(request.body.formData);
+      return send2(request.body.formData);
     case "Stream": {
       supportsStreamBody ??= detectStreamBodySupport();
       if (supportsStreamBody) {
@@ -81424,7 +81726,7 @@ var fetch2 = /* @__PURE__ */ make35((request, url, signal, fiber2) => {
           });
           return sync2(() => uploadSignal.removeEventListener("abort", onAbort));
         });
-        return flatMap4(toReadableStreamEffect(interruptWhen2(request.body.stream, stopped)), send);
+        return flatMap4(toReadableStreamEffect(interruptWhen2(request.body.stream, stopped)), send2);
       }
       if (fiber2.getRef(StreamBodyFallback) === "error") {
         return fail7(new HttpClientError({
@@ -81439,10 +81741,10 @@ var fetch2 = /* @__PURE__ */ make35((request, url, signal, fiber2) => {
           request,
           cause
         })
-      })), flatMap4(send));
+      })), flatMap4(send2));
     }
   }
-  return send(undefined);
+  return send2(undefined);
 });
 var layer2 = /* @__PURE__ */ layerMergedContext(/* @__PURE__ */ succeed7(fetch2));
 // node_modules/effect/dist/encoding/Ndjson.js
@@ -81480,17 +81782,17 @@ var encodeString = () => fromTransform((upstream, _scope) => succeed7(flatMap4(u
 })));
 var encode8 = () => map10(encodeString(), map4((_) => encoder6.encode(_)));
 var makeDecodePull = (upstream, step, flush) => {
-  let failure;
+  let failure2;
   let done4;
   const emit = (out, error) => {
-    failure = error;
+    failure2 = error;
     if (isArrayNonEmpty2(out))
       return succeed7(out);
     return error !== undefined ? fail7(error) : undefined;
   };
   const pull = suspend2(() => {
-    if (failure !== undefined)
-      return fail7(failure);
+    if (failure2 !== undefined)
+      return fail7(failure2);
     if (done4 !== undefined)
       return done3(done4.leftover);
     return matchEffect2(upstream, {
@@ -83905,13 +84207,13 @@ var parseIpv6Address = (host) => {
   if (halves.length > 2)
     return null;
   const head3 = halves[0] ? halves[0].split(":") : [];
-  const tail = halves[1] ? halves[1].split(":") : [];
-  if ([...head3, ...tail].some((part) => !/^[\da-f]{1,4}$/u.test(part)))
+  const tail2 = halves[1] ? halves[1].split(":") : [];
+  if ([...head3, ...tail2].some((part) => !/^[\da-f]{1,4}$/u.test(part)))
     return null;
-  const missing2 = 8 - head3.length - tail.length;
+  const missing2 = 8 - head3.length - tail2.length;
   if (halves.length === 1 && missing2 !== 0 || halves.length === 2 && missing2 < 1)
     return null;
-  return [...head3, ...Array.from({ length: missing2 }, () => "0"), ...tail].map((part) => Number.parseInt(part, 16));
+  return [...head3, ...Array.from({ length: missing2 }, () => "0"), ...tail2].map((part) => Number.parseInt(part, 16));
 };
 var ipv6PrefixMatches = (address, prefix, prefixLength) => {
   const fullHextets = Math.floor(prefixLength / 16);
@@ -84658,12 +84960,12 @@ var firstHealthyAvailable = (self2) => {
   return item;
 };
 var makeWaiter = () => {
-  const waiter = (failure) => {
+  const waiter = (failure2) => {
     const resume = waiter.resume;
     if (resume === undefined)
       return;
     waiter.resume = undefined;
-    resume(failure ?? void_);
+    resume(failure2 ?? void_);
   };
   waiter.resume = undefined;
   return waiter;
@@ -85165,7 +85467,7 @@ var makeNoSerialization = /* @__PURE__ */ fnUntraced2(function* (group2, options
       return interrupt4;
     }
     const id2 = generateRequestId();
-    const send = middleware2((message) => options2.onFromClient({
+    const send2 = middleware2((message) => options2.onFromClient({
       message,
       context: context3
     }), {
@@ -85206,7 +85508,7 @@ var makeNoSerialization = /* @__PURE__ */ fnUntraced2(function* (group2, options
         }
       };
       entries3.set(id2, entry);
-      fiber2 = send.pipe(span ? withParentSpan2(span, {
+      fiber2 = send2.pipe(span ? withParentSpan2(span, {
         captureStackTrace: false
       }) : identity, runForkWith2(parentFiber.context));
       fiber2.addObserver((exit3) => {
@@ -85282,17 +85584,17 @@ var makeNoSerialization = /* @__PURE__ */ fnUntraced2(function* (group2, options
       middlewares.push(middleware2);
     }
     if (middlewares.length === 0) {
-      return (send, request) => send(request);
+      return (send2, request) => send2(request);
     }
-    return function loop(send, request, index3 = middlewares.length - 1) {
+    return function loop(send2, request, index3 = middlewares.length - 1) {
       if (index3 === -1) {
-        return send(request);
+        return send2(request);
       }
       return middlewares[index3]({
         rpc: rpc2,
         request,
         next(request2) {
-          return loop(send, request2, index3 - 1);
+          return loop(send2, request2, index3 - 1);
         }
       });
     };
@@ -85374,7 +85676,7 @@ var make48 = /* @__PURE__ */ fnUntraced2(function* (group2, options2) {
   const {
     codecFor,
     run: run3,
-    send,
+    send: send2,
     supportsAck,
     supportsTransferables
   } = yield* Protocol;
@@ -85386,7 +85688,7 @@ var make48 = /* @__PURE__ */ fnUntraced2(function* (group2, options2) {
     if (!entries3.has(requestId))
       return void_3;
     entries3.delete(requestId);
-    return send(clientId, {
+    return send2(clientId, {
       _tag: "Interrupt",
       requestId
     });
@@ -85417,7 +85719,7 @@ var make48 = /* @__PURE__ */ fnUntraced2(function* (group2, options2) {
               entries3.delete(message.id);
               return interrupt4;
             }
-            return send(clientId, {
+            return send2(clientId, {
               ...message,
               id: message.id,
               payload,
@@ -85429,7 +85731,7 @@ var make48 = /* @__PURE__ */ fnUntraced2(function* (group2, options2) {
           const entry = entries3.get(message.requestId);
           if (!entry)
             return void_3;
-          return send(clientId, {
+          return send2(clientId, {
             _tag: "Ack",
             requestId: message.requestId
           });
@@ -85590,7 +85892,7 @@ var makeProtocolHttpBatched = /* @__PURE__ */ fnUntraced2(function* (client, opt
       closeBatch(clientId, batch);
       return done2(batch.done, exit3);
     }));
-    const send = fnUntraced2(function* (clientId, request) {
+    const send2 = fnUntraced2(function* (clientId, request) {
       let batch = batches.get(clientId);
       if (batch === undefined) {
         batch = {
@@ -85617,7 +85919,7 @@ var makeProtocolHttpBatched = /* @__PURE__ */ fnUntraced2(function* (client, opt
       return yield* exchange.requestExit(request, yield* _await(batch.done));
     });
     return {
-      send: (clientId, request) => request._tag === "Request" ? send(clientId, request) : void_3,
+      send: (clientId, request) => request._tag === "Request" ? send2(clientId, request) : void_3,
       supportsAck: false,
       supportsTransferables: false,
       codecFor: serialization.codecFor
@@ -85639,7 +85941,7 @@ var makeHttpExchange = (client, serialization, writeResponse) => {
       cause
     })
   });
-  const send = fnUntraced2(function* (clientId, requests) {
+  const send2 = fnUntraced2(function* (clientId, requests) {
     const parser = serialization.makeUnsafe();
     const encoded = parser.encode(requests.length === 1 ? requests[0] : requests);
     const body = typeof encoded === "string" ? text3(encoded, serialization.contentType) : uint8Array(encoded, serialization.contentType);
@@ -85701,7 +86003,7 @@ var makeHttpExchange = (client, serialization, writeResponse) => {
     return void_2;
   };
   return {
-    send,
+    send: send2,
     requestExit
   };
 };
@@ -85960,7 +86262,7 @@ var makeProtocolWorker = (options2) => Protocol.make(fnUntraced2(function* (writ
     }
     entries3.clear();
   }));
-  const send = (clientId, request, transferables) => {
+  const send2 = (clientId, request, transferables) => {
     switch (request._tag) {
       case "Request": {
         return get13(pool).pipe(flatMap4((worker2) => {
@@ -86002,7 +86304,7 @@ var makeProtocolWorker = (options2) => Protocol.make(fnUntraced2(function* (writ
   if (isSome2(hooks))
     yield* hooks.value.onConnect;
   return {
-    send,
+    send: send2,
     supportsAck: true,
     supportsTransferables: true,
     codecFor: toCodecJson2
@@ -86758,8 +87060,8 @@ var make51 = fn2("EnvironmentSupervisor.make")(function* (entry, options2) {
     const index3 = results2.indexOf("ready");
     if (index3 === -1)
       return;
-    const live = yield* get11(session);
-    if (isNone2(live) || live.value !== lease.session)
+    const live2 = yield* get11(session);
+    if (isNone2(live2) || live2.value !== lease.session)
       return;
     yield* signal({
       _tag: "BetterRouteAvailable",
@@ -86800,11 +87102,11 @@ var make51 = fn2("EnvironmentSupervisor.make")(function* (entry, options2) {
     if (hasInterruptsOnly2(exit3.cause)) {
       return yield* annotateCurrentSpan2("connection.outcome", "interrupted");
     }
-    const failure = exit3.cause.reasons.find(isFailReason2)?.error;
+    const failure2 = exit3.cause.reasons.find(isFailReason2)?.error;
     yield* annotateCurrentSpan2({
       "connection.outcome": "failed",
-      "connection.failure.tag": failure?._tag ?? "defect",
-      "connection.failure.reason": failure?.reason ?? "defect"
+      "connection.failure.tag": failure2?._tag ?? "defect",
+      "connection.failure.reason": failure2?.reason ?? "defect"
     });
   });
   const traceRelayEstablishment = (effect2, attempt2, generation, pendingRetry) => {
@@ -88434,8 +88736,8 @@ ${result3.success.error ?? ""}`;
     });
     const tokenResult = yield* result2(session.clerkToken);
     if (tokenResult._tag === "Failure") {
-      const failure = tokenResult.failure;
-      if (failure._tag === "ConnectionBlockedError" && failure.reason === "authentication") {
+      const failure2 = tokenResult.failure;
+      if (failure2._tag === "ConnectionBlockedError" && failure2.reason === "authentication") {
         if ((yield* get8(accountGeneration)) !== generation) {
           return;
         }
@@ -88445,7 +88747,7 @@ ${result3.success.error ?? ""}`;
         }));
         return;
       }
-      return yield* failure;
+      return yield* failure2;
     }
     const clerkToken = tokenResult.success;
     if ((yield* get8(accountGeneration)) !== generation) {
@@ -88572,7 +88874,7 @@ __export(exports_AsyncResult, {
   error: () => error,
   fail: () => fail15,
   failWithPrevious: () => failWithPrevious,
-  failure: () => failure,
+  failure: () => failure2,
   failureWithPrevious: () => failureWithPrevious,
   flatMap: () => flatMap8,
   fromExit: () => fromExit,
@@ -88631,7 +88933,7 @@ var ResultProto = {
   }
 };
 var isWaiting = (result3) => result3.waiting;
-var fromExit = (exit3) => exit3._tag === "Success" ? success(exit3.value) : failure(exit3.cause);
+var fromExit = (exit3) => exit3._tag === "Success" ? success(exit3.value) : failure2(exit3.cause);
 var fromExitWithPrevious = (exit3, previous) => exit3._tag === "Success" ? success(exit3.value) : failureWithPrevious(exit3.cause, {
   previous
 });
@@ -88660,7 +88962,7 @@ var success = (value3, options2) => {
 };
 var isFailure5 = (result3) => result3._tag === "Failure";
 var isInterrupted = (result3) => result3._tag === "Failure" && hasInterruptsOnly2(result3.cause);
-var failure = (cause, options2) => {
+var failure2 = (cause, options2) => {
   const result3 = Object.create(ResultProto);
   result3._tag = "Failure";
   result3.cause = cause;
@@ -88668,11 +88970,11 @@ var failure = (cause, options2) => {
   result3.waiting = options2?.waiting ?? false;
   return result3;
 };
-var failureWithPrevious = (cause, options2) => failure(cause, {
+var failureWithPrevious = (cause, options2) => failure2(cause, {
   previousSuccess: flatMap(options2.previous, (result3) => isSuccess5(result3) ? some2(result3) : isFailure5(result3) ? result3.previousSuccess : none2()),
   waiting: options2.waiting
 });
-var fail15 = (error, options2) => failure(fail6(error), options2);
+var fail15 = (error, options2) => failure2(fail6(error), options2);
 var failWithPrevious = (error, options2) => failureWithPrevious(fail6(error), options2);
 var waiting = /* @__PURE__ */ dual((args2) => isAsyncResult(args2[0]), (self2, options2) => {
   if (self2.waiting) {
@@ -88732,7 +89034,7 @@ var map13 = /* @__PURE__ */ dual(2, (self2, f) => {
     case "Initial":
       return self2;
     case "Failure":
-      return failure(self2.cause, {
+      return failure2(self2.cause, {
         previousSuccess: map(self2.previousSuccess, (s) => success(f(s.value), s)),
         waiting: self2.waiting
       });
@@ -88745,7 +89047,7 @@ var flatMap8 = /* @__PURE__ */ dual(2, (self2, f) => {
     case "Initial":
       return self2;
     case "Failure":
-      return failure(self2.cause, {
+      return failure2(self2.cause, {
         previousSuccess: flatMap(self2.previousSuccess, (s) => {
           const next2 = f(s.value, s);
           return isSuccess5(next2) ? some2(next2) : none2();
@@ -88810,7 +89112,7 @@ var all3 = (results2) => {
       assignProperty(successes, key5, result3);
       continue;
     } else if (isFailure5(result3)) {
-      return failure(result3.cause, {
+      return failure2(result3.cause, {
         previousSuccess: combinedPreviousSuccess(entries3, isIter),
         waiting: result3.waiting
       });
@@ -88937,7 +89239,7 @@ var Schema = (options2) => {
           onFailure: (issue) => new Composite(ast, [new Pointer(["previousSuccess", "value"], issue)], input, options3)
         })), getOrElse(() => succeedNone2));
         const causeEffect = mapErrorEager2(decodeUnknownEffect(cause2)(input.cause, options3), (issue) => makeCompositeAtKey(ast, "cause", issue, input, options3));
-        return flatMapEager2(prevSuccessEffect, (previousSuccess) => mapEager2(causeEffect, (cause3) => failure(cause3, {
+        return flatMapEager2(prevSuccessEffect, (previousSuccess) => mapEager2(causeEffect, (cause3) => failure2(cause3, {
           previousSuccess,
           waiting: input.waiting
         })));
@@ -88968,7 +89270,7 @@ var Schema = (options2) => {
                 timestamp: encoded.timestamp
               });
             case "Failure": {
-              return failure(encoded.cause, {
+              return failure2(encoded.cause, {
                 previousSuccess: map(encoded.previousSuccess, (ps) => success(ps.value, ps)),
                 waiting: encoded.waiting
               });
@@ -89344,17 +89646,17 @@ var invoke = (f) => {
 };
 var noFailure = {};
 function runAll(items, f) {
-  let failure2 = noFailure;
+  let failure3 = noFailure;
   for (const item of items) {
     try {
       f(item);
     } catch (error2) {
-      if (failure2 === noFailure)
-        failure2 = error2;
+      if (failure3 === noFailure)
+        failure3 = error2;
     }
   }
-  if (failure2 !== noFailure)
-    throw failure2;
+  if (failure3 !== noFailure)
+    throw failure3;
 }
 var SerializableTypeId = "~effect-atom/atom/Atom/Serializable";
 var atomKey = (atom) => (SerializableTypeId in atom) ? atom[SerializableTypeId].key : atom;
@@ -89785,23 +90087,23 @@ class NodeImpl {
       return;
     }
     this._value = value4;
-    let failure2 = noFailure;
+    let failure3 = noFailure;
     try {
       if (initialized || recovered)
         this.invalidateChildren();
     } catch (error2) {
-      failure2 = error2;
+      failure3 = error2;
     }
     if (this.listeners.size > 0) {
       try {
         this.announce();
       } catch (error2) {
-        if (failure2 === noFailure)
-          failure2 = error2;
+        if (failure3 === noFailure)
+          failure3 = error2;
       }
     }
-    if (failure2 !== noFailure)
-      throw failure2;
+    if (failure3 !== noFailure)
+      throw failure3;
   }
   announce() {
     if (batchState.phase === BatchPhase.collect) {
@@ -89840,19 +90142,19 @@ class NodeImpl {
     if (this.children.size === 0) {
       return;
     }
-    let failure2 = noFailure;
+    let failure3 = noFailure;
     for (const child of Array.from(this.children)) {
       if (!child.affectedBy(this))
         continue;
       try {
         child.invalidate();
       } catch (error2) {
-        if (failure2 === noFailure)
-          failure2 = error2;
+        if (failure3 === noFailure)
+          failure3 = error2;
       }
     }
-    if (failure2 !== noFailure)
-      throw failure2;
+    if (failure3 !== noFailure)
+      throw failure3;
   }
   affectedBy(parent) {
     if (this.state === NodeState.valid)
@@ -90115,11 +90417,11 @@ function batch(f) {
   const previousPhase = batchState.phase;
   batchState.phase = BatchPhase.collect;
   batchState.depth++;
-  let failure2 = noFailure;
+  let failure3 = noFailure;
   try {
     f();
   } catch (error2) {
-    failure2 = error2;
+    failure3 = error2;
   }
   if (batchState.depth === 1) {
     const {
@@ -90133,8 +90435,8 @@ function batch(f) {
         try {
           batchRebuildNode(stale[i]);
         } catch (error2) {
-          if (failure2 === noFailure)
-            failure2 = error2;
+          if (failure3 === noFailure)
+            failure3 = error2;
         }
       }
       batchState.phase = BatchPhase.commit;
@@ -90142,8 +90444,8 @@ function batch(f) {
         try {
           node.notify();
         } catch (error2) {
-          if (failure2 === noFailure)
-            failure2 = error2;
+          if (failure3 === noFailure)
+            failure3 = error2;
         }
       }
     } while (i < stale.length);
@@ -90152,8 +90454,8 @@ function batch(f) {
   }
   batchState.depth--;
   batchState.phase = previousPhase;
-  if (failure2 !== noFailure)
-    throw failure2;
+  if (failure3 !== noFailure)
+    throw failure3;
 }
 function batchRebuildNode(node) {
   if (node.state === NodeState.valid) {
@@ -91939,6 +92241,10 @@ function platform(config) {
   const boundary = {
     workspaceRefs: (token, cwd) => workspaceRefs(config.url, token, cwd),
     uploadImage: (token, bytes2, meta) => uploadImage(config.url, token, bytes2, meta),
+    speech: {
+      status: (token) => speechStatus(config.url, token),
+      transcribe: (token, pcm, options2, signal) => transcribeSpeech(config.url, token, pcm, { speechLanguage: config.settings.dictation.language, ...options2 }, signal)
+    },
     diffs: {
       full: (token, input) => diffMethods.full(config.url, token, input),
       turn: (token, input) => diffMethods.turn(config.url, token, input)
@@ -92045,6 +92351,7 @@ function platform(config) {
       ...boundary,
       dispatch: blocked,
       uploadImage: blocked,
+      speech: undefined,
       answerSecret: blocked,
       terminal: undefined,
       pageUrl: blocked,
@@ -92296,7 +92603,12 @@ async function actionsReport(settings2, host, probes, readOnly2) {
   await command2("type into a terminal", "commands.tmux", settings2.commands.tmux);
   await command2("run code block", "commands.run", settings2.commands.run);
   await command2("send", "commands.send", settings2.commands.send);
-  await command2("dictation", "commands.dictation", settings2.commands.dictation);
+  if (settings2.commands.dictation)
+    await command2("dictation", "commands.dictation", settings2.commands.dictation);
+  else {
+    const recorder = recorderStatus(host, settings2.dictation.recorder ? expand(settings2.dictation.recorder, {}) : undefined);
+    add4("dictation", recorder.ready, recorder.ready ? `${recorder.name}; T3 web app \u2192 Settings \u2192 Voice must have a model installed` : recorder.reason);
+  }
   await command2("link mapping", "commands.mapUrl", settings2.commands.mapUrl);
   return rows;
 }
@@ -92625,6 +92937,7 @@ var READ_ONLY_POLICY = {
   pasteImage: "block",
   pickFiles: "block",
   toggleDictation: "block",
+  record: "block",
   editor: "block",
   copy: "allow",
   targets: "allow",
@@ -95149,20 +95462,30 @@ function createClient(boundary, managedToken, now2 = Date.now) {
         return Promise.reject(new Error("Offline"));
       return runtime2.runPromise(boundary.uploadImage(token, bytes2, meta));
     },
+    speechStatus() {
+      if (!token || !boundary.speech)
+        return Promise.reject(new Error("Offline"));
+      return boundary.speech.status(token);
+    },
+    transcribe(pcm, options2, signal) {
+      if (!token || !boundary.speech)
+        return Promise.reject(new Error("Offline"));
+      return boundary.speech.transcribe(token, pcm, options2, signal);
+    },
     get terminalAvailable() {
       return !!boundary.terminal;
     },
     terminal(input, receive2, done4) {
-      let send = (_op) => {};
+      let send2 = (_op) => {};
       if (!token || !boundary.terminal) {
         done4(new Error("Offline"));
-        return { send, stop() {} };
+        return { send: send2, stop() {} };
       }
       const fiber3 = runtime2.runFork(boundary.terminal(token, input, receive2, (bound) => {
-        send = bound;
+        send2 = bound;
       }).pipe(match5({ onFailure: done4, onSuccess: () => done4() })));
       return {
-        send: (op) => send(op),
+        send: (op) => send2(op),
         stop: () => void runtime2.runFork(interrupt5(fiber3))
       };
     },
@@ -96265,17 +96588,17 @@ function deriveAgentRows(input) {
     if (!thread)
       return [];
     const status2 = threadRelationshipRowStatus(graph, row);
-    const live = !FINISHED.has(status2 ?? "") && (status2 === null || WORKING.has(status2));
+    const live2 = !FINISHED.has(status2 ?? "") && (status2 === null || WORKING.has(status2));
     const record3 = projection?.subagents.find((agent) => agent.childThreadId === thread.id);
     const request2 = subagentRequest(thread);
     return [
       {
         threadId: thread.id,
         title: formatSubagentDisplayTitle(thread.title) || record3?.title || "Agent",
-        state: request2 && live ? `Waiting \xB7 ${request2 === "approval" ? "approval" : "question"}` : agentStatusLabel(status2),
-        live,
-        startedAt: iso((live ? thread.activityRunStartedAt : thread.latestRunStartedAt) ?? record3?.startedAt),
-        completedAt: live ? null : iso(thread.latestRunCompletedAt ?? record3?.completedAt)
+        state: request2 && live2 ? `Waiting \xB7 ${request2 === "approval" ? "approval" : "question"}` : agentStatusLabel(status2),
+        live: live2,
+        startedAt: iso((live2 ? thread.activityRunStartedAt : thread.latestRunStartedAt) ?? record3?.startedAt),
+        completedAt: live2 ? null : iso(thread.latestRunCompletedAt ?? record3?.completedAt)
       }
     ];
   });
@@ -96574,7 +96897,7 @@ function TerminalPanel({
   const rows = Math.max(1, height - 1);
   const size6 = import_react26.useRef({ cols, rows });
   size6.current = { cols, rows };
-  const live = useClientAtom(client, client.status) === "live";
+  const live2 = useClientAtom(client, client.status) === "live";
   const term = import_react26.useRef(undefined);
   const session = import_react26.useRef(undefined);
   const [state2, setState] = import_react26.useState("connecting");
@@ -96583,7 +96906,7 @@ function TerminalPanel({
   const [retry5, setRetry] = import_react26.useState(0);
   const [frame, setFrame] = import_react26.useState(0);
   import_react26.useEffect(() => {
-    if (!threadId || !cwd || !live || !client.terminalAvailable)
+    if (!threadId || !cwd || !live2 || !client.terminalAvailable)
       return;
     const screen2 = new import_headless.Terminal({ ...size6.current, scrollback: 5000, allowProposedApi: true });
     term.current = screen2;
@@ -96636,9 +96959,9 @@ function TerminalPanel({
         screen2.clear();
         paint();
       }
-    }, (failure2) => {
+    }, (failure3) => {
       if (active2)
-        setState(failure2 ? "disconnected" : "closed");
+        setState(failure3 ? "disconnected" : "closed");
     });
     session.current = attached;
     const answers = screen2.onData((data) => {
@@ -96654,7 +96977,7 @@ function TerminalPanel({
       term.current = undefined;
       session.current = undefined;
     };
-  }, [client, threadId, cwd, worktreePath, live, retry5]);
+  }, [client, threadId, cwd, worktreePath, live2, retry5]);
   import_react26.useEffect(() => {
     const screen2 = term.current;
     if (!screen2 || screen2.cols === cols && screen2.rows === rows)
@@ -96710,7 +97033,7 @@ function TerminalPanel({
       children: text5
     })
   });
-  const blocked = !client.terminalAvailable ? "Terminal is off in read-only mode." : !threadId ? "Select a thread." : !cwd ? "This thread has no workspace." : !live ? "Offline. The terminal returns when the server does." : "";
+  const blocked = !client.terminalAvailable ? "Terminal is off in read-only mode." : !threadId ? "Select a thread." : !cwd ? "This thread has no workspace." : !live2 ? "Offline. The terminal returns when the server does." : "";
   return /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
     flexDirection: "column",
     flexGrow: 1,
@@ -97740,9 +98063,9 @@ class MarkdownCache {
           result4.push(row);
       return this.finish(items, width2, result4);
     }
-    const live = new Set(items.map((item) => item.id));
+    const live2 = new Set(items.map((item) => item.id));
     for (const id2 of this.cache.keys())
-      if (!live.has(id2))
+      if (!live2.has(id2))
         this.cache.delete(id2);
     const result3 = items.flatMap((_, index3) => this.itemRows(items, index3, width2, imageHeight, offered));
     return this.finish(items, width2, result3);
@@ -97819,18 +98142,18 @@ function ImagePreview({
     setBytes(undefined);
     setInfo(undefined);
     setFailed(false);
-    const failure2 = () => {
+    const failure3 = () => {
       if (active2)
         setFailed(true);
     };
     load?.(image2.source, cwd).then((value4) => {
       if (active2)
         setBytes(value4);
-    }, failure2);
+    }, failure3);
     inspect2?.(image2.source, cwd).then((value4) => {
       if (active2)
         setInfo(value4);
-    }, failure2);
+    }, failure3);
     return () => {
       active2 = false;
     };
@@ -100415,10 +100738,10 @@ function sidebarRows(entries3, width2) {
     const last = rows[rows.length - 1];
     if (entry.project) {
       const project2 = entry.projectGlyph ? `${entry.projectGlyph} ${entry.project}` : entry.project;
-      const tail = `${last.text.trim() === "\xB7" ? "" : " \xB7"} ${project2}`;
+      const tail2 = `${last.text.trim() === "\xB7" ? "" : " \xB7"} ${project2}`;
       const room = width2 - timeWidth - Bun.stringWidth(last.lead + last.text);
       if (room >= 4)
-        last.projectText = truncateName(tail, room);
+        last.projectText = truncateName(tail2, room);
     }
     if (entry.timeLabel) {
       const space = width2 - Bun.stringWidth(last.lead + last.text + last.projectText);
@@ -100876,6 +101199,158 @@ function ThreadPalette({
       ]
     })
   });
+}
+
+// src/client/dictation.ts
+function createDictation(client, effects, notice = () => {}) {
+  let state2 = "idle";
+  let message = "";
+  let generation = 0;
+  let capture;
+  let request2;
+  let origin2;
+  let pending = false;
+  let disposed = false;
+  let fallback;
+  const editors = new Map;
+  const listeners = new Set;
+  const update4 = (next2, text5) => {
+    state2 = next2;
+    message = text5;
+    notice(text5);
+    for (const listener of listeners)
+      listener();
+  };
+  function cancel() {
+    if (effects?.toggleDictation)
+      return;
+    generation++;
+    pending = false;
+    capture?.cancel();
+    capture = undefined;
+    request2?.abort();
+    request2 = undefined;
+    update4("idle", "Mic cancelled");
+  }
+  async function toggle(id2) {
+    if (disposed)
+      return;
+    if (effects?.toggleDictation) {
+      if (pending)
+        return;
+      pending = true;
+      try {
+        const result3 = await effects.toggleDictation();
+        if (!disposed)
+          update4(result3.recording ? "recording" : "idle", result3.recording ? `Mic recording \xB7 ${hintFor("dictation")} stop` : "Mic stopped \u2713");
+      } catch {
+        if (!disposed)
+          update4("error", "Mic unavailable; retry when connected.");
+      } finally {
+        pending = false;
+      }
+      return;
+    }
+    if (state2 === "transcribing" || pending) {
+      cancel();
+      return;
+    }
+    const run3 = ++generation;
+    try {
+      if (state2 === "recording" && capture) {
+        const recording = capture;
+        request2 = new AbortController;
+        const signal = request2.signal;
+        update4("transcribing", "Mic transcribing \xB7 press mic again to cancel");
+        const pcm = await recording.stop();
+        if (generation !== run3 || disposed)
+          return;
+        capture = undefined;
+        const text5 = await client.transcribe(pcm, {}, signal);
+        if (generation !== run3 || disposed)
+          return;
+        request2 = undefined;
+        if (text5 && origin2) {
+          const insert = editors.get(origin2);
+          if (insert)
+            insert(text5);
+          else
+            fallback?.(origin2, text5);
+        }
+        update4("idle", text5 ? "Mic transcript added \u2713" : "No speech detected");
+      } else {
+        if (!id2 || !effects?.record)
+          return;
+        origin2 = id2;
+        pending = true;
+        const problem = speechSetupProblem(await client.speechStatus());
+        if (generation !== run3 || disposed)
+          return;
+        if (problem)
+          throw new Error(problem);
+        let reachedLimit = false;
+        const recording = await effects.record({
+          onLimit: () => {
+            reachedLimit = true;
+            if (!pending)
+              toggle();
+          }
+        });
+        if (generation !== run3 || disposed) {
+          recording.cancel();
+          return;
+        }
+        capture = recording;
+        pending = false;
+        update4("recording", `Mic recording \xB7 ${hintFor("dictation")} stop`);
+        if (reachedLimit)
+          toggle();
+      }
+    } catch (error2) {
+      if (generation === run3 && !disposed) {
+        capture?.cancel();
+        capture = undefined;
+        request2 = undefined;
+        update4("error", error2 instanceof Error ? error2.message : "Dictation failed");
+      }
+    } finally {
+      if (generation === run3)
+        pending = false;
+    }
+  }
+  return {
+    toggle,
+    cancel,
+    getSnapshot: () => state2,
+    getMessage: () => message,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    setFallback(sink) {
+      fallback = sink;
+      return () => {
+        if (fallback === sink)
+          fallback = undefined;
+      };
+    },
+    register(id2, insert) {
+      editors.set(id2, insert);
+      return () => {
+        if (editors.get(id2) === insert)
+          editors.delete(id2);
+      };
+    },
+    dispose() {
+      cancel();
+      disposed = true;
+      editors.clear();
+      fallback = undefined;
+      listeners.clear();
+    }
+  };
 }
 
 // src/client/composer.tsx
@@ -102097,6 +102572,7 @@ function emojiChoices(query2) {
 function ThreadComposer({
   client,
   effects,
+  dictation: suppliedDictation,
   enabled,
   pasteEnabled = false,
   collapsed = false,
@@ -102104,6 +102580,13 @@ function ThreadComposer({
   onSent
 }) {
   const composer = import_react44.useMemo(() => createComposer(client, client.boundary.drafts), [client]);
+  const localDictation = import_react44.useMemo(() => createDictation(client, effects), [client, effects]);
+  const dictation = suppliedDictation ?? localDictation;
+  import_react44.useEffect(() => () => localDictation.dispose(), [localDictation]);
+  import_react44.useEffect(() => dictation.setFallback((origin2, text5) => {
+    const draft = client.registry.get(composer.drafts)[origin2] ?? "";
+    composer.setDraft(origin2, draft + (draft && !/\s$/.test(draft) ? " " : "") + text5);
+  }), [client, composer, dictation]);
   useClientAtom(client, client.transcripts);
   const [leaveCard, setLeaveCard] = import_react44.useState();
   const id2 = useClientAtom(client, client.selectedThreadId);
@@ -102141,6 +102624,7 @@ function ThreadComposer({
         client,
         effects,
         composer,
+        dictation,
         id: id2,
         enabled: enabled && !answering,
         pasteFromPane: !enabled && pasteEnabled && !answering,
@@ -102154,6 +102638,7 @@ function ThreadComposer({
 function Editor({
   client,
   composer,
+  dictation,
   effects,
   id: id2,
   enabled,
@@ -102166,8 +102651,15 @@ function Editor({
   const [mediaStatus, setMediaStatus] = import_react44.useState("");
   const [mediaBusy, setMediaBusy] = import_react44.useState(false);
   const mediaLock = import_react44.useRef(false);
-  const [recording, setRecording] = import_react44.useState(false);
+  const micState = import_react44.useSyncExternalStore(dictation.subscribe, dictation.getSnapshot);
+  const recording = micState === "recording";
   async function media3(kind) {
+    if (kind === "mic") {
+      setMediaStatus("");
+      onInputFocus?.();
+      await dictation.toggle(id2);
+      return;
+    }
     if (mediaLock.current || busy)
       return;
     mediaLock.current = true;
@@ -102198,15 +102690,11 @@ function Editor({
         if (!effects?.pasteImage)
           throw new Error("unavailable");
         composer.attach(id2, await effects.pasteImage());
-      } else {
-        if (!effects?.toggleDictation)
-          throw new Error("unavailable");
-        setRecording((await effects.toggleDictation()).recording);
       }
       setMediaStatus("\u2713");
     } catch (error3) {
       const reason = error3 instanceof Error && error3.message !== "unavailable" ? error3.message : "";
-      setMediaStatus(kind === "files" ? `Attach failed${reason && ` (${reason})`}.` : kind !== "mic" ? `Paste unavailable${reason && ` (${reason})`}: copy text or a PNG up to 2000px / 10 MB.` : `Mic unavailable${reason && ` (${reason})`}; retry when connected.`);
+      setMediaStatus(kind === "files" ? `Attach failed${reason && ` (${reason})`}.` : `Paste unavailable${reason && ` (${reason})`}: copy text or a PNG up to 2000px / 10 MB.`);
     } finally {
       mediaLock.current = false;
       setMediaBusy(false);
@@ -102219,6 +102707,12 @@ function Editor({
   useClientAtom(client, client.transcripts);
   const snapshot2 = useClientAtom(client, client.snapshot);
   const editor2 = import_react44.useRef(null);
+  import_react44.useEffect(() => dictation.register(id2, (value4) => {
+    if (editor2.current) {
+      editor2.current.insertText(value4);
+      composer.setDraft(id2, editor2.current.plainText);
+    }
+  }), [dictation, composer, id2]);
   const [edit, setEdit] = import_react44.useState();
   const [choices, setChoices] = import_react44.useState([]);
   const [choice, setChoice] = import_react44.useState(0);
@@ -102279,7 +102773,7 @@ function Editor({
     target2.cursorOffset = trigger.start + inserted.length + 1;
     setChoices([]);
   }
-  async function send(alternate = false) {
+  async function send2(alternate = false) {
     if (await composer.send(id2, alternate, edit)) {
       setEdit(undefined);
       onSent?.();
@@ -102293,7 +102787,7 @@ function Editor({
     if (selected && !typed && !attached)
       composer.promote(id2, selected.id);
     else
-      send(true);
+      send2(true);
   }
   usePaste((event) => {
     if (!pasteFromPane || !editor2.current)
@@ -102319,12 +102813,22 @@ function Editor({
     }
     if (!enabled)
       return;
+    if (key5.name === "escape" && !effects?.toggleDictation && (recording || micState === "transcribing")) {
+      key5.preventDefault();
+      dictation.cancel();
+      return;
+    }
+    if (commandForKey(key5) === "dictation" && hasDictation(effects)) {
+      key5.preventDefault();
+      media3("mic");
+      return;
+    }
     if (key5.ctrl && key5.name === "v" && effects?.pasteClipboard) {
       key5.preventDefault();
       media3("clipboard");
       return;
     }
-    if (key5.meta && (key5.name === "backspace" || commandForKey(key5) === "dictation" && effects?.toggleDictation || key5.name === "p" && effects?.pasteImage)) {
+    if (key5.meta && (key5.name === "backspace" || key5.name === "p" && effects?.pasteImage)) {
       key5.preventDefault();
       if (key5.name === "backspace") {
         const image2 = images.at(-1);
@@ -102373,7 +102877,7 @@ function Editor({
       if (key5.meta)
         steer();
       else
-        send();
+        send2();
     }
   });
   const queued = composer.queued(id2);
@@ -102525,7 +103029,7 @@ function Editor({
               " "
             ]
           }),
-          effects?.toggleDictation && /* @__PURE__ */ import_jsx_runtime.jsxs("text", {
+          hasDictation(effects) && /* @__PURE__ */ import_jsx_runtime.jsxs("text", {
             fg: theme.accent,
             onMouseUp: (event) => {
               if (event.button === 0)
@@ -102535,13 +103039,13 @@ function Editor({
               "[",
               hintFor("dictation"),
               " ",
-              recording ? "Stop mic" : "mic",
+              recording ? effects?.toggleDictation ? "Stop mic" : "Recording" : micState === "transcribing" ? "Transcribing" : "mic",
               "]"
             ]
           }),
           /* @__PURE__ */ import_jsx_runtime.jsx("text", {
             fg: theme.plain,
-            children: mediaBusy ? " \u2026" : mediaStatus
+            children: mediaBusy ? " \u2026" : mediaStatus || dictation.getMessage()
           })
         ]
       }),
@@ -102598,7 +103102,7 @@ function Editor({
             fg: theme.accent,
             onMouseUp: (event) => {
               if (event.button === 0 && !busy)
-                send();
+                send2();
             },
             children: busy ? "[sending\u2026]" : edit ? "[save queued edit]" : `[${requiresModifier(shortcut, text5) ? "Ctrl+Enter" : "Enter"} send / queue]`
           }),
@@ -106274,9 +106778,9 @@ function latestUsage(turns) {
 }
 function contextDetailOf(input) {
   const turns = (input.providerTurns ?? []).filter((turn2) => !input.activeProviderThreadId || turn2.providerThreadId === input.activeProviderThreadId);
-  const { usage: live, turn } = latestUsage(turns);
+  const { usage: live2, turn } = latestUsage(turns);
   const snapshot2 = input.providerThread?.contextUsage ?? null;
-  const source = live ?? snapshot2;
+  const source = live2 ?? snapshot2;
   if (source === null)
     return null;
   const used = Math.max(0, source.usedTokens);
@@ -106308,7 +106812,7 @@ function contextDetailOf(input) {
         color: theme.border
       });
   }
-  const expires = live?.promptCacheExpiresAt ? Date.parse(live.promptCacheExpiresAt) : NaN;
+  const expires = live2?.promptCacheExpiresAt ? Date.parse(live2.promptCacheExpiresAt) : NaN;
   return {
     used,
     max: max5,
@@ -106356,15 +106860,15 @@ var headText = (detail) => detail === null ? "Context unknown" : detail.percent 
 var tailText = (detail) => detail.max === null ? "" : `${tokensText(detail.used)} / ${tokensText(detail.max)}`;
 function chipLayout(detail, columns, open2) {
   const head3 = headText(detail);
-  const tail = detail ? tailText(detail) : "";
+  const tail2 = detail ? tailText(detail) : "";
   const arrow = open2 ? " \u25B4" : " \u25BE";
   const base = Bun.stringWidth(head3 + arrow);
-  const withTail = tail ? base + 1 + Bun.stringWidth(tail) : base;
+  const withTail = tail2 ? base + 1 + Bun.stringWidth(tail2) : base;
   const hasBar = !!detail && detail.slices.length > 0;
   if (hasBar && columns >= withTail + 1 + 8)
-    return { head: head3, tail, arrow, bar: Math.min(24, columns - withTail - 1) };
+    return { head: head3, tail: tail2, arrow, bar: Math.min(24, columns - withTail - 1) };
   if (columns >= withTail)
-    return { head: head3, tail, arrow, bar: 0 };
+    return { head: head3, tail: tail2, arrow, bar: 0 };
   if (columns >= base)
     return { head: head3, tail: "", arrow, bar: 0 };
   return null;
@@ -106686,6 +107190,8 @@ function AppFrame({
   };
   const [menuTarget, setMenuTarget] = import_react52.useState();
   const [actionError, setActionError] = import_react52.useState("");
+  const dictation = import_react52.useMemo(() => createDictation(client, effects, setActionError), [client, effects]);
+  import_react52.useEffect(() => () => dictation.dispose(), [dictation]);
   import_react52.useEffect(() => onMediaNotice(setActionError), []);
   const [quitArmed, setQuitArmed] = import_react52.useState(false);
   import_react52.useEffect(() => {
@@ -106740,10 +107246,7 @@ function AppFrame({
       return;
     }
     if (command2 === "dictation") {
-      if (!effects?.toggleDictation)
-        return;
-      setActionError("Mic \u2026");
-      effects.toggleDictation().then((result3) => setActionError(result3.recording ? `Mic recording \xB7 ${hintFor("dictation")} stop` : "Mic stopped \u2713")).catch(() => setActionError("Mic unavailable; retry when connected."));
+      dictation.toggle(selectedId ?? undefined);
       return;
     }
     if (command2 === "newThread") {
@@ -106819,9 +107322,14 @@ function AppFrame({
   };
   useKeyboard((key5) => {
     const found = commandForKey(key5);
-    const command2 = found === "shell" && !effects?.shell || found === "dictation" && !effects?.toggleDictation || found === "attach" && !effects?.pickFiles || found === "dismissNotice" && !notice ? undefined : found;
+    const command2 = found === "shell" && !effects?.shell || found === "dictation" && !hasDictation(effects) || found === "attach" && !effects?.pickFiles || found === "dismissNotice" && !notice ? undefined : found;
     if (key5.defaultPrevented)
       return;
+    if (focus === "composer" && key5.name === "escape" && !effects?.toggleDictation && ["recording", "transcribing"].includes(dictation.getSnapshot())) {
+      key5.preventDefault();
+      dictation.cancel();
+      return;
+    }
     if (focus === "right" && right === "terminal" && !overlay && !key5.meta)
       return;
     if (focus === "right" && !!right && !overlay && !key5.ctrl && !key5.meta && key5.name !== "escape")
@@ -106848,7 +107356,7 @@ function AppFrame({
   });
   const helpLines = cheatSheet(keymap(), {
     shell: !!effects?.shell,
-    dictation: !!effects?.toggleDictation,
+    dictation: hasDictation(effects),
     notice: !!notice,
     attach: !!effects?.pickFiles
   }, targetKeys(effects)).flatMap((part, i) => [
@@ -107024,6 +107532,7 @@ function AppFrame({
                       children: /* @__PURE__ */ import_jsx_runtime.jsx(ThreadComposer, {
                         client,
                         effects,
+                        dictation,
                         enabled: !overlay && focus === "composer" && !agentId,
                         pasteEnabled: !overlay && !agentId && (width2 >= 70 || !right) && !(focus === "right" && right === "terminal"),
                         collapsed: composerCollapsed,
@@ -107247,7 +107756,7 @@ async function runKeys(env = process.env, home = homedir3()) {
     const { settings: settings5 } = await loadSettings(settingsDir(env, home), readOptional, home);
     applyLook(settings5);
     const effects = hostActions({ settings: settings5, host: systemHost(), writeTerminal: () => {} });
-    const sheet = cheatSheet(keymap(), { shell: !!effects.shell, dictation: !!effects.toggleDictation, attach: !!effects.pickFiles }, targetKeys(effects));
+    const sheet = cheatSheet(keymap(), { shell: !!effects.shell, dictation: hasDictation(effects), attach: !!effects.pickFiles }, targetKeys(effects));
     console.log(cheatSheetText(sheet, true));
     console.log(`
 Rebind with the name in the last column, e.g. "keys": { "palette": "Ctrl+k" }.`);

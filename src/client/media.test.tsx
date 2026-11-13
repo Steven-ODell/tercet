@@ -523,3 +523,49 @@ test("Alt+a attaches picked files: a PNG as an image, anything else as a named f
     await h.client.dispose();
   }
 });
+
+test("built-in mic inserts into editable composer and never sends", async () => {
+  const h = await composerFixture();
+  h.client.boundary.speech = {
+    status: async () => ({ supported: true, state: "ready" }) as never,
+    transcribe: async () => "dictated words",
+  };
+  let cancelled = 0;
+  const view = await testRender(<ThreadComposer client={h.client} enabled effects={{
+    copy() {}, record: async () => ({ stop: async () => new Uint8Array(4), cancel() { cancelled++; } }),
+  }} />, { width: 110, height: 12, kittyKeyboard: true });
+  try {
+    await act(async () => view.mockInput.pasteBracketedText("prefix "));
+    await act(async () => view.mockInput.pressKey("v", { meta: true })); await view.flush();
+    expect(view.captureCharFrame()).toContain("Recording");
+    await act(async () => view.mockInput.pressKey("v", { meta: true })); await view.flush();
+    expect(view.captureCharFrame()).toContain("prefix dictated words");
+    expect(h.commands).toHaveLength(0);
+    await act(async () => view.mockInput.pressKey("v", { meta: true }));
+    await act(async () => view.mockInput.pressKey("ESCAPE")); await view.flush();
+    expect(cancelled).toBe(1);
+  } finally { await act(async () => view.renderer.destroy()); await h.client.dispose(); }
+});
+
+test("late built-in transcript survives editor unmount into original saved draft", async () => {
+  let saved: Record<string, string> = {};
+  const h = await composerFixture({ read: async () => ({}), write: async (drafts) => { saved = drafts; } });
+  let resolve!: (text: string) => void;
+  h.client.boundary.speech = {
+    status: async () => ({ supported: true, state: "ready" }) as never,
+    transcribe: () => new Promise<string>((done) => { resolve = done; }),
+  };
+  const view = await testRender(<ThreadComposer client={h.client} enabled effects={{ copy() {},
+    record: async () => ({ stop: async () => new Uint8Array(4), cancel() {} }),
+  }} />, { width: 110, height: 12, kittyKeyboard: true });
+  try {
+    await act(async () => view.mockInput.pasteBracketedText("original"));
+    await act(async () => view.mockInput.pressKey("v", { meta: true }));
+    await act(async () => view.mockInput.pressKey("v", { meta: true }));
+    await act(async () => h.client.registry.set(h.client.selectedThreadId, ThreadId.make("other")));
+    await act(async () => { resolve("late voice"); }); await view.flush();
+    expect(view.captureCharFrame()).not.toContain("late voice");
+    expect(saved.composer).toBe("original late voice");
+    expect(saved.other).toBeUndefined();
+  } finally { await act(async () => view.renderer.destroy()); await h.client.dispose(); }
+});

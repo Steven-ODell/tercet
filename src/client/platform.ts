@@ -9,6 +9,7 @@ import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { AuthStandardClientScopes } from "@t3tools/contracts";
 import { isLoopback, type Config } from "./config";
+import { speechStatus, transcribeSpeech } from "./speech";
 import {
   listPreviews,
   terminalSession,
@@ -78,6 +79,15 @@ export function platform(config: Config) {
     workspaceRefs: (token: string, cwd: string) => workspaceRefs(config.url, token, cwd),
     uploadImage: (token: string, bytes: Uint8Array, meta?: UploadMeta) =>
       uploadImage(config.url, token, bytes, meta),
+    speech: {
+      status: (token: string) => speechStatus(config.url, token),
+      transcribe: (
+        token: string,
+        pcm: Uint8Array,
+        options: Partial<import("@t3tools/contracts").SpeechTranscriptionOptions>,
+        signal?: AbortSignal,
+      ) => transcribeSpeech(config.url, token, pcm, { speechLanguage: config.settings.dictation.language, ...options }, signal),
+    },
     diffs: {
       full: (token: string, input: Parameters<typeof diffMethods.full>[2]) =>
         diffMethods.full(config.url, token, input),
@@ -225,6 +235,7 @@ export function platform(config: Config) {
       ...boundary,
       dispatch: blocked,
       uploadImage: blocked,
+      speech: undefined,
       answerSecret: blocked,
       terminal: undefined,
       pageUrl: blocked,

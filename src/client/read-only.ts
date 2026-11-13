@@ -12,6 +12,7 @@ export const READ_ONLY_POLICY: { [K in keyof Required<Actions>]: "block" | "drop
   pasteImage: "block",
   pickFiles: "block",
   toggleDictation: "block",
+  record: "block",
   editor: "block",
   copy: "allow",
   targets: "allow",

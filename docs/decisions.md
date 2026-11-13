@@ -292,8 +292,14 @@ sandboxes use port 3775 and up.
   which cannot produce a fixed diff, image and code block on cue. `scripts/demo/record` drives it
   in a private tmux and `scripts/demo/render.py` draws `capture-pane -e` dumps with pyte and
   Pillow (through `uv run --with`, maintainer tooling only, not a dependency of
-  tercet). No vhs, asciinema or agg is installed, and a real terminal window would need a
-  visible screen. Re-recording gives byte-identical frames.
+  tercet). Re-recording gives byte-identical frames. That pipeline remains as a fallback.
+- The shipped `docs/media/demo.gif` is now recorded with VHS instead: `vhs scripts/demo/demo.tape`
+  from the repo root, same fixture and key order as `record`. VHS draws in a headless browser
+  terminal (ttyd + chromium), so nothing shows on screen, but it has no Kitty or Sixel: the image
+  card is the block rung, and the alt text says so. It needs `vhs`, `ttyd`, chromium and bun.
+  Output is not byte-identical between runs (two runs matched within 0.5% RMSE, 4% at one key
+  transition), so look at the frames before committing. The result is 1250x840, about 19 s,
+  under 1 MB. The previous tmux-rendered GIF is in git history.
 - `bun run check` skips the acceptance step when `bgrun` (the maintainer's background-job
   wrapper) is not installed, and says so in the summary, so a contributor's check can still pass.
   Replacing `bgrun` with an in-repo runner is post-v1 work.
@@ -370,3 +376,19 @@ Read in the vendored v0.1.8 contracts and effect's RPC client, 2026-11-12:
   frame's runtime-mode label also falls back to the raw value. Remaining risk, documented and
   not fixable without vendor changes: a server that sends such a value on every snapshot keeps
   tercet on that message until tercet is updated.
+
+## Built-in T3 dictation (2026-11-12)
+
+- Uses the connected server's local speech model over bearer-auth HTTP. Two small fetch
+  requests avoid importing upstream's browser HTTP/DPoP stack; PCM framing comes from its
+  vendored shared encoder. Redirects are refused so audio and tokens cannot follow them.
+- Local recorder processes produce 16 kHz mono float32 PCM in memory. Stop then transcribe;
+  no cloud, post-processing, streaming, auto-send or SSH audio forwarding. Model installation
+  remains explicit in the T3 web app, Settings → Voice. External commands retain precedence.
+- One controller owns recording and destination across both mic entry points. Mounted editors
+  insert at the cursor; absent editors append to the current original draft. Cancellation
+  aborts HTTP and invalidates late results even if a transport ignores abort.
+- SSH disables automatic recording because it would capture the server machine's microphone.
+  An explicit recorder is an intentional override. Read-only blocks capture and speech access.
+- Linux pw-record, parecord (with 100 ms latency), arecord and ffmpeg capture yielded valid
+  PCM; SoX capture required a longer phrase due to buffering. macOS remains unverified.

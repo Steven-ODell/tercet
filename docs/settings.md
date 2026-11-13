@@ -248,7 +248,7 @@ one you typed on last), otherwise from tercet's own `SSH_CONNECTION`.
 | `tmux`      | `{cwd}` `{text}`  | types a code block into a terminal without running it (`T`, [tmux]) |
 | `run`       | `{cwd}` `{text}`  | runs a closed shell code block (`X`, [run])                         |
 | `send`      | `{text}` `{path}` | sends text or a file somewhere else (`F`, [send])                   |
-| `dictation` | none              | toggles dictation (`Alt+v`, [mic]); may print `recording` or `idle` |
+| `dictation` | built-in T3 speech | overrides built-in dictation (`Alt+v`, [mic]); may print `recording` or `idle` |
 | `mapUrl`    | `{url}`           | prints the link to open instead, for example a tunnel's address     |
 
 Every command also takes `{sshHost}`. If `mapUrl` fails, or the opener does, the link goes to
@@ -323,3 +323,27 @@ server, its version and whether tercet supports it, the token file, and which op
 
 Each line starts with `ok`, `!!` (worth a look) or `-` (just information). The action rows
 follow the same chains tercet runs with, and a command that is not set up is `-`.
+
+## Dictation
+
+Without `commands.dictation`, tercet captures local audio and uses the connected T3 server's
+speech model. In T3's web app, open Settings → Voice to install/select a model first. The
+upstream default is Parakeet Unified English 0.6B (731 MB, English only).
+
+```jsonc
+"dictation": {
+  "language": "auto", // a language hint supported by the selected model
+  // Optional override: raw 16 kHz mono float32 little-endian PCM on stdout.
+  "recorder": ["pw-record", "--rate", "16000", "--channels", "1", "--format", "f32", "--raw", "-"]
+}
+```
+
+Recording stops at five minutes. Audio is held in memory, discarded on cancellation, and
+uploaded only after stopping. Press mic while transcribing to abort and discard the result.
+Late text goes to the original thread's draft, preserving edits made during transcription.
+Esc cancels built-in dictation from the composer. Closing tercet terminates its recorder.
+
+Only the server's local speech model is supported: no cloud providers, post-processing,
+streaming or SSH audio forwarding. In SSH sessions automatic capture is disabled; an explicit
+`dictation.recorder` opts into capture on that host. `commands.dictation` takes precedence,
+keeps the external recording/idle protocol, and its output is never inserted as a transcript.

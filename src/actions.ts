@@ -1,5 +1,13 @@
 // All external effects enter through this boundary; tests supply a memory sink. The real ones
 // come from `hostActions` in portable.ts. An absent optional action hides its button and key.
+/** A running capture of the microphone: 16 kHz mono 32-bit float PCM, in memory. */
+export interface Recording {
+  /** Ends the capture and resolves with what was heard. Rejects when nothing was captured. */
+  stop(): Promise<Uint8Array>;
+  /** Ends the capture and drops the audio. Safe to call after `stop`. */
+  cancel(): void;
+}
+
 export interface Actions {
   shell?(input: { cwd: string }): Promise<unknown>;
   openThread?(input: { threadId: string }): Promise<unknown>;
@@ -10,7 +18,13 @@ export interface Actions {
    * Cancel gives an empty list.
    */
   pickFiles?(cwd?: string): Promise<{ name: string; mimeType: string; bytes: Uint8Array }[]>;
+  /**
+   * Dictation run by an external command (settings `commands.dictation`): the command toggles
+   * its own recording and types its own text, so tercet only learns whether it is recording.
+   */
   toggleDictation?(): Promise<{ recording: boolean }>;
+  /** Built-in dictation: starts recording the microphone. Absent when no recorder is usable. */
+  record?(input?: { onLimit?: () => void }): Promise<Recording>;
   editor?(input: { cwd: string; path: string }): Promise<unknown>;
   /** OSC 52, plus the local clipboard tool when there is one. */
   copy(text: string): void;
@@ -53,6 +67,9 @@ export function terminalActions(write: (bytes: string) => void): Actions {
     },
   };
 }
+
+/** Dictation is offered when either an external command or a local recorder is configured. */
+export const hasDictation = (effects?: Actions) => !!(effects?.toggleDictation || effects?.record);
 
 /** Target names that can take text, in button order. */
 export const targetNames = (effects?: Actions) =>

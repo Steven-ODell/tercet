@@ -84,3 +84,17 @@ tests need it, because `act()` only exists there.
 - CI (`.github/workflows/ci.yml`) runs typecheck, tests and the bundle check on Ubuntu and
   macOS. Its canary job re-vendors upstream T3 Code's `main` and typechecks against it, daily
   and on every push; it may fail without failing the run.
+
+## Dictation capture
+
+On Linux tercet picks the first installed recorder: `pw-record` (PipeWire), `parecord`
+(PulseAudio), `arecord` (ALSA), `ffmpeg` with PulseAudio input, then SoX `rec`. On macOS it
+tries ffmpeg with AVFoundation input, then SoX `rec`; microphone permission is required.
+Install a tool with your system's package manager. `tercet doctor` reports the selected tool.
+The first installed tool must have access to a working default microphone; capture failures
+are reported without silently switching devices. Very short recordings can contain no audio,
+particularly with buffered SoX capture; retry with a longer phrase.
+
+T3's server must also have a speech model configured through its web app, Settings → Voice.
+This is a separate prerequisite from the recorder. No Voxtype or cloud API key is needed.
+Linux capture and sandbox transcription have been verified; macOS capture remains untested.

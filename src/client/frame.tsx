@@ -9,6 +9,8 @@ import { useAgentRows } from "./agents";
 import { formatSubagentDisplayTitle } from "@t3tools/client-runtime/state/subagent-display";
 import { ModelPicker } from "./model-picker";
 import { ThreadPalette } from "./thread-palette";
+import { createDictation } from "./dictation";
+import { hasDictation } from "../actions";
 import { failureText } from "../actions";
 import { allThreads, createThreadActions } from "./thread-actions";
 import type { OrchestrationV2ThreadShell, RuntimeMode, ThreadId } from "@t3tools/contracts";
@@ -194,6 +196,11 @@ export function AppFrame({
   };
   const [menuTarget, setMenuTarget] = useState<OrchestrationV2ThreadShell>();
   const [actionError, setActionError] = useState("");
+  const dictation = useMemo(
+    () => createDictation(client, effects, setActionError),
+    [client, effects],
+  );
+  useEffect(() => () => dictation.dispose(), [dictation]);
   // The media ladder's one-time hint (tmux passthrough off) when the first image falls back.
   useEffect(() => onMediaNotice(setActionError), []);
   const [quitArmed, setQuitArmed] = useState(false);
@@ -246,16 +253,7 @@ export function AppFrame({
       return;
     }
     if (command === "dictation") {
-      if (!effects?.toggleDictation) return;
-      setActionError("Mic …");
-      void effects
-        .toggleDictation()
-        .then((result) =>
-          setActionError(
-            result.recording ? `Mic recording · ${hintFor("dictation")} stop` : "Mic stopped ✓",
-          ),
-        )
-        .catch(() => setActionError("Mic unavailable; retry when connected."));
+      void dictation.toggle(selectedId ?? undefined);
       return;
     }
     if (command === "newThread") {
@@ -361,12 +359,20 @@ export function AppFrame({
     // A command whose action is missing is not bound, like it is not listed in help.
     const command =
       (found === "shell" && !effects?.shell) ||
-      (found === "dictation" && !effects?.toggleDictation) ||
+      (found === "dictation" && !hasDictation(effects)) ||
       (found === "attach" && !effects?.pickFiles) ||
       (found === "dismissNotice" && !notice)
         ? undefined
         : found;
     if (key.defaultPrevented) return;
+    if (
+      focus === "composer" && key.name === "escape" && !effects?.toggleDictation &&
+      ["recording", "transcribing"].includes(dictation.getSnapshot())
+    ) {
+      key.preventDefault();
+      dictation.cancel();
+      return;
+    }
     // A focused terminal owns every key except the Alt bindings, Esc and Ctrl+c included.
     if (focus === "right" && right === "terminal" && !overlay && !key.meta) return;
     if (focus === "right" && !!right && !overlay && !key.ctrl && !key.meta && key.name !== "escape")
@@ -404,7 +410,7 @@ export function AppFrame({
     keymap(),
     {
       shell: !!effects?.shell,
-      dictation: !!effects?.toggleDictation,
+      dictation: hasDictation(effects),
       notice: !!notice,
       attach: !!effects?.pickFiles,
     },
@@ -604,6 +610,7 @@ export function AppFrame({
                     <ThreadComposer
                       client={client}
                       effects={effects}
+                      dictation={dictation}
                       enabled={!overlay && focus === "composer" && !agentId}
                       pasteEnabled={
                         !overlay &&

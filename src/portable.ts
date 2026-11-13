@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 import type { Actions } from "./actions";
 import { LinkCopied, shellQuote } from "./actions";
+import { recorderStatus, startRecording } from "./dictation";
 import { parseFfmpegInfo, type MediaProbe } from "./client/media";
 import {
   PLACEHOLDER,
@@ -645,6 +646,12 @@ export function hostActions(deps: HostDeps): Actions {
       recording = said === "recording" ? true : said === "idle" ? false : !recording;
       return { recording };
     };
+  } else {
+    // Without an external command, tercet records and sends the audio to T3 itself.
+    const custom = settings.dictation.recorder;
+    const recorder = recorderStatus(host, custom ? expand(custom, {}) : undefined);
+    if (recorder.ready)
+      actions.record = (input) => startRecording(host, recorder.args, { onLimit: input?.onLimit });
   }
   return actions;
 }

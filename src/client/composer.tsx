@@ -1,8 +1,10 @@
+import { hasDictation } from "../actions";
+import { createDictation, type Dictation } from "./dictation";
 import { theme } from "./theme";
 import { commandForKey, hintFor } from "./keymap";
 import { InlineImage } from "./image-preview";
 import { pendingCard, requestKey, RequestPanel } from "./requests";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useKeyboard, usePaste } from "@opentui/react";
 import { decodePasteBytes, type TextareaRenderable } from "@opentui/core";
 import type { RunId, ThreadId } from "@t3tools/contracts";
@@ -15,6 +17,7 @@ import type { Client } from "./runtime";
 export function ThreadComposer({
   client,
   effects,
+  dictation: suppliedDictation,
   enabled,
   pasteEnabled = false,
   collapsed = false,
@@ -23,6 +26,7 @@ export function ThreadComposer({
 }: {
   client: Client;
   effects?: import("../actions").Actions;
+  dictation?: Dictation;
   enabled: boolean;
   /** A paste made from another pane lands here and moves focus here. */
   pasteEnabled?: boolean;
@@ -34,6 +38,13 @@ export function ThreadComposer({
   onSent?: () => void;
 }) {
   const composer = useMemo(() => createComposer(client, client.boundary.drafts), [client]);
+  const localDictation = useMemo(() => createDictation(client, effects), [client, effects]);
+  const dictation = suppliedDictation ?? localDictation;
+  useEffect(() => () => localDictation.dispose(), [localDictation]);
+  useEffect(() => dictation.setFallback((origin, text) => {
+    const draft = client.registry.get(composer.drafts)[origin] ?? "";
+    composer.setDraft(origin, draft + (draft && !/\s$/.test(draft) ? " " : "") + text);
+  }), [client, composer, dictation]);
   useClientAtom(client, client.transcripts);
   const [leaveCard, setLeaveCard] = useState<string>();
   const id = useClientAtom(client, client.selectedThreadId);
@@ -72,6 +83,7 @@ export function ThreadComposer({
         client={client}
         effects={effects}
         composer={composer}
+        dictation={dictation}
         id={id}
         enabled={enabled && !answering}
         pasteFromPane={!enabled && pasteEnabled && !answering}
@@ -85,6 +97,7 @@ export function ThreadComposer({
 function Editor({
   client,
   composer,
+  dictation,
   effects,
   id,
   enabled,
@@ -95,6 +108,7 @@ function Editor({
 }: {
   client: Client;
   composer: ReturnType<typeof createComposer>;
+  dictation: Dictation;
   effects?: import("../actions").Actions;
   id: ThreadId;
   enabled: boolean;
@@ -107,8 +121,15 @@ function Editor({
   const [mediaStatus, setMediaStatus] = useState("");
   const [mediaBusy, setMediaBusy] = useState(false);
   const mediaLock = useRef(false);
-  const [recording, setRecording] = useState(false);
+  const micState = useSyncExternalStore(dictation.subscribe, dictation.getSnapshot);
+  const recording = micState === "recording";
   async function media(kind: "paste" | "clipboard" | "mic" | "files") {
+    if (kind === "mic") {
+      setMediaStatus("");
+      onInputFocus?.();
+      await dictation.toggle(id);
+      return;
+    }
     if (mediaLock.current || busy) return;
     mediaLock.current = true;
     setMediaBusy(true);
@@ -133,9 +154,6 @@ function Editor({
       } else if (kind === "paste") {
         if (!effects?.pasteImage) throw new Error("unavailable");
         composer.attach(id, await effects.pasteImage());
-      } else {
-        if (!effects?.toggleDictation) throw new Error("unavailable");
-        setRecording((await effects.toggleDictation()).recording);
       }
       setMediaStatus("✓");
     } catch (error) {
@@ -143,9 +161,7 @@ function Editor({
       setMediaStatus(
         kind === "files"
           ? `Attach failed${reason && ` (${reason})`}.`
-          : kind !== "mic"
-          ? `Paste unavailable${reason && ` (${reason})`}: copy text or a PNG up to 2000px / 10 MB.`
-          : `Mic unavailable${reason && ` (${reason})`}; retry when connected.`,
+          : `Paste unavailable${reason && ` (${reason})`}: copy text or a PNG up to 2000px / 10 MB.`,
       );
     } finally {
       mediaLock.current = false;
@@ -159,6 +175,12 @@ function Editor({
   useClientAtom(client, client.transcripts);
   const snapshot = useClientAtom(client, client.snapshot);
   const editor = useRef<TextareaRenderable>(null);
+  useEffect(() => dictation.register(id, (value) => {
+    if (editor.current) {
+      editor.current.insertText(value);
+      composer.setDraft(id, editor.current.plainText);
+    }
+  }), [dictation, composer, id]);
   const [edit, setEdit] = useState<RunId>();
   const [choices, setChoices] = useState<readonly string[]>([]);
   const [choice, setChoice] = useState(0);
@@ -261,6 +283,16 @@ function Editor({
       return;
     }
     if (!enabled) return;
+    if (key.name === "escape" && !effects?.toggleDictation && (recording || micState === "transcribing")) {
+      key.preventDefault();
+      dictation.cancel();
+      return;
+    }
+    if (commandForKey(key) === "dictation" && hasDictation(effects)) {
+      key.preventDefault();
+      void media("mic");
+      return;
+    }
     if (key.ctrl && key.name === "v" && effects?.pasteClipboard) {
       key.preventDefault();
       void media("clipboard");
@@ -269,7 +301,6 @@ function Editor({
     if (
       key.meta &&
       (key.name === "backspace" ||
-        (commandForKey(key) === "dictation" && effects?.toggleDictation) ||
         (key.name === "p" && effects?.pasteImage))
     ) {
       key.preventDefault();
@@ -463,17 +494,17 @@ function Editor({
               [{hintFor("attach") === "none" ? "" : `${hintFor("attach")} `}Attach]{" "}
             </text>
           )}
-          {effects?.toggleDictation && (
+          {hasDictation(effects) && (
             <text
               fg={theme.accent}
               onMouseUp={(event) => {
                 if (event.button === 0) void media("mic");
               }}
             >
-              [{hintFor("dictation")} {recording ? "Stop mic" : "mic"}]
+              [{hintFor("dictation")} {recording ? (effects?.toggleDictation ? "Stop mic" : "Recording") : micState === "transcribing" ? "Transcribing" : "mic"}]
             </text>
           )}
-          <text fg={theme.plain}>{mediaBusy ? " …" : mediaStatus}</text>
+          <text fg={theme.plain}>{mediaBusy ? " …" : mediaStatus || dictation.getMessage()}</text>
         </box>
       )}
       <textarea

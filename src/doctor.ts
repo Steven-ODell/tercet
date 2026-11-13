@@ -1,3 +1,4 @@
+import { recorderStatus } from "./dictation";
 import { access } from "node:fs/promises";
 import { homedir, release } from "node:os";
 import { connectionConfig, isLoopback, type Config } from "./client/config";
@@ -13,6 +14,7 @@ import {
   type Settings,
 } from "./client/settings";
 import {
+  expand,
   clipboardChain,
   openerChain,
   playerChain,
@@ -294,7 +296,11 @@ async function actionsReport(
   await command("type into a terminal", "commands.tmux", settings.commands.tmux);
   await command("run code block", "commands.run", settings.commands.run);
   await command("send", "commands.send", settings.commands.send);
-  await command("dictation", "commands.dictation", settings.commands.dictation);
+  if (settings.commands.dictation) await command("dictation", "commands.dictation", settings.commands.dictation);
+  else {
+    const recorder = recorderStatus(host, settings.dictation.recorder ? expand(settings.dictation.recorder, {}) : undefined);
+    add("dictation", recorder.ready, recorder.ready ? `${recorder.name}; T3 web app → Settings → Voice must have a model installed` : recorder.reason);
+  }
   await command("link mapping", "commands.mapUrl", settings.commands.mapUrl);
   return rows;
 }

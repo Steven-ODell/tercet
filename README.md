@@ -3,7 +3,7 @@
 A terminal client for [T3 Code](https://github.com/pingdotgg/t3code): your threads, transcripts
 and composer in a TUI, next to the web app, on the same server.
 
-![tercet: opening a thread, a diff, the palette and a reply](docs/media/demo.gif)
+![tercet: opening a thread, a block-rendered image, a diff, the palette and a reply](docs/media/demo.gif)
 
 - **The web app's behavior, in a terminal.** Same thread list, shelves and models, live
   streaming, a composer with `@file`, `/skill` and `:emoji`, diffs and the files panel. Mouse
@@ -104,6 +104,18 @@ to check the file (the `settings` line should say `ok`). For example:
 Commands run without a shell, and thread text always stays one argument. Every key, the command
 templates and their placeholders: [docs/settings.md](docs/settings.md). Images and video:
 [docs/media.md](docs/media.md).
+
+## Dictation
+
+Press `Alt+v` or click `[mic]`, speak, then press again to transcribe into the editable draft.
+Text stays in the thread where recording began and is never sent automatically. Press mic
+again during transcription to cancel; Esc in the composer cancels built-in recording too.
+
+Install a local recorder (see [capture dependencies](docs/install.md#dictation-capture)) and
+configure your T3 server's speech model in its web app under **Settings → Voice**. tercet uses
+that server model over authenticated HTTP, without a separate transcription app. Model setup
+and downloads are explicit; tercet never performs them for you. `commands.dictation` remains
+an override for external integrations. SSH does not forward your microphone.
 
 ## Keys
 

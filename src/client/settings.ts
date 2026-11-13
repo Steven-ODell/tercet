@@ -96,6 +96,13 @@ export interface Settings {
   commands: Partial<Record<CommandName, CommandSpec>>;
   /** Named clipboards (another machine, say) offered next to "copy", in file order. */
   targets: Record<string, { copy: CommandSpec; key?: string }>;
+  /** Built-in dictation (used when `commands.dictation` is absent). */
+  dictation: {
+    /** Language hint sent with each recording: "auto" or a code such as "en". */
+    language: string;
+    /** A recorder that prints 16 kHz mono 32-bit float little-endian PCM to stdout until killed. */
+    recorder?: CommandSpec;
+  };
 }
 
 export const defaultSettings = (): Settings => ({
@@ -108,6 +115,7 @@ export const defaultSettings = (): Settings => ({
   media: { protocol: "auto", video: "player" },
   commands: {},
   targets: {},
+  dictation: { language: "auto" },
 });
 
 /** A bad settings file. The message is one line naming the file, line and key. */
@@ -487,6 +495,7 @@ const schema = struct({
     Object.fromEntries(Object.entries(COMMANDS).map(([name, vars]) => [name, withHost(vars)])),
   ),
   targets,
+  dictation: struct({ language: expect("a language code (2–16 characters)", (v) => typeof v === "string" && v.length >= 2 && v.length <= 16), recorder: template([]) }),
 });
 
 /** `~/x` is under home; other relative paths are relative to the settings directory. */
@@ -525,6 +534,7 @@ export function parseSettings(
     media: { ...base.media, ...raw.media },
     commands: { ...base.commands, ...raw.commands },
     targets: { ...base.targets, ...raw.targets },
+    dictation: { ...base.dictation, ...raw.dictation },
   };
   try {
     resolveKeymap(settings.keys, settingsTargetKeys(settings));

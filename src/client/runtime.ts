@@ -49,6 +49,16 @@ export interface Boundary {
     bytes: Uint8Array,
     meta?: import("./connection").UploadMeta,
   ) => Effect.Effect<import("@t3tools/contracts").ChatImageAttachment | import("@t3tools/contracts").ChatFileAttachment, unknown>;
+  /** The server's speech service, for built-in dictation. */
+  speech?: {
+    status: (token: string) => Promise<import("@t3tools/contracts").EnvironmentSpeechStatus>;
+    transcribe: (
+      token: string,
+      pcm: Uint8Array,
+      options: Partial<import("@t3tools/contracts").SpeechTranscriptionOptions>,
+      signal?: AbortSignal,
+    ) => Promise<string>;
+  };
   diffs?: {
     [K in keyof typeof import("./connection").diffMethods]: (
       token: string,
@@ -310,6 +320,19 @@ export function createClient(
     uploadImage(bytes: Uint8Array, meta?: import("./connection").UploadMeta) {
       if (!token || !boundary.uploadImage) return Promise.reject(new Error("Offline"));
       return runtime.runPromise(boundary.uploadImage(token, bytes, meta));
+    },
+    /** Whether the server can take a recording now; rejects with a `SpeechError`. */
+    speechStatus() {
+      if (!token || !boundary.speech) return Promise.reject(new Error("Offline"));
+      return boundary.speech.status(token);
+    },
+    transcribe(
+      pcm: Uint8Array,
+      options: Partial<import("@t3tools/contracts").SpeechTranscriptionOptions>,
+      signal?: AbortSignal,
+    ) {
+      if (!token || !boundary.speech) return Promise.reject(new Error("Offline"));
+      return boundary.speech.transcribe(token, pcm, options, signal);
     },
     get terminalAvailable() {
       return !!boundary.terminal;

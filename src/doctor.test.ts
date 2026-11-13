@@ -115,8 +115,10 @@ test("doctor reports a tmux machine with passthrough off and a supported server"
     available: null,
     detail: "not set up (add commands.shell to settings)",
   });
-  for (const name of ["editor", "type into a terminal", "run code block", "send", "dictation"])
+  for (const name of ["editor", "type into a terminal", "run code block", "send"])
     expect(action(name)?.available).toBeNull();
+  expect(action("dictation")?.available).toBe(true);
+  expect(action("dictation")?.detail).toContain("ffmpeg");
   const text = formatReport(report);
   expect(text).toContain("settings");
   expect(text).toMatch(/!! tmux +tmux 3\.5a, inside, allow-passthrough off; images need it/);

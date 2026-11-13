@@ -43,3 +43,20 @@ temporary `HOME`, `--base-dir` and `--port`, as the script does.
     codes when you click, no leftover images.
 13. With `"icons": "ascii"`, no character outside ASCII shows in the frame.
 14. With no `commands` in settings there is no [tmux], [run] or [send] button anywhere.
+
+## Built-in dictation
+
+Use an isolated server with a speech model installed explicitly through Settings → Voice.
+With `commands.dictation` absent, press Alt+v, speak a phrase, then press again. Recording
+changes to Transcribing, followed by editable text at the cursor; nothing sends automatically.
+Repeat while switching threads and while editing the original draft during transcription:
+text must land only in the originating draft and preserve those edits. Press mic during
+transcription or Esc in the composer to cancel; quitting must release the microphone.
+
+Check missing model, no recorder, denied microphone, disconnected server and read-only mode.
+Over SSH automatic capture must be unavailable with an explanation that no mic is forwarded.
+An explicit external command must retain its previous state-only behavior.
+
+Automated coverage uses fake capture/transport plus a real child process for recorder cleanup.
+A synthetic spoken phrase was transcribed successfully by the isolated v0.1.8 server's local
+Parakeet model on Linux. No speaker playback was used. macOS capture is untested.

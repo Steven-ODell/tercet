@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { targetKeys } from "./actions";
+import { hasDictation, targetKeys } from "./actions";
 import { applyLook } from "./client/look";
 import { cheatSheet, cheatSheetText, keymap } from "./client/keymap";
 import { readOptional } from "./client/platform";
@@ -14,7 +14,7 @@ export async function runKeys(env = process.env, home = homedir()) {
     const effects = hostActions({ settings, host: systemHost(), writeTerminal: () => {} });
     const sheet = cheatSheet(
       keymap(),
-      { shell: !!effects.shell, dictation: !!effects.toggleDictation, attach: !!effects.pickFiles },
+      { shell: !!effects.shell, dictation: hasDictation(effects), attach: !!effects.pickFiles },
       targetKeys(effects),
     );
     console.log(cheatSheetText(sheet, true));
