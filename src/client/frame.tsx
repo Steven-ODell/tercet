@@ -16,7 +16,7 @@ import { ThreadComposer } from "./composer";
 import { ThreadTranscript } from "./transcript";
 import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
-import { contextFillOf, formatContextFillPercent } from "./usage";
+import { ContextChip, contextDetailOf, ContextDropdown } from "./context-meter";
 import { paneGlyphs, selectionIcon } from "./icons";
 import { ThreadSidebar, wrapName } from "./sidebar";
 import type { Client } from "./runtime";
@@ -27,7 +27,15 @@ import { onMediaNotice } from "./media";
 
 type Pane = "sidebar" | "transcript" | "composer" | "right";
 type RightPanel = "files" | "diff" | "launchers" | "terminal";
-type Overlay = "workspace" | "model" | "effort" | "palette" | "search" | "menu" | "help";
+type Overlay =
+  | "workspace"
+  | "model"
+  | "effort"
+  | "palette"
+  | "search"
+  | "menu"
+  | "help"
+  | "context";
 
 /** Outer width of the right pane. Files and diff show file contents, so they take a real share. */
 function rightWidth(kind: RightPanel, width: number) {
@@ -80,24 +88,33 @@ export function AppFrame({
   const providers = useClientAtom(client, client.providers);
   const logo = selected && selectionIcon(selected.modelSelection, providers);
   // Upstream keeps context usage on the thread's active provider thread, not on the shell.
-  const providerThread = selected
-    ? client
-        .getThread(selected.id)
-        .projection?.providerThreads?.find(
-          (thread) => thread.id === selected.activeProviderThreadId,
-        )
-    : undefined;
-  const fill = contextFillOf(providerThread?.contextUsage);
+  const projection = selected ? client.getThread(selected.id).projection : undefined;
+  const providerThread = projection?.providerThreads?.find(
+    (thread) => thread.id === selected?.activeProviderThreadId,
+  );
+  const contextDetail = selected
+    ? contextDetailOf({
+        activeProviderThreadId: selected.activeProviderThreadId,
+        providerThread,
+        providerTurns: projection?.providerTurns,
+      })
+    : null;
   const effort = selected?.modelSelection.options?.find((option) =>
     ["reasoningEffort", "effort", "variant"].includes(option.id),
   )?.value;
-  const context = fill
-    ? `${["○", "◔", "◑", "◕", "●"][Math.round(fill.percent / 25)]} Context ${formatContextFillPercent(fill.percent)} · ${fill.tokensLabel}`
-    : "○ Context unknown";
+  // The top row: status on the left, the context chip on the right in whatever room is left.
+  const statusText = `tercet · ${status} · threads=${count}${selected ? ` · ${runtimeModeLabels[selected.runtimeMode] ?? selected.runtimeMode}` : ""}`;
+  const agentsText =
+    runningAgents > 0 ? `${runningAgents} ${runningAgents === 1 ? "agent" : "agents"} running` : "";
+  const chipColumns =
+    width -
+    Bun.stringWidth(statusText) -
+    (agentsText ? 2 + Bun.stringWidth(agentsText) : 0) -
+    2;
   const headerRows = selected
     ? [
         ...wrapName(
-          `${logo?.glyph} ${selected.modelSelection.model} · effort ${effort ?? "default"} · ${context}`,
+          `${logo?.glyph} ${selected.modelSelection.model} · effort ${effort ?? "default"}`,
           width,
         ),
         ...wrapName(
@@ -259,6 +276,7 @@ export function AppFrame({
     }
     if (
       command === "help" ||
+      command === "context" ||
       command === "model" ||
       command === "effort" ||
       command === "palette"
@@ -442,10 +460,7 @@ export function AppFrame({
     <HintsShown.Provider value={hintsShown}>
       <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.canvas}>
         <box height={1} flexShrink={0} flexDirection="row">
-          <text fg={theme.text}>
-            tercet · {status} · threads={count}
-            {selected ? ` · ${runtimeModeLabels[selected.runtimeMode] ?? selected.runtimeMode}` : ""}
-          </text>
+          <text fg={theme.text}>{statusText}</text>
           {runningAgents > 0 && (
             <box
               marginLeft={2}
@@ -454,9 +469,22 @@ export function AppFrame({
               }}
             >
               <text fg={theme.accent} selectable={false}>
-                {runningAgents} {runningAgents === 1 ? "agent" : "agents"} running
+                {agentsText}
               </text>
             </box>
+          )}
+          {selected && (
+            <>
+              <box flexGrow={1} />
+              <ContextChip
+                detail={contextDetail}
+                columns={chipColumns}
+                open={overlay === "context"}
+                onToggle={() => {
+                  if (!overlay || overlay === "context") dispatch("context");
+                }}
+              />
+            </>
           )}
         </box>
         {noticeRows.length > 0 && (
@@ -479,7 +507,7 @@ export function AppFrame({
             key={row}
             height={1}
             flexShrink={0}
-            fg={fill?.level === "full" ? theme.red : theme.accent}
+            fg={contextDetail?.level === "full" ? theme.red : theme.accent}
           >
             {logo && row.startsWith(logo.glyph) ? (
               <>
@@ -780,6 +808,15 @@ export function AppFrame({
               setOverlay("model");
               if (width >= 70 || !right) setFocus("composer");
             }}
+          />
+        )}
+        {overlay === "context" && (
+          <ContextDropdown
+            detail={contextDetail}
+            width={width}
+            height={height}
+            now={client.now}
+            close={() => setOverlay(null)}
           />
         )}
         {overlay === "help" && (

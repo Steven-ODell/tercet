@@ -38486,6 +38486,7 @@ var COMMANDS = [
   { id: "sidebar", keys: "Alt+b", label: "Sidebar" },
   { id: "model", keys: "Alt+m", label: "Model" },
   { id: "effort", keys: "Alt+e", label: "Effort / Permissions" },
+  { id: "context", keys: "Alt+u", label: "Context usage" },
   { id: "files", keys: "Alt+f", label: "Files" },
   { id: "diff", keys: "Alt+d", label: "Diff" },
   { id: "dictation", keys: "Alt+v", label: "Dictation", needs: "dictation" },
@@ -100167,19 +100168,6 @@ function sidebarLimitProviders(providers, now2) {
     ];
   });
 }
-function tokens(value4) {
-  return formatContextWindowTokens(value4).replace(/m$/, "M");
-}
-function contextFillOf(usage2) {
-  if (usage2 == null || usage2.maxTokens === undefined || usage2.maxTokens <= 0)
-    return null;
-  const percent = Math.min(100, Math.max(0, usage2.usedTokens / usage2.maxTokens * 100));
-  return {
-    percent,
-    level: percent >= 90 ? "full" : percent >= 70 ? "high" : "normal",
-    tokensLabel: `${tokens(usage2.usedTokens)} / ${tokens(usage2.maxTokens)}`
-  };
-}
 function formatContextFillPercent(percent) {
   if (percent > 0 && percent < 1)
     return "<1%";
@@ -102828,19 +102816,19 @@ function normalizeKeyToken(token) {
 }
 function parseKeybindingShortcut(value4) {
   const rawTokens = value4.toLowerCase().split("+").map((token) => token.trim());
-  const tokens2 = [...rawTokens];
+  const tokens = [...rawTokens];
   let trailingEmptyCount = 0;
-  while (tokens2[tokens2.length - 1] === "") {
+  while (tokens[tokens.length - 1] === "") {
     trailingEmptyCount += 1;
-    tokens2.pop();
+    tokens.pop();
   }
   if (trailingEmptyCount > 0) {
-    tokens2.push("+");
+    tokens.push("+");
   }
-  if (tokens2.some((token) => token.length === 0)) {
+  if (tokens.some((token) => token.length === 0)) {
     return null;
   }
-  if (tokens2.length === 0)
+  if (tokens.length === 0)
     return null;
   let key5 = null;
   let metaKey = false;
@@ -102848,7 +102836,7 @@ function parseKeybindingShortcut(value4) {
   let shiftKey = false;
   let altKey = false;
   let modKey = false;
-  for (const token of tokens2) {
+  for (const token of tokens) {
     switch (token) {
       case "cmd":
       case "meta":
@@ -102887,7 +102875,7 @@ function parseKeybindingShortcut(value4) {
   };
 }
 function tokenizeWhenExpression(expression) {
-  const tokens2 = [];
+  const tokens = [];
   let index3 = 0;
   while (index3 < expression.length) {
     const current2 = expression[index3];
@@ -102898,27 +102886,27 @@ function tokenizeWhenExpression(expression) {
       continue;
     }
     if (expression.startsWith("&&", index3)) {
-      tokens2.push({ type: "and" });
+      tokens.push({ type: "and" });
       index3 += 2;
       continue;
     }
     if (expression.startsWith("||", index3)) {
-      tokens2.push({ type: "or" });
+      tokens.push({ type: "or" });
       index3 += 2;
       continue;
     }
     if (current2 === "!") {
-      tokens2.push({ type: "not" });
+      tokens.push({ type: "not" });
       index3 += 1;
       continue;
     }
     if (current2 === "(") {
-      tokens2.push({ type: "lparen" });
+      tokens.push({ type: "lparen" });
       index3 += 1;
       continue;
     }
     if (current2 === ")") {
-      tokens2.push({ type: "rparen" });
+      tokens.push({ type: "rparen" });
       index3 += 1;
       continue;
     }
@@ -102926,21 +102914,21 @@ function tokenizeWhenExpression(expression) {
     if (!identifier2) {
       return null;
     }
-    tokens2.push({ type: "identifier", value: identifier2[0] });
+    tokens.push({ type: "identifier", value: identifier2[0] });
     index3 += identifier2[0].length;
   }
-  return tokens2;
+  return tokens;
 }
 function parseKeybindingWhenExpression(expression) {
-  const tokens2 = tokenizeWhenExpression(expression);
-  if (!tokens2 || tokens2.length === 0)
+  const tokens = tokenizeWhenExpression(expression);
+  if (!tokens || tokens.length === 0)
     return null;
   let index3 = 0;
   const parsePrimary = (depth) => {
     if (depth > MAX_WHEN_EXPRESSION_DEPTH) {
       return null;
     }
-    const token = tokens2[index3];
+    const token = tokens[index3];
     if (!token)
       return null;
     if (token.type === "identifier") {
@@ -102950,7 +102938,7 @@ function parseKeybindingWhenExpression(expression) {
     if (token.type === "lparen") {
       index3 += 1;
       const expressionNode = parseOr(depth + 1);
-      const closeToken = tokens2[index3];
+      const closeToken = tokens[index3];
       if (!expressionNode || !closeToken || closeToken.type !== "rparen") {
         return null;
       }
@@ -102961,7 +102949,7 @@ function parseKeybindingWhenExpression(expression) {
   };
   const parseUnary = (depth) => {
     let notCount = 0;
-    while (tokens2[index3]?.type === "not") {
+    while (tokens[index3]?.type === "not") {
       index3 += 1;
       notCount += 1;
       if (notCount > MAX_WHEN_EXPRESSION_DEPTH) {
@@ -102981,7 +102969,7 @@ function parseKeybindingWhenExpression(expression) {
     let left = parseUnary(depth);
     if (!left)
       return null;
-    while (tokens2[index3]?.type === "and") {
+    while (tokens[index3]?.type === "and") {
       index3 += 1;
       const right = parseUnary(depth);
       if (!right)
@@ -102994,7 +102982,7 @@ function parseKeybindingWhenExpression(expression) {
     let left = parseAnd(depth);
     if (!left)
       return null;
-    while (tokens2[index3]?.type === "or") {
+    while (tokens[index3]?.type === "or") {
       index3 += 1;
       const right = parseAnd(depth);
       if (!right)
@@ -103004,7 +102992,7 @@ function parseKeybindingWhenExpression(expression) {
     return left;
   };
   const ast = parseOr(0);
-  if (!ast || index3 !== tokens2.length)
+  if (!ast || index3 !== tokens.length)
     return null;
   return ast;
 }
@@ -104037,8 +104025,8 @@ function contextCompactionLabel(item) {
     return "Context compaction stopped";
   if (isOrchestrationV2WorkActive(item.status))
     return "Compacting context";
-  const tokens2 = contextCompactionTokenCounts(item);
-  return tokens2 ? `Context compacted ${tokens2.before} \u2192 ${tokens2.after} tokens` : "Context compacted";
+  const tokens = contextCompactionTokenCounts(item);
+  return tokens ? `Context compacted ${tokens.before} \u2192 ${tokens.after} tokens` : "Context compacted";
 }
 function normalizeCompactToolLabel(value4) {
   return value4.replace(/\s+(?:complete|completed)\s*$/i, "").trim();
@@ -104532,9 +104520,9 @@ var TERMINAL_SHELL_PROGRAMS = new Set([
   "until",
   "while"
 ]);
-function shellCommandArgumentIndex(tokens2, start) {
-  for (let index3 = start;index3 < tokens2.length; index3 += 1) {
-    const option3 = tokens2[index3];
+function shellCommandArgumentIndex(tokens, start) {
+  for (let index3 = start;index3 < tokens.length; index3 += 1) {
+    const option3 = tokens[index3];
     if (option3 === "--" || !option3.startsWith("-"))
       return null;
     if (SHELL_OPTIONS_WITH_VALUE.has(option3)) {
@@ -104556,7 +104544,7 @@ var COMMAND_WRAPPER_FLAGS = {
 };
 function tokenizeShellCommand(command2) {
   const input = command2.trim();
-  const tokens2 = [];
+  const tokens = [];
   let current2 = "";
   let quote2 = null;
   let escaping = false;
@@ -104657,7 +104645,7 @@ function tokenizeShellCommand(command2) {
         continue;
       }
       if (tokenStarted) {
-        tokens2.push(current2);
+        tokens.push(current2);
         current2 = "";
         tokenStarted = false;
       }
@@ -104670,8 +104658,8 @@ function tokenizeShellCommand(command2) {
     return null;
   }
   if (tokenStarted)
-    tokens2.push(current2);
-  return tokens2;
+    tokens.push(current2);
+  return tokens;
 }
 function commandWithoutShellComments(command2, end3, comments) {
   let result3 = "";
@@ -104904,14 +104892,14 @@ function withoutShellWrapper(command2) {
   const split2 = splitFirstShellCommand(trimmed);
   if (split2.remainingCommand !== null)
     return trimmed;
-  const tokens2 = tokenizeShellCommand(trimmed);
-  const program = tokens2?.[0]?.split(/[\\/]/u).at(-1)?.replace(/\.exe$/iu, "");
-  if (!tokens2 || !program || !SHELL_PROGRAMS.has(program))
+  const tokens = tokenizeShellCommand(trimmed);
+  const program = tokens?.[0]?.split(/[\\/]/u).at(-1)?.replace(/\.exe$/iu, "");
+  if (!tokens || !program || !SHELL_PROGRAMS.has(program))
     return trimmed;
-  const scriptIndex = shellCommandArgumentIndex(tokens2, 1);
-  if (scriptIndex === null || scriptIndex !== tokens2.length - 1)
+  const scriptIndex = shellCommandArgumentIndex(tokens, 1);
+  if (scriptIndex === null || scriptIndex !== tokens.length - 1)
     return trimmed;
-  return tokens2[scriptIndex]?.trim() || trimmed;
+  return tokens[scriptIndex]?.trim() || trimmed;
 }
 var POWERSHELL_PROGRAMS = new Set(["powershell", "pwsh"]);
 var POWERSHELL_VERBS = new Set(`Add Approve Assert Backup Block Build Checkpoint Clear Close Compare Complete Compress Confirm Connect Convert ConvertFrom ConvertTo Copy Debug Deny Deploy Disable Disconnect Dismount Edit Enable Enter Exit Expand Export Find ForEach Format Get Grant Group Hide Import Initialize Install Invoke Join Limit Lock Measure Merge Mount Move New Open Optimize Out Ping Pop Protect Publish Push Read Receive Redo Register Remove Rename Repair Request Reset Resize Resolve Restart Restore Resume Revoke Save Search Select Send Set Show Skip Sort Split Start Step Stop Submit Suspend Switch Sync Tee Test Trace Unblock Undo Uninstall Unlock Unprotect Unpublish Unregister Update Use Wait Watch Where Write`.split(" "));
@@ -106264,7 +106252,340 @@ ${detail.message}` } : message;
 }
 
 // src/client/frame.tsx
+var import_react52 = __toESM(require_react(), 1);
+
+// src/client/context-meter.tsx
 var import_react51 = __toESM(require_react(), 1);
+var tokensText = (value4) => formatContextWindowTokens(value4).replace(/m$/, "M");
+var num = (value4) => typeof value4 === "number" && Number.isFinite(value4) ? value4 : null;
+function latestUsage(turns) {
+  let usage2 = null;
+  let turn = null;
+  for (const candidate of turns) {
+    const report = candidate.tokenUsage;
+    if (report === undefined)
+      continue;
+    if (usage2 === null || Date.parse(report.updatedAt) >= Date.parse(usage2.updatedAt)) {
+      usage2 = report;
+      turn = candidate;
+    }
+  }
+  return { usage: usage2, turn };
+}
+function contextDetailOf(input) {
+  const turns = (input.providerTurns ?? []).filter((turn2) => !input.activeProviderThreadId || turn2.providerThreadId === input.activeProviderThreadId);
+  const { usage: live, turn } = latestUsage(turns);
+  const snapshot2 = input.providerThread?.contextUsage ?? null;
+  const source = live ?? snapshot2;
+  if (source === null)
+    return null;
+  const used = Math.max(0, source.usedTokens);
+  const maxRaw = num(source.maxTokens) ?? num(snapshot2?.maxTokens);
+  const max5 = maxRaw !== null && maxRaw > 0 ? maxRaw : null;
+  const percent = max5 === null ? null : Math.min(100, used / max5 * 100);
+  const compactRaw = num(source.autoCompactThreshold) ?? num(snapshot2?.autoCompactThreshold);
+  const compactAt = compactRaw !== null && max5 !== null && compactRaw < max5 ? compactRaw : null;
+  const slices = [];
+  if (max5 !== null) {
+    const input2 = num(source.inputTokens);
+    const cached3 = num(source.cachedInputTokens);
+    const output = num(source.outputTokens);
+    if (input2 !== null && output !== null && input2 + output <= used + 1 && input2 + output > 0) {
+      const hit = Math.min(cached3 ?? 0, input2);
+      slices.push({ name: "Cached input", tokens: hit, kind: "used", color: theme.accent }, { name: "New input", tokens: input2 - hit, kind: "used", color: theme.cyan }, { name: "Output", tokens: output, kind: "used", color: theme.pink });
+      const rest = used - input2 - output;
+      if (rest > 1)
+        slices.push({ name: "Other", tokens: rest, kind: "used", color: theme.blue });
+    } else
+      slices.push({ name: "Used", tokens: used, kind: "used", color: theme.accent });
+    const room = Math.max(used, compactAt ?? max5);
+    slices.push({ name: "Free", tokens: room - used, kind: "free", color: theme.muted });
+    if (compactAt !== null)
+      slices.push({
+        name: "Compact buffer",
+        tokens: max5 - room,
+        kind: "buffer",
+        color: theme.border
+      });
+  }
+  const expires = live?.promptCacheExpiresAt ? Date.parse(live.promptCacheExpiresAt) : NaN;
+  return {
+    used,
+    max: max5,
+    percent,
+    level: percent === null ? "normal" : percent >= 90 ? "full" : percent >= 70 ? "high" : "normal",
+    slices: slices.filter((slice2) => slice2.tokens > 0 || slice2.kind === "free"),
+    compactAt,
+    cacheExpiresAt: Number.isFinite(expires) ? expires : null,
+    reasoning: num(source.reasoningOutputTokens),
+    turn: turn?.turnTokenUsage ?? null,
+    cost: snapshot2?.cost ?? null
+  };
+}
+function allocate2(slices, width2) {
+  const total = slices.reduce((sum3, slice2) => sum3 + slice2.tokens, 0);
+  if (total === 0 || width2 <= 0)
+    return slices.map(() => 0);
+  const exact = slices.map((slice2) => slice2.tokens / total * width2);
+  const out = exact.map(Math.floor);
+  const order = exact.map((_, i) => i).sort((a, b) => exact[b] % 1 - exact[a] % 1);
+  for (let left = width2 - out.reduce((s, n) => s + n, 0), k = 0;left > 0; left--, k++)
+    out[order[k % order.length]] += 1;
+  slices.forEach((slice2, i) => {
+    if (slice2.kind !== "used" || slice2.tokens === 0 || out[i] > 0)
+      return;
+    const biggest = out.indexOf(Math.max(...out));
+    if (out[biggest] <= 1)
+      return;
+    out[biggest] -= 1;
+    out[i] = 1;
+  });
+  return out;
+}
+var glyph = (slice2) => slice2.kind === "free" ? "\u25B1" : "\u25B0";
+function Bar({ slices, width: width2 }) {
+  const cells = allocate2(slices, width2);
+  return /* @__PURE__ */ import_jsx_runtime.jsx(import_jsx_runtime.Fragment, {
+    children: slices.map((slice2, i) => cells[i] ? /* @__PURE__ */ import_jsx_runtime.jsx("span", {
+      fg: slice2.color,
+      children: glyph(slice2).repeat(cells[i])
+    }, slice2.name) : null)
+  });
+}
+var headText = (detail) => detail === null ? "Context unknown" : detail.percent === null ? `Context ${tokensText(detail.used)}` : `Context ${formatContextFillPercent(detail.percent)}`;
+var tailText = (detail) => detail.max === null ? "" : `${tokensText(detail.used)} / ${tokensText(detail.max)}`;
+function chipLayout(detail, columns, open2) {
+  const head3 = headText(detail);
+  const tail = detail ? tailText(detail) : "";
+  const arrow = open2 ? " \u25B4" : " \u25BE";
+  const base = Bun.stringWidth(head3 + arrow);
+  const withTail = tail ? base + 1 + Bun.stringWidth(tail) : base;
+  const hasBar = !!detail && detail.slices.length > 0;
+  if (hasBar && columns >= withTail + 1 + 8)
+    return { head: head3, tail, arrow, bar: Math.min(24, columns - withTail - 1) };
+  if (columns >= withTail)
+    return { head: head3, tail, arrow, bar: 0 };
+  if (columns >= base)
+    return { head: head3, tail: "", arrow, bar: 0 };
+  return null;
+}
+function ContextChip({
+  detail,
+  columns,
+  open: open2,
+  onToggle
+}) {
+  const layout = chipLayout(detail, columns, open2);
+  if (!layout)
+    return null;
+  const color2 = detail === null ? theme.muted : detail.level === "full" ? theme.red : detail.level === "high" ? theme.yellow : theme.accent;
+  return /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+    flexShrink: 0,
+    onMouseUp: (event) => {
+      if (event.button === 0)
+        onToggle();
+    },
+    children: /* @__PURE__ */ import_jsx_runtime.jsxs("text", {
+      selectable: false,
+      fg: theme.muted,
+      children: [
+        /* @__PURE__ */ import_jsx_runtime.jsx("span", {
+          fg: color2,
+          children: layout.head
+        }),
+        layout.bar > 0 && detail ? /* @__PURE__ */ import_jsx_runtime.jsxs(import_jsx_runtime.Fragment, {
+          children: [
+            " ",
+            /* @__PURE__ */ import_jsx_runtime.jsx(Bar, {
+              slices: detail.slices,
+              width: layout.bar
+            })
+          ]
+        }) : null,
+        layout.tail ? ` ${layout.tail}` : "",
+        /* @__PURE__ */ import_jsx_runtime.jsx("span", {
+          fg: open2 ? theme.accent : theme.muted,
+          children: layout.arrow
+        })
+      ]
+    })
+  });
+}
+function share(tokens, max5) {
+  if (max5 === null)
+    return "";
+  return formatContextFillPercent(tokens / max5 * 100);
+}
+function relativeMinutes(at, now2) {
+  const minutes2 = Math.round(Math.abs(at - now2) / 60000);
+  const text5 = minutes2 >= 60 ? `${Math.floor(minutes2 / 60)}h ${minutes2 % 60}m` : `${minutes2}m`;
+  return at >= now2 ? `in ${text5}` : `${text5} ago`;
+}
+function detailLines(detail, width2, now2) {
+  if (detail === null)
+    return [
+      { text: "No usage reported yet.", color: theme.muted },
+      { text: "The server sends it after the", color: theme.muted },
+      { text: "thread's first turn.", color: theme.muted }
+    ];
+  const lines = [
+    {
+      text: detail.max === null ? `${tokensText(detail.used)} used \xB7 window size unknown` : `${formatContextFillPercent(detail.percent ?? 0)} used \xB7 ${tailText(detail)}`,
+      color: theme.text
+    }
+  ];
+  if (detail.slices.length > 0) {
+    lines.push({ text: "", bar: true });
+    const nameWidth = Math.max(...detail.slices.map((slice2) => slice2.name.length));
+    for (const slice2 of detail.slices) {
+      const tokens = tokensText(slice2.tokens).padStart(6);
+      const pct = share(slice2.tokens, detail.max).padStart(5);
+      lines.push({ text: `${slice2.name.padEnd(nameWidth)} ${tokens} ${pct}`, swatch: slice2 });
+    }
+  }
+  lines.push({ text: "" });
+  lines.push({
+    text: detail.compactAt !== null ? `Compacts at ${detail.compactAt.toLocaleString("en-US")} tokens.` : "Compacts automatically when needed.",
+    color: theme.muted
+  });
+  if (detail.cacheExpiresAt !== null)
+    lines.push({
+      text: detail.cacheExpiresAt > now2 ? `Prompt cache warm, expires ${relativeMinutes(detail.cacheExpiresAt, now2)}.` : `Prompt cache expired ${relativeMinutes(detail.cacheExpiresAt, now2)}.`,
+      color: detail.cacheExpiresAt > now2 ? theme.green : theme.yellow
+    });
+  const turn = detail.turn;
+  if (turn && turn.inputTokens !== undefined && turn.outputTokens !== undefined) {
+    const parts2 = [`${tokensText(turn.inputTokens)} in`];
+    if (turn.cachedInputTokens)
+      parts2.push(`${tokensText(turn.cachedInputTokens)} cached`);
+    parts2.push(`${tokensText(turn.outputTokens)} out`);
+    lines.push({ text: "" }, { text: "Last turn, all calls", color: theme.accent });
+    lines.push({ text: parts2.join(" \xB7 "), color: theme.text });
+    if (turn.reasoningTokens)
+      lines.push({ text: `${tokensText(turn.reasoningTokens)} reasoning` });
+    if (turn.otherUsage)
+      lines.push({
+        text: `Subagents, compaction: ${tokensText(turn.otherUsage.inputTokens)} in \xB7 ${tokensText(turn.otherUsage.outputTokens)} out`,
+        color: theme.muted
+      });
+  } else if (detail.reasoning)
+    lines.push({ text: `${tokensText(detail.reasoning)} reasoning` });
+  if (detail.cost) {
+    const digits = Math.abs(detail.cost.amount) > 0 && Math.abs(detail.cost.amount) < 0.01 ? 4 : 2;
+    lines.push({ text: `Cost ${detail.cost.currency} ${detail.cost.amount.toFixed(digits)}` });
+  }
+  return lines.flatMap((line) => line.bar || line.swatch || Bun.stringWidth(line.text) <= width2 ? [line] : wrapWords(line.text, width2).map((text5) => ({ ...line, text: text5 })));
+}
+function wrapWords(text5, width2) {
+  const rows = [];
+  let row = "";
+  for (const word of text5.split(" ")) {
+    const next2 = row ? `${row} ${word}` : word;
+    if (Bun.stringWidth(next2) > width2 && row) {
+      rows.push(row);
+      row = word;
+    } else
+      row = next2;
+  }
+  if (row)
+    rows.push(row);
+  return rows;
+}
+function ContextDropdown({
+  detail,
+  width: width2,
+  height,
+  now: nowOf,
+  close: close2
+}) {
+  const [now2, setNow] = import_react51.useState(nowOf);
+  import_react51.useEffect(() => {
+    const timer = setInterval(() => setNow(nowOf()), 60000);
+    return () => clearInterval(timer);
+  }, [nowOf]);
+  const outer = Math.min(46, width2);
+  const inner = Math.max(1, outer - 4);
+  const lines = detailLines(detail, inner, now2);
+  const boxHeight = Math.min(Math.max(3, height - 1), lines.length + 3);
+  return /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    width: "100%",
+    height: "100%",
+    children: [
+      /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+        position: "absolute",
+        left: 0,
+        top: 0,
+        width: "100%",
+        height: "100%",
+        onMouseUp: (event) => {
+          if (event.button === 0)
+            close2();
+        }
+      }),
+      /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
+        position: "absolute",
+        left: Math.max(0, width2 - outer),
+        top: 1,
+        width: outer,
+        height: boxHeight,
+        border: true,
+        borderStyle: "rounded",
+        borderColor: theme.accent,
+        backgroundColor: theme.canvas,
+        title: "Context window",
+        titleColor: theme.accent,
+        flexDirection: "column",
+        paddingLeft: 1,
+        paddingRight: 1,
+        children: [
+          /* @__PURE__ */ import_jsx_runtime.jsx("scrollbox", {
+            scrollY: true,
+            scrollX: false,
+            flexGrow: 1,
+            children: lines.map((line, i) => line.bar && detail ? /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+              children: /* @__PURE__ */ import_jsx_runtime.jsx(Bar, {
+                slices: detail.slices,
+                width: inner
+              })
+            }, i) : line.swatch ? /* @__PURE__ */ import_jsx_runtime.jsxs("text", {
+              fg: theme.text,
+              children: [
+                /* @__PURE__ */ import_jsx_runtime.jsxs("span", {
+                  fg: line.swatch.color,
+                  children: [
+                    glyph(line.swatch),
+                    " "
+                  ]
+                }),
+                line.text
+              ]
+            }, i) : /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+              fg: line.color ?? theme.text,
+              children: line.text
+            }, i))
+          }),
+          /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+            height: 1,
+            onMouseUp: (event) => {
+              if (event.button === 0)
+                close2();
+            },
+            children: /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+              fg: theme.accent,
+              selectable: false,
+              children: "[ Esc Close ]"
+            })
+          })
+        ]
+      })
+    ]
+  });
+}
+
+// src/client/frame.tsx
 function rightWidth(kind2, width2) {
   if (kind2 === "terminal")
     return Math.max(24, Math.floor(width2 * 0.5));
@@ -106293,7 +106614,7 @@ function AppFrame({
   const selectedId = useClientAtom(client, client.selectedThreadId);
   const snapshot2 = useClientAtom(client, client.snapshot);
   useClientAtom(client, client.transcripts);
-  const [agentStack, setAgentStack] = import_react51.useState([]);
+  const [agentStack, setAgentStack] = import_react52.useState([]);
   const agentId = agentStack.at(-1) ?? null;
   const agentCard = agentId ? pendingCard(client.getThread(agentId).projection) : undefined;
   const hasCard = !!(agentId ? agentCard : selectedId && pendingCard(client.getThread(selectedId).projection));
@@ -106303,27 +106624,34 @@ function AppFrame({
   const selected = snapshot2?.threads.find((thread) => thread.id === selectedId);
   const providers = useClientAtom(client, client.providers);
   const logo = selected && selectionIcon(selected.modelSelection, providers);
-  const providerThread = selected ? client.getThread(selected.id).projection?.providerThreads?.find((thread) => thread.id === selected.activeProviderThreadId) : undefined;
-  const fill = contextFillOf(providerThread?.contextUsage);
+  const projection = selected ? client.getThread(selected.id).projection : undefined;
+  const providerThread = projection?.providerThreads?.find((thread) => thread.id === selected?.activeProviderThreadId);
+  const contextDetail = selected ? contextDetailOf({
+    activeProviderThreadId: selected.activeProviderThreadId,
+    providerThread,
+    providerTurns: projection?.providerTurns
+  }) : null;
   const effort = selected?.modelSelection.options?.find((option3) => ["reasoningEffort", "effort", "variant"].includes(option3.id))?.value;
-  const context4 = fill ? `${["\u25CB", "\u25D4", "\u25D1", "\u25D5", "\u25CF"][Math.round(fill.percent / 25)]} Context ${formatContextFillPercent(fill.percent)} \xB7 ${fill.tokensLabel}` : "\u25CB Context unknown";
+  const statusText = `tercet \xB7 ${status2} \xB7 threads=${count}${selected ? ` \xB7 ${runtimeModeLabels[selected.runtimeMode] ?? selected.runtimeMode}` : ""}`;
+  const agentsText = runningAgents > 0 ? `${runningAgents} ${runningAgents === 1 ? "agent" : "agents"} running` : "";
+  const chipColumns = width2 - Bun.stringWidth(statusText) - (agentsText ? 2 + Bun.stringWidth(agentsText) : 0) - 2;
   const headerRows = selected ? [
-    ...wrapName(`${logo?.glyph} ${selected.modelSelection.model} \xB7 effort ${effort ?? "default"} \xB7 ${context4}`, width2),
+    ...wrapName(`${logo?.glyph} ${selected.modelSelection.model} \xB7 effort ${effort ?? "default"}`, width2),
     ...wrapName(`${paneGlyphs.branch} ${selected.branch ?? "branch unknown"} \xB7 ${selected.worktreePath ?? snapshot2?.projects.find((p) => p.id === selected.projectId)?.workspaceRoot ?? "workspace unknown"}`, width2)
   ] : [];
-  const notice = import_react51.useContext(ServerNotice);
+  const notice = import_react52.useContext(ServerNotice);
   const noticeRows = notice ? wrapName(`! ${notice.text} [ Dismiss${hintFor("dismissNotice") === "none" ? "" : ` (${hintFor("dismissNotice")})`} ]`, width2) : [];
   const topRows = headerRows.length + noticeRows.length;
-  const [hintsShown, setHintsShown] = import_react51.useState(true);
-  import_react51.useEffect(() => {
+  const [hintsShown, setHintsShown] = import_react52.useState(true);
+  import_react52.useEffect(() => {
     client.boundary.showHints?.().then(setHintsShown).catch(() => {});
   }, [client]);
   const chromeRows = topRows + (hintsShown ? 2 : 0);
-  const [sidebarWanted, setSidebar] = import_react51.useState(true);
-  const [narrowSidebar, setNarrowSidebar] = import_react51.useState(false);
+  const [sidebarWanted, setSidebar] = import_react52.useState(true);
+  const [narrowSidebar, setNarrowSidebar] = import_react52.useState(false);
   const sidebar = width2 >= 70 ? sidebarWanted : narrowSidebar;
-  const [focus, setFocusPane] = import_react51.useState("sidebar");
-  const [sent, setSent] = import_react51.useState(false);
+  const [focus, setFocusPane] = import_react52.useState("sidebar");
+  const [sent, setSent] = import_react52.useState(false);
   const setFocus = (next2) => {
     if (next2 === "composer")
       setSent(false);
@@ -106332,18 +106660,18 @@ function AppFrame({
   const hasQueued = !agentId && !!selectedId && !!client.getThread(selectedId).projection?.runs.some((run3) => run3.status === "queued");
   const composerCollapsed = !hasCard && !hasQueued && (!!agentId || focus !== "composer" || sent);
   const composerHeight = hasCard ? Math.min(17, Math.max(13, height - 5 - chromeRows)) : composerCollapsed ? 3 : 9;
-  const [filePath, setFilePath] = import_react51.useState();
-  const [diffTarget, setDiffTarget] = import_react51.useState();
-  const [diffSerial, setDiffSerial] = import_react51.useState(0);
-  const [right, setRight] = import_react51.useState(null);
-  const [overlay, setOverlay] = import_react51.useState(null);
-  const actions = import_react51.useMemo(() => createThreadActions(client), [client]);
-  import_react51.useEffect(() => {
+  const [filePath, setFilePath] = import_react52.useState();
+  const [diffTarget, setDiffTarget] = import_react52.useState();
+  const [diffSerial, setDiffSerial] = import_react52.useState(0);
+  const [right, setRight] = import_react52.useState(null);
+  const [overlay, setOverlay] = import_react52.useState(null);
+  const actions = import_react52.useMemo(() => createThreadActions(client), [client]);
+  import_react52.useEffect(() => {
     client.viewThread(agentId);
   }, [client, agentId]);
-  import_react51.useEffect(() => setAgentStack([]), [selectedId]);
+  import_react52.useEffect(() => setAgentStack([]), [selectedId]);
   const agentCardKey = agentId && agentCard ? `${agentId}:${requestKey(agentCard)}` : undefined;
-  import_react51.useEffect(() => {
+  import_react52.useEffect(() => {
     if (agentCardKey)
       setFocus("composer");
   }, [agentCardKey]);
@@ -106356,17 +106684,17 @@ function AppFrame({
     setAgentStack((stack) => stack.slice(0, -1));
     setFocus("transcript");
   };
-  const [menuTarget, setMenuTarget] = import_react51.useState();
-  const [actionError, setActionError] = import_react51.useState("");
-  import_react51.useEffect(() => onMediaNotice(setActionError), []);
-  const [quitArmed, setQuitArmed] = import_react51.useState(false);
-  import_react51.useEffect(() => {
+  const [menuTarget, setMenuTarget] = import_react52.useState();
+  const [actionError, setActionError] = import_react52.useState("");
+  import_react52.useEffect(() => onMediaNotice(setActionError), []);
+  const [quitArmed, setQuitArmed] = import_react52.useState(false);
+  import_react52.useEffect(() => {
     setNarrowSidebar(false);
     if (width2 < 70)
       setFocus(right ? "right" : "transcript");
   }, [width2, right]);
-  const center = import_react51.useRef("transcript");
-  import_react51.useEffect(() => {
+  const center = import_react52.useRef("transcript");
+  import_react52.useEffect(() => {
     if (focus === "transcript" || focus === "composer")
       center.current = focus;
   }, [focus]);
@@ -106434,7 +106762,7 @@ function AppFrame({
       setOverlay(null);
       return;
     }
-    if (command2 === "help" || command2 === "model" || command2 === "effort" || command2 === "palette") {
+    if (command2 === "help" || command2 === "context" || command2 === "model" || command2 === "effort" || command2 === "palette") {
       setMenuTarget(selected);
       setOverlay(overlay === command2 ? null : command2);
       return;
@@ -106573,15 +106901,9 @@ function AppFrame({
           flexShrink: 0,
           flexDirection: "row",
           children: [
-            /* @__PURE__ */ import_jsx_runtime.jsxs("text", {
+            /* @__PURE__ */ import_jsx_runtime.jsx("text", {
               fg: theme.text,
-              children: [
-                "tercet \xB7 ",
-                status2,
-                " \xB7 threads=",
-                count,
-                selected ? ` \xB7 ${runtimeModeLabels[selected.runtimeMode] ?? selected.runtimeMode}` : ""
-              ]
+              children: statusText
             }),
             runningAgents > 0 && /* @__PURE__ */ import_jsx_runtime.jsx("box", {
               marginLeft: 2,
@@ -106589,16 +106911,27 @@ function AppFrame({
                 if (event.button === 0 && !overlay)
                   openRight("launchers");
               },
-              children: /* @__PURE__ */ import_jsx_runtime.jsxs("text", {
+              children: /* @__PURE__ */ import_jsx_runtime.jsx("text", {
                 fg: theme.accent,
                 selectable: false,
-                children: [
-                  runningAgents,
-                  " ",
-                  runningAgents === 1 ? "agent" : "agents",
-                  " running"
-                ]
+                children: agentsText
               })
+            }),
+            selected && /* @__PURE__ */ import_jsx_runtime.jsxs(import_jsx_runtime.Fragment, {
+              children: [
+                /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+                  flexGrow: 1
+                }),
+                /* @__PURE__ */ import_jsx_runtime.jsx(ContextChip, {
+                  detail: contextDetail,
+                  columns: chipColumns,
+                  open: overlay === "context",
+                  onToggle: () => {
+                    if (!overlay || overlay === "context")
+                      dispatch2("context");
+                  }
+                })
+              ]
             })
           ]
         }),
@@ -106618,7 +106951,7 @@ function AppFrame({
         headerRows.map((row) => /* @__PURE__ */ import_jsx_runtime.jsx("text", {
           height: 1,
           flexShrink: 0,
-          fg: fill?.level === "full" ? theme.red : theme.accent,
+          fg: contextDetail?.level === "full" ? theme.red : theme.accent,
           children: logo && row.startsWith(logo.glyph) ? /* @__PURE__ */ import_jsx_runtime.jsxs(import_jsx_runtime.Fragment, {
             children: [
               /* @__PURE__ */ import_jsx_runtime.jsx("span", {
@@ -106844,6 +107177,13 @@ function AppFrame({
             if (width2 >= 70 || !right)
               setFocus("composer");
           }
+        }),
+        overlay === "context" && /* @__PURE__ */ import_jsx_runtime.jsx(ContextDropdown, {
+          detail: contextDetail,
+          width: width2,
+          height,
+          now: client.now,
+          close: () => setOverlay(null)
         }),
         overlay === "help" && /* @__PURE__ */ import_jsx_runtime.jsx("box", {
           position: "absolute",

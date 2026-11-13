@@ -22,6 +22,7 @@ export const COMMANDS = [
   { id: "sidebar", keys: "Alt+b", label: "Sidebar" },
   { id: "model", keys: "Alt+m", label: "Model" },
   { id: "effort", keys: "Alt+e", label: "Effort / Permissions" },
+  { id: "context", keys: "Alt+u", label: "Context usage" },
   { id: "files", keys: "Alt+f", label: "Files" },
   { id: "diff", keys: "Alt+d", label: "Diff" },
   { id: "dictation", keys: "Alt+v", label: "Dictation", needs: "dictation" },

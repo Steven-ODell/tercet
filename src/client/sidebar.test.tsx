@@ -785,7 +785,7 @@ test.each([
   };
   const two = { ...base, id: threadId("two"), activeProviderThreadId: "provider-two" as never };
   // Upstream reports context usage on the thread's active provider thread.
-  const usage = (id: string, usedTokens: number, maxTokens: number) => ({
+  const usage = (id: string, usedTokens: number, maxTokens: number, providerTurns: unknown[] = []) => ({
     ...client.getThread(id),
     projection: {
       turnItems: [],
@@ -794,12 +794,34 @@ test.each([
       runs: [],
       messages: [],
       providerThreads: [{ id: `provider-${id}`, contextUsage: { usedTokens, maxTokens } }],
+      providerTurns,
     } as never,
   });
+  // The newest turn report carries the cache split and the compact threshold.
+  const turnReport = {
+    providerThreadId: "provider-one",
+    tokenUsage: {
+      usedTokens: 430_000,
+      maxTokens: 1_000_000,
+      inputTokens: 428_000,
+      cachedInputTokens: 400_000,
+      outputTokens: 2_000,
+      autoCompactThreshold: 900_000,
+      updatedAt: "2026-10-22T12:00:00.000Z",
+    },
+    turnTokenUsage: {
+      usageScope: "main_agent",
+      usageStatus: "complete",
+      hasSubagents: false,
+      inputTokens: 1_200_000,
+      cachedInputTokens: 1_100_000,
+      outputTokens: 9_000,
+    },
+  };
   client.registry.set(
     client.transcripts,
     new Map([
-      [one.id as string, usage(one.id, 430_000, 1_000_000)],
+      [one.id as string, usage(one.id, 430_000, 1_000_000, [turnReport])],
       [two.id as string, usage(two.id, 800, 200_000)],
     ]),
   );
@@ -855,6 +877,26 @@ test.each([
     expect(frame).toContain("430k / 1M");
     const footerY = frame.split("\n").findIndex((line) => line.includes("5h ["));
     expect(footerY).toBeGreaterThan(height / 2);
+    // The context chip sits at the right end of the top row; a click drops the breakdown down.
+    const top = frame.split("\n")[0]!;
+    expect(top.trimEnd().endsWith("430k / 1M ▾")).toBe(true);
+    await act(async () => view.mockMouse.click(top.indexOf("Context 43%") + 2, 0));
+    await view.flush();
+    frame = view.captureCharFrame();
+    expect(frame).toContain("Context window");
+    expect(frame).toContain("Cached input");
+    expect(frame).toContain("Compacts at 900,000 tokens.");
+    expect(frame).toContain("1.2M in · 1.1M cached · 9k out");
+    await act(async () => view.mockInput.pressEscape());
+    await view.flush();
+    expect(view.captureCharFrame()).not.toContain("Cached input");
+    await act(async () => view.mockInput.pressKey("u", { meta: true }));
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Cached input");
+    await act(async () => view.mockInput.pressKey("u", { meta: true }));
+    await view.flush();
+    frame = view.captureCharFrame();
+    expect(frame).not.toContain("Cached input");
     await act(async () => {
       await view.mockMouse.scroll(5, 8, "down");
       client.openThread(two.id);

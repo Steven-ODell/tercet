@@ -1,4 +1,4 @@
-tercet · live · threads=1 · Supervised
+tercet · live · threads=1 · Supervised                                                                 Context unknown ▾
 › opencode/flint-40b-f┌──────────────────────────────────────────────────────────────────────────┐
 ↱ branch unknown · /tm│Model · Favorites first                                                   │
 ╭─● ≡ Threads─────────│Press / or type to filter all providers…                                  │─────────────────────╮
