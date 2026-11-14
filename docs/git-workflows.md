@@ -122,3 +122,26 @@ actual pinned-server rig on 3776, with disposable data and an explicitly scoped 
 It proves create-and-switch, switching back, conflicting dirty checkout refusal and edit
 preservation through both raw RPC and the workflow controller. Never uses daily data or
 live GitHub writes. Windows CI runs the portable tests; this process rig skips Windows.
+
+## Worktrees
+
+In Branches (Alt+g), `w` or Branches / Worktrees toggles the workspace list. Select with
+j/k, arrows, Enter or mouse; `n` / Create worktree asks for a new branch name. The server
+chooses its managed directory (`path:null`). Creation preserves source edits; they are
+not copied into the new worktree. No worktree removal, force checkout or automatic retry.
+Refs are paginated; known thread bindings supplement and deduplicate their worktree paths.
+Root branch detection uses its checked-out ref, even when reading from another worktree.
+The new-thread workspace picker includes those same known bindings.
+
+Selection verifies current branch/path against fresh status before metadata binding, with
+expectedBranch/expectedWorktreePath preconditions. Running/queued source and destination
+workspaces refuse changes. Idle provider sessions detach via the same pinned command used
+by stock stopThreadSession before moving, so the next turn uses the new cwd. Editors keep
+their existing pinned session. Files/diff/shell continue using the selected thread's path.
+Closing during creation cannot undo setup or release the controller's write lock; metadata
+bookkeeping continues. A failed binding leaves the worktree available for explicit selection.
+
+The POSIX rig below also proves real server-managed worktree setup, durable thread metadata,
+new-thread workspace choice, correct Git cwd and preservation of dirty source files. All
+server data, managed worktrees and Git effects stay inside its disposable /tmp directory;
+no provider turns or GitHub writes run. Native Windows CI still needs a native execution.

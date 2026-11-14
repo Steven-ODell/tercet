@@ -258,17 +258,21 @@ export function AppFrame({
   const cwd =
     selected?.worktreePath ??
     snapshot?.projects.find((p) => p.id === selected?.projectId)?.workspaceRoot;
+  const busyWorkspace = (path: string) => (snapshot?.threads ?? []).filter((t) =>
+    (t.worktreePath ?? snapshot?.projects.find((p) => p.id === t.projectId)?.workspaceRoot) === path
+  ).some((t) => !!t.activeRunId || !!t.activityRunStatus || client.getThread(t.id).projection?.runs.some((run) =>
+    !["completed", "failed", "cancelled", "interrupted", "rolled_back"].includes(run.status)));
+  const busyWorkspaceRef = useRef(busyWorkspace);
+  busyWorkspaceRef.current = busyWorkspace;
   const branchTarget = useRef<BranchTarget | undefined>(undefined);
   branchTarget.current = selected && cwd ? {
     projectId: selected.projectId, threadId: selected.id,
     projectCwd: snapshot!.projects.find((p) => p.id === selected.projectId)!.workspaceRoot,
     worktreePath: selected.worktreePath, branch: selected.branch,
-    running: (snapshot?.threads ?? []).filter((t) =>
-      (t.worktreePath ?? snapshot?.projects.find((p) => p.id === t.projectId)?.workspaceRoot) === cwd
-    ).some((t) => !!t.activeRunId || !!t.activityRunStatus || client.getThread(t.id).projection?.runs.some((run) =>
-      !["completed", "failed", "cancelled", "interrupted", "rolled_back"].includes(run.status))),
+    knownWorkspaces: snapshot?.threads.filter((t) => t.projectId === selected.projectId),
+    running: busyWorkspace(cwd),
   } : undefined;
-  const branchWorkflow = useMemo(() => createBranchWorkflow(client, () => branchTarget.current), [client]);
+  const branchWorkflow = useMemo(() => createBranchWorkflow(client, () => branchTarget.current, (path) => busyWorkspaceRef.current(path)), [client]);
   const runShell = () =>
     Promise.resolve().then(() => {
       if (!cwd || !effects?.shell) throw new Error("Unavailable");

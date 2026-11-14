@@ -3,6 +3,7 @@ import { act } from "react";
 import { testRender } from "@opentui/react/test-utils";
 import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { BranchPanel, createBranchWorkflow, type BranchTarget, type BranchData } from "./git-workflows.tsx";
+import { workspaceChoices } from "./workspace";
 import type { Client } from "./runtime";
 
 const target: BranchTarget = { projectId: ProjectId.make("p"), threadId: ThreadId.make("t"), projectCwd: "C:\\project with spaces", worktreePath: null, branch: "main", running: false };
@@ -21,6 +22,7 @@ function fixture() {
       if (operation === "status") return { ...status, hasWorkingTreeChanges: dirty };
       if (operation === "refs") return { refs: refs.map((r) => r.name === "feature" && other ? { ...r, worktreePath: "\\\\server\\other workspace" } : r), nextCursor: null };
       if (hold) await new Promise<void>((done) => { release = done; });
+      if (operation === "createWorktree") return { worktree: { refName: input.newRefName, path: String.raw`\\server\managed worktree` } };
       return { refName: input.refName };
     },
     dispatch: async (input: any) => { calls.push({ operation: "dispatch", input }); },
@@ -121,4 +123,138 @@ test.skipIf(process.platform === "win32" || process.env.TERCET_GIT_LIVE !== "1")
   await workflow.change(liveTarget, "feature");
   expect(workflow.snapshot().status).toBe("error");
   expect(await fs.readFile(`${cwd}/README.md`, "utf8")).toBe(edits);
+});
+
+test("worktree creation preserves dirty source, binds managed opaque path and refreshes destination", async () => {
+  const f = fixture(); f.dirty();
+  await f.workflow.workspace(target, { branch: null, worktreePath: null }, "topic");
+  expect(f.calls.find((c) => c.operation === "createWorktree")?.input).toEqual({ cwd: target.projectCwd, refName: "main", newRefName: "topic", path: null });
+  expect(f.calls.find((c) => c.operation === "dispatch")?.input).toMatchObject({ branch: "topic", worktreePath: String.raw`\\server\managed worktree`, expectedBranch: "main", expectedWorktreePath: null });
+  expect(f.calls.at(-2)?.input.cwd).toBe(String.raw`\\server\managed worktree`);
+});
+
+test("workspaces deduplicate paths and find root branch even when read from a worktree", () => {
+  expect(workspaceChoices("/root", [
+    { name: "topic", current: true, isDefault: false, worktreePath: "/tree" },
+    { name: "main", current: false, isDefault: true, worktreePath: "/root" },
+  ], [{ branch: "topic", worktreePath: "/tree" }, { branch: null, worktreePath: "/detached" }])).toEqual([
+    { branch: "main", worktreePath: null }, { branch: "topic", worktreePath: "/tree" }, { branch: null, worktreePath: "/detached" },
+  ]);
+});
+
+test("worktree selection only binds verified branch/path, and source/destination runs refuse writes", async () => {
+  const calls: any[] = [];
+  let busy = false;
+  const path = String.raw`C:\managed tree`;
+  const workflow = createBranchWorkflow({
+    git: (async (op: string, input: any) => {
+      calls.push([op, input]);
+      if (op === "refs") return { refs: [...refs, { name: "topic", worktreePath: path }], nextCursor: null };
+      return { ...status, refName: input.cwd === path ? "topic" : "main" };
+    }) as Client["git"],
+    dispatch: async (command) => { calls.push(["dispatch", command]); },
+  }, () => target, (cwd) => busy && cwd === path);
+  await workflow.workspace(target, { branch: "topic", worktreePath: path });
+  expect(calls.filter(([op]) => op === "dispatch")[0][1]).toMatchObject({ branch: "topic", worktreePath: path, expectedWorktreePath: null });
+  busy = true; calls.length = 0;
+  await workflow.workspace(target, { branch: "topic", worktreePath: path });
+  expect(calls).toHaveLength(0);
+  expect(workflow.snapshot().status).toBe("error");
+  const f = fixture(); f.setNow({ ...target, running: true });
+  await f.workflow.workspace(target, { branch: null, worktreePath: null }, "blocked");
+  expect(f.calls).toHaveLength(0);
+});
+
+test("closing a pending worktree creation keeps write lock and binding alive", async () => {
+  const f = fixture(); f.hold();
+  const write = f.workflow.workspace(target, { branch: null, worktreePath: null }, "topic");
+  for (let i = 0; i < 30 && !f.calls.some((c) => c.operation === "createWorktree"); i++) await Promise.resolve();
+  f.workflow.cancel();
+  await f.workflow.workspace(target, { branch: null, worktreePath: null }, "duplicate");
+  f.release(); await write;
+  expect(f.calls.filter((c) => c.operation === "createWorktree")).toHaveLength(1);
+  expect(f.calls.filter((c) => c.operation === "dispatch")).toHaveLength(1);
+  expect(f.workflow.snapshot().status).toBe("idle");
+});
+
+test("narrow worktree panel keyboard and mouse expose selection and creation", async () => {
+  const f = fixture();
+  const view = await testRender(<BranchPanel workflow={f.workflow} target={target} close={() => {}} />, { width: 48, height: 20, kittyKeyboard: true });
+  try {
+    await view.waitForFrame((frame) => frame.includes("feature"));
+    await act(async () => { view.mockInput.pressKey("w"); }); await view.flush();
+    expect(view.captureCharFrame()).toContain("[n Create worktree]");
+    const lines = view.captureCharFrame().split("\n"), y = lines.findIndex((line) => line.includes("[n Create worktree]"));
+    await act(async () => { await view.mockMouse.click(lines[y]!.indexOf("[n Create") + 2, y); }); await view.flush();
+    await act(async () => { await view.mockInput.typeText("topic"); }); await view.flush();
+    await act(async () => { view.mockInput.pressKey("RETURN"); }); await view.flush();
+    expect(f.calls.some((c) => c.operation === "createWorktree")).toBe(true);
+  } finally { view.renderer.destroy(); }
+});
+
+test.skipIf(process.platform === "win32" || process.env.TERCET_GIT_LIVE !== "1")("actual server worktree setup, metadata binding and new-thread workspace are durable", async () => {
+  const { connectionConfig } = await import("./config");
+  const { platform } = await import("./platform");
+  const { createClient, waitForLive } = await import("./runtime");
+  const { createThreadActions } = await import("./thread-actions");
+  const { withSandbox } = await import("../spikes/connect");
+  const { ORCHESTRATION_V2_WS_METHODS: RPC, ProviderInstanceId } = await import("@t3tools/contracts");
+  const Effect = await import("effect/Effect");
+  const Stream = await import("effect/Stream");
+  const fs = await import("node:fs/promises");
+  const dir = process.env.TERCET_SANDBOX_DIR!;
+  const cwd = `${dir}/work/demo-app`;
+  const config = await connectionConfig(["--url", "http://127.0.0.1:3776", "--token-file", `${dir}/token`], async () => undefined, "/unused", {});
+  const client = createClient({ ...platform(config), drafts: undefined }, false);
+  client.start();
+  try {
+    await waitForLive(client);
+    const project = client.registry.get(client.snapshot)!.projects.find((p) => p.workspaceRoot === cwd)!;
+    expect(project).toBeDefined();
+    client.registry.set(client.newModelSelection, { instanceId: ProviderInstanceId.make("opencode"), model: "opencode/flint-40b-free" });
+    const actions = createThreadActions(client);
+    const id = await actions.run("new", undefined, "worktree rig source", false, { branch: "main", worktreePath: null }, project.id);
+    for (let i = 0; i < 150 && !client.getThread(id!).projection; i++) await Bun.sleep(20);
+    const liveTarget = { ...target, projectId: project.id, threadId: id!, projectCwd: cwd };
+    const workflow = createBranchWorkflow(client, () => liveTarget);
+    const edits = await fs.readFile(`${cwd}/README.md`, "utf8");
+    await workflow.workspace(liveTarget, { branch: null, worktreePath: null }, "worktree-rig");
+    const state = workflow.snapshot();
+    expect(state.status).toBe("ready");
+    const readThread = (threadId: typeof id) => Effect.runPromise(withSandbox((session) => session.client[RPC.subscribeThread]({ threadId: threadId! }).pipe(
+      Stream.filter((item) => item.kind === "snapshot"), Stream.take(1), Stream.runCollect,
+      Effect.map((items) => { const item = items[0]; if (!item || item.kind !== "snapshot") throw new Error("No durable thread"); return item.projection; }),
+    )));
+    const bound = (await readThread(id)).thread;
+    expect(bound.branch).toBe("worktree-rig");
+    expect(bound.worktreePath?.startsWith(dir + "/")).toBe(true);
+    expect(await fs.readFile(`${cwd}/README.md`, "utf8")).toBe(edits);
+    expect((await client.git("status", { cwd: bound.worktreePath!, localOnly: true })).refName).toBe("worktree-rig");
+    const choices = workspaceChoices(cwd, await client.workspaceRefs(cwd));
+    const choice = choices.find((row) => row.worktreePath === bound.worktreePath)!;
+    expect(choice).toBeDefined();
+    const next = await actions.run("new", undefined, "worktree rig new thread", false, choice, project.id);
+    const durable = await readThread(next);
+    expect(durable.thread).toMatchObject(choice);
+    expect(durable.runs).toHaveLength(0);
+    const { workspaceCwd } = await import("./git-workflows.ts");
+    expect(workspaceCwd({ ...liveTarget, ...durable.thread })).toBe(bound.worktreePath!);
+    const tree = Bun.spawnSync(["git", "-C", bound.worktreePath!, "branch", "--show-current"]);
+    expect(tree.exitCode).toBe(0);
+    expect(tree.stdout.toString().trim()).toBe("worktree-rig");
+  } finally { await client.dispose(); }
+}, 60_000);
+
+test("moving a thread detaches idle provider sessions before binding and refuses active sessions", async () => {
+  const { ProviderSessionId } = await import("@t3tools/contracts");
+  for (const sessionStatus of ["ready", "running"] as const) {
+    const commands: any[] = [];
+    const workflow = createBranchWorkflow({
+      git: (async (op: string) => op === "refs" ? { refs, nextCursor: null } : status) as Client["git"],
+      dispatch: async (command) => { commands.push(command); },
+      getThread: (() => ({ projection: { providerSessions: [{ id: ProviderSessionId.make("session"), status: sessionStatus }] } })) as Client["getThread"],
+    }, () => ({ ...target, worktreePath: "/old" }));
+    await workflow.workspace({ ...target, worktreePath: "/old" }, { branch: "main", worktreePath: null });
+    expect(commands.map((c) => c.type)).toEqual(sessionStatus === "ready" ? ["provider-session.detach", "thread.metadata.update"] : []);
+  }
 });

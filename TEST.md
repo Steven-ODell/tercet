@@ -60,3 +60,14 @@ An explicit external command must retain its previous state-only behavior.
 Automated coverage uses fake capture/transport plus a real child process for recorder cleanup.
 A synthetic spoken phrase was transcribed successfully by the isolated v0.1.8 server's local
 Parakeet model on Linux. No speaker playback was used. macOS capture is untested.
+
+### Git worktree workflow rig (step 3)
+
+`bash scripts/test-git-workflows.sh` starts an off-screen/muted stock 0.1.8 server on
+3776 with disposable HOME/data/repositories and a scoped token. It tests branch refusal
+and source edit preservation, then creates a managed worktree through the workflow,
+reads durable branch/path binding from the server, and creates a new thread using that
+workspace with no provider runs. It verifies the real Git branch at the returned cwd and
+that the managed path stays under its disposable root. Server stops on exit; 3775 and daily
+3773/data remain untouched. POSIX-only process rig; portable controller/renderer tests:
+`bun test src/client/git-workflows.test.ts src/client/git-workflows.test.tsx`.

@@ -90,7 +90,7 @@ mutations. Only the user's eventual trial connects this new UI to their daily se
   Done when: `bun test src/client/git-workflows.test.ts src/client/git-workflows.test.tsx`
   plus baseline exit 0; disposable repo verifies create/switch/refusal preserves edits.
 
-- [ ] 3. Add worktree creation, listing, selection and thread workspace binding.
+- [x] 3. Add worktree creation, listing, selection and thread workspace binding.
   Files: same workflow UI/boundary, src/client/{new-thread,frame,runtime}.tsx/ts as applicable;
   pinned orchestration command and worktree schemas. Follow upstream thread-binding behavior,
   protect running threads and retain correct cwd for Files, diff, shell and editors.
