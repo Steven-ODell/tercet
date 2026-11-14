@@ -153853,6 +153853,7 @@ function Editor({
   const [cursor, setCursor] = import_react46.useState(0);
   const text5 = drafts[id2] ?? "";
   const root = import_react46.useRef(null);
+  const preview2 = collapsed && !enabled && text5.length > 0;
   const spell = useSpellCheck({
     spell: effects?.spell,
     editor: editor2,
@@ -154204,8 +154205,18 @@ function Editor({
           })
         ]
       }),
+      preview2 && /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+        height: 1,
+        flexShrink: 0,
+        marginRight: 1,
+        wrapMode: "none",
+        truncate: true,
+        fg: theme.input,
+        children: text5.replace(/\s+/g, " ").trim()
+      }),
       /* @__PURE__ */ import_jsx_runtime.jsx("textarea", {
         ref: editor2,
+        visible: !preview2,
         flexGrow: 1,
         minHeight: 1,
         marginRight: 1,
@@ -158370,6 +158381,7 @@ function AppFrame({
   const [menuTarget, setMenuTarget] = import_react54.useState();
   const [actionError, setActionError] = import_react54.useState("");
   const dictation = import_react54.useMemo(() => createDictation(client, effects), [client, effects]);
+  const micMessage = import_react54.useSyncExternalStore(dictation.subscribe, dictation.getMessage);
   import_react54.useEffect(() => () => dictation.dispose(), [dictation]);
   import_react54.useEffect(() => onMediaNotice(setActionError), []);
   const [quitArmed, setQuitArmed] = import_react54.useState(false);
@@ -158805,7 +158817,7 @@ function AppFrame({
           height: 1,
           flexShrink: 0,
           fg: theme.accent,
-          children: actionError || (quitArmed ? "Press Ctrl+c again to quit; any other key cancels" : `Focus: ${focus}${hintsShown || hintFor("hints") === "none" ? "" : ` \xB7 ${hintFor("hints")} hints`}`)
+          children: actionError || (quitArmed ? "Press Ctrl+c again to quit; any other key cancels" : composerCollapsed && micMessage ? micMessage : `Focus: ${focus}${hintsShown || hintFor("hints") === "none" ? "" : ` \xB7 ${hintFor("hints")} hints`}`)
         }),
         hintsShown && /* @__PURE__ */ import_jsx_runtime.jsx("box", {
           height: 2,

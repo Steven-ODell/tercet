@@ -715,3 +715,91 @@ test("paste, image paste and mic buttons draw only when their effect exists", as
     await act(async () => full.renderer.destroy());
   }
 });
+
+test("while the composer is collapsed, the status line carries the mic's message", async () => {
+  const h = await composerFixture();
+  let fail: ((error: Error) => void) | undefined;
+  (h.client as { speechStatus: () => Promise<unknown> }).speechStatus = async () => ({
+    supported: true,
+    state: "ready",
+  });
+  const effects = {
+    copy() {},
+    record: async (options?: { onFailure?: (error: Error) => void }) => {
+      fail = options?.onFailure;
+      return { stop: async () => new Uint8Array(4), cancel() {} };
+    },
+  };
+  const view = await testRender(<AppFrame client={h.client} effects={effects} />, {
+    width: 120,
+    height: 40,
+    kittyKeyboard: true,
+    exitOnCtrlC: false,
+  });
+  const lines = () => view.captureCharFrame().split("\n");
+  const status = () => lines().find((line) => line.includes("Focus:") || line.includes("Mic ")) ?? "";
+  try {
+    await view.waitForFrame((frame) => frame.includes("Focus: sidebar"));
+    const composerRow = lines().findIndex((line) => line.includes("Composer─"));
+    await act(async () => view.mockMouse.click(60, composerRow));
+    await view.waitForFrame((frame) => frame.includes("Focus: composer"));
+    await act(async () => view.mockInput.pressKey("v", { meta: true }));
+    await view.waitForFrame((frame) => frame.includes("Recording]"));
+    // Open: the message sits beside the mic button and the status line keeps the focus.
+    expect(view.captureCharFrame()).toContain("Focus: composer");
+    await act(async () => view.mockMouse.click(60, 5));
+    await view.waitForFrame((frame) => !frame.includes("Recording]"));
+    expect(status()).toContain("Mic recording");
+    await act(async () => fail?.(new Error("pw-record exited with 1: device unplugged")));
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("device unplugged");
+  } finally {
+    await act(async () => view.renderer.destroy());
+    await h.client.dispose();
+  }
+});
+
+test("a long dictation from another pane previews from its first words in the collapsed composer", async () => {
+  const h = await composerFixture();
+  const said = Array.from({ length: 30 }, (_, i) => `word${i + 1}`).join(" ");
+  Object.assign(h.client, {
+    speechStatus: async () => ({ supported: true, state: "ready" }),
+    transcribe: async () => said,
+  });
+  const effects = {
+    copy() {},
+    record: async () => ({ stop: async () => new Uint8Array(4), cancel() {} }),
+  };
+  const view = await testRender(<AppFrame client={h.client} effects={effects} />, {
+    width: 120,
+    height: 40,
+    kittyKeyboard: true,
+    exitOnCtrlC: false,
+  });
+  const composerLines = () => {
+    const lines = view.captureCharFrame().split("\n");
+    const y = lines.findIndex((line) => line.includes("Composer─"));
+    return { y, lines: lines.slice(y + 1, y + 3) };
+  };
+  try {
+    await view.waitForFrame((frame) => frame.includes("Focus: sidebar"));
+    await act(async () => view.mockInput.pressKey("v", { meta: true }));
+    await view.waitForFrame((frame) => frame.includes("Mic recording"));
+    await act(async () => view.mockInput.pressKey("v", { meta: true }));
+    await view.waitForFrame((frame) => frame.includes("transcript added"));
+    const collapsed = composerLines();
+    expect(collapsed.lines[0]).toContain("word1 word2 word3");
+    expect(collapsed.lines[0]).toContain("word30");
+    await act(async () => view.mockMouse.click(60, collapsed.y + 1));
+    await view.waitForFrame((frame) => frame.includes("send / queue]"));
+    // Opened, the draft is whole and the caret still sits at its end.
+    await act(async () => view.mockInput.typeText("!"));
+    await view.flush();
+    await act(async () => view.mockInput.pressKey("RETURN"));
+    await view.flush();
+    expect(h.commands[0]).toMatchObject({ type: "message.dispatch", text: `${said}!` });
+  } finally {
+    await act(async () => view.renderer.destroy());
+    await h.client.dispose();
+  }
+});

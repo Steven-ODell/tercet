@@ -16,7 +16,15 @@ import { allThreads, createThreadActions } from "./thread-actions";
 import type { OrchestrationV2ThreadShell, RuntimeMode, ThreadId } from "@t3tools/contracts";
 import { ThreadComposer } from "./composer";
 import { ThreadTranscript } from "./transcript";
-import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
 import { ContextChip, contextDetailOf, ContextDropdown } from "./context-meter";
 import { paneGlyphs, selectionIcon } from "./icons";
@@ -224,8 +232,10 @@ export function AppFrame({
   };
   const [menuTarget, setMenuTarget] = useState<OrchestrationV2ThreadShell>();
   const [actionError, setActionError] = useState("");
-  // Its messages show beside the composer's mic button, not on this status line.
+  // Its messages show beside the composer's mic button, and on this status line only while the
+  // collapsed composer hides that button: dictation keeps running after the composer loses focus.
   const dictation = useMemo(() => createDictation(client, effects), [client, effects]);
+  const micMessage = useSyncExternalStore(dictation.subscribe, dictation.getMessage);
   useEffect(() => () => dictation.dispose(), [dictation]);
   // The media ladder's one-time hint (tmux passthrough off) when the first image falls back.
   useEffect(() => onMediaNotice(setActionError), []);
@@ -774,7 +784,9 @@ export function AppFrame({
           {actionError ||
             (quitArmed
               ? "Press Ctrl+c again to quit; any other key cancels"
-              : `Focus: ${focus}${hintsShown || hintFor("hints") === "none" ? "" : ` · ${hintFor("hints")} hints`}`)}
+              : composerCollapsed && micMessage
+                ? micMessage
+                : `Focus: ${focus}${hintsShown || hintFor("hints") === "none" ? "" : ` · ${hintFor("hints")} hints`}`)}
         </text>
         {hintsShown && (
           <box height={2} flexShrink={0} flexDirection="row" flexWrap="wrap">

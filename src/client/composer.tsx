@@ -198,6 +198,10 @@ function Editor({
   const [cursor, setCursor] = useState(0);
   const text = drafts[id] ?? "";
   const root = useRef<BoxRenderable>(null);
+  // Collapsed and unfocused, the row previews how the draft starts. The textarea would show the
+  // wrapped row holding the caret, so a long dictation looked like it had lost its first words. It
+  // stays mounted and only hidden, keeping its caret for when the composer opens again.
+  const preview = collapsed && !enabled && text.length > 0;
   const spell = useSpellCheck({
     spell: effects?.spell,
     editor,
@@ -535,8 +539,14 @@ function Editor({
           <text fg={theme.plain}>{mediaBusy ? " …" : mediaStatus || micMessage}</text>
         </box>
       )}
+      {preview && (
+        <text height={1} flexShrink={0} marginRight={1} wrapMode="none" truncate fg={theme.input}>
+          {text.replace(/\s+/g, " ").trim()}
+        </text>
+      )}
       <textarea
         ref={editor}
+        visible={!preview}
         flexGrow={1}
         minHeight={1}
         // OpenTUI places the caret one cell past a full wrapped row. Keep it off the border.
