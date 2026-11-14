@@ -16,6 +16,7 @@ export interface Chord {
  */
 export const COMMANDS = [
   { id: "shell", keys: "Alt+t", label: "Shell", needs: "shell" },
+  { id: "editor", keys: "Alt+r", label: "Editor" },
   { id: "terminal", keys: "Alt+j", label: "Terminal" },
   { id: "web", keys: "Alt+o", label: "Web" },
   { id: "launchers", keys: "Alt+l", label: "Launchers" },

@@ -61,6 +61,67 @@ Automated coverage uses fake capture/transport plus a real child process for rec
 A synthetic spoken phrase was transcribed successfully by the isolated v0.1.8 server's local
 Parakeet model on Linux. No speaker playback was used. macOS capture is untested.
 
+## Embedded editor
+
+Run the server-free fixture on a disposable directory (never your real source files):
+
+```bash
+trial=$(mktemp -d /tmp/tercet-editor-trial.XXXXXX)
+printf 'before\n' > "$trial/trial file.txt"
+bun scripts/files-preview-fixture.tsx "$trial"
+```
+
+Enter opens the file, `e` embeds Neovim. `i` inserts text; Esc, `:wq`, Enter saves and quits;
+Enter returns to Files and should show the saved text. `:q` with unsaved edits must show the
+editor's native warning. `:q!` discards them. This fixture quits with Ctrl+c.
+
+In the full app against the throwaway server, also verify `Alt+h` returns to chat,
+`Alt+c` hides, `Alt+r` resumes the same buffer, and changing threads never moves the session
+to another workspace. Quit Tercet from chat while the editor runs: it must ask you to quit
+the editor first. Resize while editing. Test `Ctrl+p`, `Ctrl+c`, Esc and bracketed paste:
+none may trigger chat actions. Clicking Edit here and Back must work.
+The existing `o` external command must retain its configuration.
+
+Automated tests cover path quoting, real Neovim save/quit, resize, original workspace pinning,
+focus/input, hide/resume, quit protection, remote rejection and read-only blocking.
+The Neovim test skips when Neovim is absent; macOS PTY behavior still needs hands-on validation.
+
+For the full conversation/files/editor flow from this checkout, use an isolated server and
+settings directory (no installed launcher or daily settings change):
+
+```bash
+export TERCET_SANDBOX_DIR=$(mktemp -d /tmp/tercet-editor-server.XXXXXX)
+scripts/sandbox.sh up
+scripts/sandbox.sh token > /dev/null
+printf 'before\n' > "$TERCET_SANDBOX_DIR/work/demo-app/trial.txt"
+XDG_CONFIG_HOME="$TERCET_SANDBOX_DIR/config" bun dist/tercet.js --url http://127.0.0.1:3775 --token-file "$TERCET_SANDBOX_DIR/token"
+```
+
+Create a thread with Ctrl+n in demo-app, then Alt+f → trial.txt → Enter → e. No agent turn is
+needed. After quitting both editor and Tercet, stop this server with `scripts/sandbox.sh down`.
+
+External editor follow-up: with VISUAL/EDITOR unset and no editor setting, o must explain setup.
+Set VISUAL to a terminal editor: o should launch a separate terminal window. Set it to code or
+configure an absolute VS Code executable with editorMode direct: o should open the selected
+file in that GUI. A nonexistent executable must show full-path linking guidance.
+Set launchers.editor to nvim and editorMode to tmux: from an attached tmux client, o opens a
+new session (not a window), :wq saves and returns to the original Tercet session. A focused
+Tercet Files preview must refresh after an external save. Custom commands.editor still wins.
+The private-socket external-editor-rig.test.ts verifies real Neovim save and client return.
+
+If your hands-on sandbox is using 3775, run the full check on the second reserved test port:
+`TERCET_SANDBOX_PORT=3776 bun run check`. Only 3775 and 3776 are accepted; the daily port
+is never a sandbox target. This leaves the interactive sandbox and its editor sessions alone.
+
+## README recording
+
+The README now uses docs/media/demo-extended.gif; docs/media/demo.gif is preserved unchanged.
+See scripts/demo/README.md for the off-screen VHS workflow. The new segment demonstrates real
+shell output, an embedded Neovim save, an external tmux Neovim save and return to chat, using
+only a disposable file. The original animation is appended without decoding or re-encoding it.
+Final verification compared every decoded frame and delay against both source GIFs: all
+474 original frames and 551 appended frames match exactly (41 seconds total).
+
 ### Git worktree workflow rig (step 3)
 
 `bash scripts/test-git-workflows.sh` starts an off-screen/muted stock 0.1.8 server on

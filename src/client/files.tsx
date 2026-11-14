@@ -1,7 +1,7 @@
 import { theme } from "./theme";
 import { hintFor } from "./keymap";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useKeyboard } from "@opentui/react";
+import { useKeyboard, useRenderer } from "@opentui/react";
 import type { ProjectEntry, ProjectReadFileResult } from "@t3tools/contracts";
 import type { Client } from "./runtime";
 import type { Actions } from "../actions";
@@ -21,6 +21,7 @@ type Loaded =
 /** The panel owns navigation only; all filesystem reads belong to the connected environment. */
 export function FilesPanel({
   api,
+  edit,
   cwd,
   path,
   enabled,
@@ -31,6 +32,7 @@ export function FilesPanel({
   peekDelay = 80,
 }: {
   api: FilesApi;
+  edit?: (path: string) => void;
   cwd?: string;
   path?: string;
   enabled: boolean;
@@ -42,6 +44,17 @@ export function FilesPanel({
   /** Wait before previewing the row under the cursor, so holding j does not read every file. */
   peekDelay?: number;
 }) {
+  const renderer = useRenderer();
+  useEffect(() => {
+    const refresh = () => {
+      loads.current.clear();
+      setRetry((n) => n + 1);
+    };
+    renderer.on("focus", refresh);
+    return () => {
+      renderer.off("focus", refresh);
+    };
+  }, [renderer]);
   const [mode, setMode] = useState<"tree" | "find" | "search">("tree");
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState("");
@@ -264,11 +277,18 @@ export function FilesPanel({
     if (!cwd || !file) return;
     setNotice("Opening editor…");
     try {
-      if (!effects?.editor) throw new Error();
+      if (!effects?.editor) {
+        setNotice(
+          "No editor set. Set VISUAL or EDITOR in your shell profile, or launchers.editor in Tercet settings.",
+        );
+        return;
+      }
       await effects.editor({ cwd, path: file });
+      loads.current.clear();
+      setRetry((n) => n + 1);
       setNotice("Editor ✓");
-    } catch {
-      setNotice("Editor failed. Press o to retry.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Editor failed. Press o to retry.");
     }
   };
   useKeyboard((key) => {
@@ -317,6 +337,7 @@ export function FilesPanel({
         setIndex(Math.min(rows.length - 1, index + 1));
       else if (!file) choose(row);
     } else if (key.name === "return") choose(rows[index]);
+    else if (key.sequence === "e" && file) edit?.(file);
     else if (key.sequence === "o") void editor();
     else if (key.sequence === "p") setPeeking((v) => !v);
     else if (key.sequence === "g" || key.sequence === "G") {
@@ -387,7 +408,8 @@ export function FilesPanel({
             <span fg={fileIcon(file).color}>{fileIcon(file).glyph} </span>
             {file}
           </text>
-          {button("[o Editor]", () => {
+          {edit && button("[e Edit here]", () => edit(file))}
+          {button("[o External editor]", () => {
             void editor();
           })}
         </>

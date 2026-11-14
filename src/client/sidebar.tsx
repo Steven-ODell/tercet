@@ -40,9 +40,12 @@ const stamp = (at: DateTime.Utc | null | undefined) =>
 export function threadBadge(thread: Thread, visited = 0) {
   if (thread.lastErrorClass === "usage_limit")
     return `◷ limited · reset ${thread.usageLimitResetAt ?? "unknown"}`;
-  if (thread.pendingRuntimeRequest || thread.status === "waiting") return "? waiting";
-  if (thread.status === "failed") return "× failed";
-  if (["preparing", "queued", "starting", "running"].includes(thread.status)) return "▶ running";
+  // `status` follows the latest run. A message queued behind a live run and then cancelled makes
+  // it "cancelled" while the earlier run is still working; the activity run is what is live.
+  const status = thread.activityRunStatus ?? thread.status;
+  if (thread.pendingRuntimeRequest || status === "waiting") return "? waiting";
+  if (status === "failed") return "× failed";
+  if (["preparing", "queued", "starting", "running"].includes(status)) return "▶ running";
   if (
     thread.latestVisibleMessage?.role === "assistant" &&
     stamp(thread.latestVisibleMessage.updatedAt) > Math.max(stamp(thread.lastVisitedAt), visited)

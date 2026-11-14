@@ -1,3 +1,6 @@
+import { useState } from "react";
+import { EditorPanel } from "../src/client/editor";
+import { editorAction, type EditorSession } from "../src/embedded-editor";
 // Standalone, offline Files panel on a real directory: bun scripts/files-preview-fixture.tsx [dir]. Ctrl+c exits.
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -40,19 +43,35 @@ const effects = {
       throw new Error("offline fixture");
     }),
 };
+const editor = editorAction("http://127.0.0.1");
+renderer.once("destroy", () => editor.dispose());
 function Fixture() {
+  const [session, setSession] = useState<EditorSession>();
   const { width, height } = useTerminalDimensions();
   return (
     <box width={Math.min(width, 48)} height={height} border borderStyle="rounded" title="Files">
-      <FilesPanel
-        api={api}
-        cwd={root}
-        enabled
-        effects={effects}
-        height={height}
-        width={Math.min(width, 48) - 2}
-        close={() => renderer.destroy()}
-      />
+      {session ? (
+        <EditorPanel
+          session={session}
+          enabled
+          width={Math.min(width, 48) - 2}
+          height={height - 2}
+          close={() => setSession(undefined)}
+        />
+      ) : (
+        <FilesPanel
+          api={api}
+          cwd={root}
+          enabled
+          effects={effects}
+          edit={(path) => {
+            void editor.open({ cwd: root, path }).then(setSession);
+          }}
+          height={height}
+          width={Math.min(width, 48) - 2}
+          close={() => renderer.destroy()}
+        />
+      )}
     </box>
   );
 }

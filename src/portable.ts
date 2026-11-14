@@ -1,9 +1,12 @@
+import { createReadback, playReadback, playReadbackVia } from "./readback";
 // Portable host actions: the clipboard, opener and player fallback chains, the ffmpeg poster probe,
 // and the command template engine behind every optional action (shell, editor, tmux typing, run,
 // send, dictation, link mapping).
 // This is the only file in src/ that names desktop tools; anything personal lives in the user's
 // settings file as a template.
 import { createSpellChecker } from "./client/spell";
+import { isAbsolute, win32, resolve } from "node:path";
+import { windowsClipboard, windowsOpen, windowsPicker, windowsTerminal } from "./windows";
 import { spawn } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 import type { Actions } from "./actions";
@@ -81,6 +84,7 @@ interface BuiltinTool extends ClipboardTool {
  * used while its display is set, so an SSH session does not write some other desktop's clipboard.
  */
 export const CLIPBOARD_TOOLS: readonly BuiltinTool[] = [
+  { ...windowsClipboard, writer: "powershell.exe", reader: "powershell.exe", usable: (host) => host.platform === "win32" && !host.env.SSH_CONNECTION && !host.env.SSH_CLIENT && !host.env.SSH_TTY },
   {
     name: "wl-clipboard",
     writer: "wl-copy",
@@ -155,6 +159,8 @@ export function openerChain(settings: Settings, host: Host): Opener | undefined 
   const spec = settings.launchers.opener;
   if (spec)
     return { name: "launchers.opener", args: (target, vars) => expand(spec, vars, [target]) };
+  if (host.platform === "win32" && host.which("powershell.exe"))
+    return { name: "Windows opener", args: windowsOpen };
   // Linux's `open` is often openvt, so it only counts on macOS.
   const program = host.which("xdg-open")
     ? "xdg-open"
@@ -179,7 +185,13 @@ export function playerChain(settings: Settings, host: Host): Opener | undefined 
  */
 export function pickerChain(settings: Settings, host: Host) {
   const spec = settings.launchers.picker;
-  if (spec) return { name: "launchers.picker", args: (cwd: string, vars: Vars) => expand(spec, { ...vars, cwd }) };
+  if (spec)
+    return {
+      name: "launchers.picker",
+      args: (cwd: string, vars: Vars) => expand(spec, { ...vars, cwd }),
+    };
+  if (host.platform === "win32" && host.which("powershell.exe"))
+    return { name: "Windows file dialog", args: windowsPicker };
   const desktop = !!(host.env.WAYLAND_DISPLAY || host.env.DISPLAY);
   if (desktop && host.which("zenity"))
     return {
@@ -229,7 +241,15 @@ export function pickerChain(settings: Settings, host: Host) {
 }
 
 /** ssh that never prompts (a prompt would land in the TUI) and gives up on a dead host quickly. */
-const sshArgs = (host: string) => ["ssh", "-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host];
+const sshArgs = (host: string) => [
+  "ssh",
+  "-n",
+  "-o",
+  "BatchMode=yes",
+  "-o",
+  "ConnectTimeout=5",
+  host,
+];
 
 /**
  * The picker over SSH, run on the machine you type from. A non-interactive ssh session has no
@@ -355,7 +375,7 @@ export interface RunOptions {
 /** Runs argv (no shell) with the host's env; the program is looked up on the host's PATH. */
 export function runArgs(host: Host, args: readonly string[], options: RunOptions = {}) {
   const [name, ...rest] = args;
-  const program = name?.includes("/") ? name : name && host.which(name);
+  const program = /[\\/]/.test(name ?? "") ? name : name && host.which(name);
   if (!program) return Promise.reject(new Error(`${name ?? "command"} not found`));
   return new Promise<Uint8Array>((resolve, reject) => {
     const child = spawn(program, rest, {
@@ -434,9 +454,160 @@ const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 const isText = (type: string) =>
   type.startsWith("text/") || ["UTF8_STRING", "STRING", "TEXT"].includes(type);
 
+/** Parse VISUAL/EDITOR as argv, including quoted paths; never evaluate shell source. */
+export function editorArgv(text: string, platform = process.platform): string[] {
+  const out: string[] = [];
+  let word = "",
+    quote = "",
+    started = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (ch === "\\" && quote !== "'" && platform !== "win32") {
+      if (++i >= text.length) throw new Error("Editor command has a trailing backslash.");
+      word += text[i];
+      started = true;
+    } else if (quote) {
+      if (ch === quote) quote = "";
+      else word += ch;
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+      started = true;
+    } else if (/\s/.test(ch)) {
+      if (started) {
+        out.push(word);
+        word = "";
+        started = false;
+      }
+    } else {
+      word += ch;
+      started = true;
+    }
+  }
+  if (quote) throw new Error("Editor command has an unclosed quote.");
+  if (started) out.push(word);
+  return out;
+}
+
+export const NO_EDITOR =
+  "No editor set. Set VISUAL or EDITOR in your shell profile, or launchers.editor in Tercet settings.";
+export function externalEditorCommand(settings: Settings, host: Host): CommandSpec | undefined {
+  if (settings.launchers.editor) return settings.launchers.editor;
+  const text = host.env.VISUAL?.trim() || host.env.EDITOR?.trim();
+  if (!text) return undefined;
+  return editorArgv(text, host.platform as NodeJS.Platform);
+}
+
+/** Discover the destination separately from the user's editor command. */
+export function externalEditorChoice(settings: Settings, host: Host) {
+  let editor: CommandSpec | undefined;
+  try {
+    editor = externalEditorCommand(settings, host);
+  } catch {
+    return undefined;
+  }
+  if (!editor || !argsOf(editor)[0]) return undefined;
+  if (settings.launchers.editorMode === "tmux")
+    return { editor, mode: "tmux" as const, terminal: undefined };
+  const name = argsOf(editor)[0]!.split(/[\\/]/).at(-1)!.replace(/\.exe$/i, "");
+  const gui =
+    /^(code|code-insiders|codium|cursor|zed|subl|gvim|mvim|kate|geany|gedit|emacsclient)(\.exe)?$/.test(
+      name,
+    );
+  if (settings.launchers.editorMode === "direct")
+    return { editor, mode: "direct" as const, terminal: undefined };
+  if (settings.launchers.terminal)
+    return { editor, mode: "terminal" as const, terminal: settings.launchers.terminal };
+  const terminalEditor = /^(nvim|vim|vi|nano|micro|hx|helix|kak|emacs)$/.test(name);
+  if (!settings.launchers.editorMode && (gui || (settings.launchers.editor && !terminalEditor)))
+    return { editor, mode: "direct" as const, terminal: undefined };
+  if (host.platform === "linux" && (host.env.WAYLAND_DISPLAY || host.env.DISPLAY)) {
+    const terminals: [string, string[]][] = [
+      ["ghostty", ["ghostty", "--working-directory={cwd}", "-e"]],
+      ["foot", ["foot", "-D", "{cwd}"]],
+      ["kitty", ["kitty", "--directory", "{cwd}"]],
+      ["wezterm", ["wezterm", "start", "--cwd", "{cwd}", "--"]],
+      ["alacritty", ["alacritty", "--working-directory", "{cwd}", "-e"]],
+      ["gnome-terminal", ["gnome-terminal", "--working-directory={cwd}", "--"]],
+      ["konsole", ["konsole", "--workdir", "{cwd}", "-e"]],
+      ["xterm", ["xterm", "-e"]],
+    ];
+    const found = terminals.find(([name]) => host.which(name));
+    if (found) return { editor, mode: "terminal" as const, terminal: found[1] };
+  }
+  if (host.platform === "win32" && host.which("powershell.exe"))
+    return { editor, mode: "windows" as const, terminal: undefined };
+  if (host.platform === "darwin" && host.which("osascript"))
+    return { editor, mode: "macos" as const, terminal: undefined };
+  return undefined;
+}
+
+async function openTmuxEditor(host: Host, program: string[], cwd: string) {
+  if (!host.which("tmux"))
+    throw new Error("Tmux not found on PATH; install tmux or use editorMode terminal.");
+  if (!host.env.TMUX || !host.env.TMUX_PANE)
+    throw new Error("Tmux editor mode requires Tercet inside an attached tmux session.");
+  const origin = new TextDecoder()
+    .decode(
+      await runArgs(
+        host,
+        [
+          "tmux",
+          "display-message",
+          "-p",
+          "-t",
+          host.env.TMUX_PANE,
+          "#{client_name}\n#{session_id}",
+        ],
+        { capture: true },
+      ),
+    )
+    .trim()
+    .split("\n");
+  const [client, session] = origin;
+  if (!client || !session) throw new Error("No attached tmux client found for the editor.");
+  // Positional arguments keep paths and editor argv out of shell source. On exit, return the
+  // same client to the original session before the editor session disappears.
+  const script =
+    'client=$1; origin=$2; shift 2; "$@"; result=$?; tmux switch-client -c "$client" -t "$origin" 2>/dev/null || :; exit "$result"';
+  const id = new TextDecoder()
+    .decode(
+      await runArgs(
+        host,
+        [
+          "tmux",
+          "new-session",
+          "-d",
+          "-P",
+          "-F",
+          "#{session_id}",
+          "-c",
+          cwd,
+          "--",
+          "sh",
+          "-c",
+          script,
+          "tercet-editor",
+          client,
+          session,
+          ...program,
+        ],
+        { cwd, capture: true },
+      ),
+    )
+    .trim();
+  if (!/^\$\d+$/.test(id)) throw new Error("Tmux did not return an editor session.");
+  try {
+    await runArgs(host, ["tmux", "switch-client", "-c", client, "-t", id]);
+  } catch {
+    throw new Error(`Editor is running in tmux session ${id}; switching to it failed.`);
+  }
+}
+
 export interface HostDeps {
   settings: Settings;
   host: Host;
+  /** False for direct remote servers: automatic launch must not interpret their paths locally. */
+  localWorkspace?: boolean;
   /** OSC 52 to the terminal. */
   writeTerminal(bytes: string): void;
   /** The machine the user types from when it is not this one (SSH), for `{sshHost}`. */
@@ -563,7 +734,7 @@ export function hostActions(deps: HostDeps): Actions {
           host,
           via
             ? [...sshArgs(via), `sh -c ${shellQuote(REMOTE_PICKER)}`]
-            : picker!.args(cwd ?? host.env.HOME ?? "/", await vars(launchers.picker, {})),
+            : picker!.args(cwd ?? host.env.USERPROFILE ?? host.env.HOME ?? "/", await vars(launchers.picker, {})),
           { capture: true },
         );
       } catch (error) {
@@ -573,10 +744,10 @@ export function hostActions(deps: HostDeps): Actions {
       }
       const paths = decode(out)
         .split(/\r?\n/)
-        .filter((line) => line.startsWith("/"));
+        .filter((line) => via ? line.startsWith("/") : isAbsolute(line) || (host.platform === "win32" && win32.isAbsolute(line)));
       const files = [];
       for (const path of paths) {
-        const name = path.split("/").at(-1)!;
+        const name = path.split(/[\\/]/).at(-1)!;
         let bytes: Uint8Array;
         if (via) {
           // One byte past the limit is enough to know it is too big without copying all of it.
@@ -624,18 +795,65 @@ export function hostActions(deps: HostDeps): Actions {
       return png ? { ...info, poster: new Uint8Array(stdout) } : info;
     };
   const shell = command("shell") ?? launchers.terminal;
+  if (!shell && host.platform === "win32" && host.which("powershell.exe"))
+    actions.shell = async ({ cwd }) => runArgs(host, windowsTerminal(cwd), { cwd, graceMs: grace });
   if (shell)
     actions.shell = async ({ cwd }) => {
       await run(shell, { cwd }, { cwd, graceMs: grace });
     };
   const editor = command("editor");
-  if (editor || launchers.editor)
+  const external = externalEditorChoice(settings, host);
+  if (
+    editor ||
+    external ||
+    settings.launchers.editor ||
+    host.env.VISUAL?.trim() ||
+    host.env.EDITOR?.trim()
+  )
     actions.editor = async ({ cwd, path }) => {
-      if (editor) return run(editor, { cwd, path }, { cwd, graceMs: grace });
-      // A terminal editor needs `launchers.terminal` in front of it; a GUI editor runs alone.
-      const program = expand(launchers.editor!, { cwd, path }, [path]);
-      const args = launchers.terminal
-        ? [...expand(launchers.terminal, { cwd }), ...program]
+      if (editor) {
+        const argv = expand(editor, await vars(editor, { cwd, path }));
+        if (!argv[0] || !host.which(argv[0]))
+          throw new Error(
+            `Editor "${argv[0] ?? ""}" not found on PATH. Set commands.editor to its full executable path, or link it with launchers.editor.`,
+          );
+        return runArgs(host, argv, { cwd, graceMs: grace });
+      }
+      if (deps.localWorkspace === false)
+        throw new Error("External editor requires Tercet on the server machine; connect with SSH.");
+      const configured = externalEditorCommand(settings, host);
+      const name = configured && argsOf(configured)[0];
+      if (!name) throw new Error(NO_EDITOR);
+      if (!host.which(name))
+        throw new Error(
+          `Editor "${name}" not found on PATH. Set launchers.editor to its full executable path (for VS Code, e.g. ["/path/to/code", "{path}"]).`,
+        );
+      if (!external)
+        throw new Error(
+          "No terminal launcher found. Set launchers.terminal, use editorMode tmux inside tmux, or editorMode direct for a GUI editor.",
+        );
+      const target = settings.launchers.editor ? path : resolve(cwd, path);
+      const program = expand(external!.editor, { cwd, path: target }, [target]);
+      if (external!.mode === "windows")
+        return runArgs(host, windowsTerminal(cwd, program), { cwd, graceMs: grace });
+      if (external!.mode === "tmux") return openTmuxEditor(host, program, cwd);
+      if (external!.mode === "macos") {
+        const script =
+          'on run argv\ntell application "Terminal"\nactivate\ndo script (item 1 of argv)\nend tell\nend run';
+        return runArgs(
+          host,
+          [
+            "osascript",
+            "-e",
+            script,
+            "--",
+            `cd ${shellQuote(cwd)} && ${program.map(shellQuote).join(" ")}`,
+          ],
+          { cwd, graceMs: grace },
+        );
+      }
+      const args = external!.terminal
+        ? [...expand(external!.terminal, { cwd }), ...program]
         : program;
       return runArgs(host, args, { cwd, graceMs: grace });
     };
@@ -671,6 +889,16 @@ export function hostActions(deps: HostDeps): Actions {
           onLimit: input?.onLimit,
           onFailure: input?.onFailure,
         });
+  }
+  if (settings.readback.enabled) {
+    // Speech is made here but heard where you click: over SSH it plays on the machine you type
+    // from, found the same way as {sshHost}. A local client plays on this machine.
+    const readback = createReadback(settings.readback, undefined, async (audio, signal) => {
+      const via = await deps.sshHost?.();
+      return via ? playReadbackVia(audio, signal, host, via) : playReadback(audio, signal, host);
+    });
+    actions.stopReadback = readback.stopReadback;
+    actions.readback = (text) => readback.readback(text);
   }
   return actions;
 }

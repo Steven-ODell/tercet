@@ -165,3 +165,18 @@ Default Kokoro endpoint http://127.0.0.1:8880 was unavailable (curl exit 7, HTTP
 Actual natural voice playback has NOT been verified. Preserve no settings edit/install/restart
 boundary; report service requirement honestly, do not silently install/start a model/service.
 Kokoro readback is explicit only; tests use simulated synthesis/player and remain muted.
+
+## Local Kokoro steering and loop block
+
+Sao clarified generation should work the same way as the hub: direct local kokoro_onnx,
+not an HTTP endpoint. Root readback defaults to local engine using existing KOKORO_HOME/
+venv/model/voice files; optional HTTP engine remains. This supersedes the service requirement
+above for terminal use. Actual quiet generation produced /tmp/tercet-kokoro-local.wav
+(203786 bytes, 24kHz PCM WAV), and rebuilt combined bundle=0
+(/tmp/tercet-git-step4-local-kokoro-build.log). No settings edits or installation needed.
+Step 4 commit 0c42ba0 remains complete. Step 5 NOT launched: added local cancellation test
+timed out after two fixes (10 pass/1 fail, /tmp/tercet-kokoro-local-focused3.log).
+Follow NOTES.md Blocked exact attempts and likely Bun matcher ordering diagnosis. Resolve,
+then rerun Git/voice focused tests, root build and full :3776 check before launching Step 5.
+Keep this thread open. Preserve all editor/Windows/readback changes and latest combined dist
+UNCOMMITTED. Windows native CI/manual trial still pending, paths opaque, P10 paused.

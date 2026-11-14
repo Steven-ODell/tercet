@@ -58,10 +58,11 @@ test("launcher is a plain list: letters, arrows, Enter and clicks run entries", 
       ["web", { threadId: "composer" }],
     ]);
     await key("l", true);
-    for (const label of ["Files (F)", "Diff (D)", "Terminal (T)", "Shell (S)"])
+    for (const label of ["Files (F)", "Diff (D)", "Editor (E)", "Terminal (T)", "Shell (S)"])
       expect(view.captureCharFrame()).toContain(label);
     await key("s");
     await view.waitForFrame((f) => f.includes("Shell ✓"));
+    await key("ARROW_DOWN");
     await key("ARROW_DOWN");
     await key("ARROW_DOWN");
     await key("ARROW_DOWN");

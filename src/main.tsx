@@ -1,3 +1,4 @@
+import { editorAction } from "./embedded-editor";
 import {
   KITTY_CLEAR_DIRECT,
   KITTY_CLEAR_PLACEMENTS,
@@ -163,7 +164,15 @@ try {
         : process.env.TMUX
           ? KITTY_CLEAR_PLACEMENTS
           : KITTY_CLEAR_DIRECT;
-    terminalLifecycle(renderer, async () => client?.dispose(), kittyReset);
+    const embedded = editorAction(config.url, config.settings.commands.embeddedEditor);
+    terminalLifecycle(
+      renderer,
+      async () => {
+        embedded.dispose();
+        await client?.dispose();
+      },
+      kittyReset,
+    );
     const output = async (args: string[]) => {
       const child = Bun.spawn(args, { stdout: "pipe", stderr: "ignore" });
       const text = await new Response(child.stdout).text();
@@ -175,6 +184,7 @@ try {
     const effects = hostActions({
       settings: config.settings,
       host: systemHost(),
+      localWorkspace: isLoopback(new URL(config.url).hostname),
       writeTerminal: (bytes) => process.stdout.write(bytes),
       sshHost: sshHostLookup(process.env, output, (path) => Bun.file(path).text()),
       loadImage,
@@ -248,6 +258,7 @@ try {
         await play(target);
         return "launched player";
       };
+    effects.embeddedEditor = embedded.open;
     if (config.readOnly) blockWrites(effects);
     createRoot(renderer).render(
       client && firstCheck ? (

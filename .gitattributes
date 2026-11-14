@@ -1,2 +1,5 @@
 # Built by scripts/build from src/; review the source, not this file.
 dist/tercet.js linguist-generated=true -diff
+
+# Bundle freshness compares bytes on Windows too.
+dist/tercet.js text eol=lf

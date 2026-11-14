@@ -6,7 +6,7 @@ import { failureText } from "../actions";
 import { agentElapsed, type AgentRow } from "./agents";
 
 const noAgents: readonly AgentRow[] = [];
-export type LauncherPanel = "files" | "diff" | "terminal";
+export type LauncherPanel = "files" | "diff" | "terminal" | "editor";
 
 /**
  * The launcher is a plain list, like the web right-panel empty state. Add an entry with one line:
@@ -50,6 +50,7 @@ export function LaunchersPanel({
   const entries: Entry[] = [
     { label: "Files", letter: "f", run: () => open("files") },
     { label: "Diff", letter: "d", run: () => open("diff") },
+    { label: "Editor", letter: "e", run: () => open("editor") },
     { label: "Terminal", letter: "t", run: () => open("terminal") },
     ...(shell ? [{ label: "Shell", letter: "s", run: shell }] : []),
     ...(agents.length

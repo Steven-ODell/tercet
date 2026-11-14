@@ -2,12 +2,12 @@ tercet · live · threads=1 · Supervised                                   Cont
 › opencode/flint-40b-free · effort high
 ↱ branch unknown · /tmp/tercet-sandbox.XXXXXX/work/demo-app
 ╭─≡ Threads──────────────────╮╭─¶ Transcript──────────────────────────────╮╭─● ▤ Files─────────────────────────────────╮
-│[h] All threads             ││use tools or change files.                 ││[b Tree][/ Find][s Search][p Preview on]   │
-│                            ││                                           ││[Alt+c Close]                              │
-│  tercet acceptance sandbox ││───────────────────────────────────────────││/tmp/tercet-sandbox.XXXXXX/work/demo-app   │
-│  › ? waiting · ■ demo-… now││[+] Thought · 1 work items                 ││› ▸ ▸ src                                  │
-│  ▸ Settled (0)             ││assistant                                  ││    • README.md                            │
-│                            ││acceptance-stream-ok                       ││                                           │
+│[h] All threads             ││                                           ││[b Tree][/ Find][s Search][p Preview on]   │
+│                            ││───────────────────────────────────────────││[Alt+c Close]                              │
+│  tercet acceptance sandbox ││[+] Thought · 1 work items                 ││/tmp/tercet-sandbox.XXXXXX/work/demo-app   │
+│  › ? waiting · ■ demo-… now││assistant                                  ││› ▸ ▸ src                                  │
+│  ▸ Settled (0)             ││acceptance-stream-ok                       ││    • README.md                            │
+│                            ││[read]                                     ││                                           │
 │                            ││[+] checkpoint · completed · checkpoint    ││                                           │
 │                            ││[+] user input request · undefined · user  ││                                           │
 │                            ││input request                              ││                                           │

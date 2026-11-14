@@ -1,9 +1,15 @@
 # Installing tercet
 
 tercet runs on [Bun](https://bun.com) and talks to a T3 Code server you already run. It is tested
-on Linux and macOS with Bun 1.4.0. Windows is untested.
+on Linux and macOS with Bun 1.4.0. Native Windows support is experimental; see
+[Windows setup and verification](windows.md).
 
 ## Install
+
+On Windows, install Bun 1.4.0 or newer and use Windows Terminal. Install directly with
+`bun install -g github:Steven-ODell/tercet`, or download `install.ps1` from this repository
+and run it in PowerShell to install/update to the newest commit. The shell script below is
+for Linux and macOS. Windows installation and test limitations are in [windows.md](windows.md).
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Steven-ODell/tercet/main/install.sh | sh

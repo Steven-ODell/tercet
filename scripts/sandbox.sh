@@ -11,7 +11,11 @@
 set -euo pipefail
 
 T3_VERSION=0.1.8
-SANDBOX_PORT=3775
+SANDBOX_PORT=${TERCET_SANDBOX_PORT:-3775}
+case "$SANDBOX_PORT" in
+  3775|3776) ;;
+  *) echo "Sandbox port must be 3775 or 3776 (never the daily server)." >&2; exit 2 ;;
+esac
 SANDBOX_URL="http://127.0.0.1:$SANDBOX_PORT"
 SANDBOX_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/tercet/server"
 SANDBOX_MODEL=opencode/flint-40b-free

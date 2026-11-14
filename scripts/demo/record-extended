@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Record only the new segment, then append it to the untouched README demo.
+# Run through bgrun. No server, tokens, real workspaces or daily settings are used.
+set -euo pipefail
+root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
+dir=${1:-$(mktemp -d /tmp/tercet-demo-extended.XXXXXX)}
+mkdir -p "$dir"
+dir=$(realpath "$dir")
+if [[ -e "$dir/editor-segment.gif" || -e "$dir/demo-extended.gif" || -e "$dir/workspace" ]]; then
+  echo "Use a fresh output directory; existing recordings are preserved." >&2
+  exit 1
+fi
+for tool in vhs ttyd chromium bun nvim tmux python3; do command -v "$tool" >/dev/null; done
+python3 - "$root/scripts/demo/editor.tape" "$dir" <<'PY'
+import pathlib, sys
+source, out = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+tape = source.read_text().replace('Output "/tmp/tercet-editor-segment.gif"', f'Output "{out}/editor-segment.gif"')
+(out / 'editor.tape').write_text(tape)
+PY
+# A subshell keeps the caller in its launch directory.
+(cd "$root" && TERCET_DEMO_DIR="$dir" vhs "$dir/editor.tape")
+# This file was edited by the real embedded and external Neovim sessions in the tape.
+grep -q 'units: "imperial"' "$dir/workspace/forecast.ts"
+grep -q 'city: "London"' "$dir/workspace/forecast.ts"
+python3 "$root/scripts/demo/append-gif.py" "$root/docs/media/demo.gif" \
+  "$dir/editor-segment.gif" "$dir/demo-extended.gif"
+echo "Recording and saved-file checks passed: $dir"

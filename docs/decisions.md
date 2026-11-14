@@ -392,3 +392,16 @@ Read in the vendored v0.1.8 contracts and effect's RPC client, 2026-11-12:
   An explicit recorder is an intentional override. Read-only blocks capture and speech access.
 - Linux pw-record, parecord (with 100 ms latency), arecord and ffmpeg capture yielded valid
   PCM; SoX capture required a longer phrase due to buffering. macOS remains unverified.
+
+
+## Native Windows support (2026-11-14)
+
+Sao expanded the original POSIX-only platform target to native Windows, including the Git/PR
+loop. Keep the existing Bun/OpenTUI stack: the pinned renderer ships Windows builds and Bun
+1.4.0 supports ConPTY. Native host adapters live in `src/windows.ts`; user values are encoded
+as JSON data, never interpolated into PowerShell code. No Wine dependency or WSL requirement.
+Windows CI runs native platform/PTY/installer tests and pinned stock Windows T3 authentication;
+Linux/macOS retain their full POSIX rigs. Windows remains experimental until that native job
+and a Windows Terminal hands-on trial pass. Git paths remain opaque server values, including
+drive letters and UNC shares. See `docs/windows.md` for coverage and remaining limits.
+P10 release/publication gates remain paused.

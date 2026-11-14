@@ -68,7 +68,7 @@ export function blockActions(
   const runnable = visible && SHELL_LANGUAGE.test(language) && !text.trimEnd().endsWith("\\");
   return [
     "copy",
-    ...offered.filter((action) => (action !== "tmux" || visible) && (action !== "run" || runnable)),
+    ...offered.filter((action) => action !== "__readback" && (action !== "tmux" || visible) && (action !== "run" || runnable)),
   ];
 }
 function fit(text: string, cells: number) {
@@ -466,6 +466,11 @@ export function measureMarkdown(
       offset += wrapped.cells;
     }
   });
+  if (item.kind === "assistant" && item.text.trim() && offered.includes("__readback")) {
+    const target: Target = { kind: "message", text: item.text };
+    rows.push({ id: `${item.id}:readback:0`, chrome: true, target,
+      spans: [button("read", target)] });
+  }
   return rows;
 }
 const rulePrefix = "rule/";

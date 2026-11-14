@@ -4,7 +4,9 @@ tercet is a terminal UI for [T3 Code](https://github.com/pingdotgg/t3code). Your
 transcripts and composer run in the terminal, next to the web app, on the same server. It works
 over SSH and inside tmux, and needs no window.
 
-![tercet: opening a thread, a block-rendered image, a diff, the palette and a reply](docs/media/demo.gif)
+![tercet: threads, image preview, diff, reply, terminal, embedded editor and external tmux editor](docs/media/demo-extended.gif)
+
+[Original demo, preserved](docs/media/demo.gif).
 
 - **The web app's behavior, in a terminal.** Same thread list, shelves and models, live
   streaming, a composer with `@file`, `/skill` and `:emoji`, diffs and the files panel. Mouse
@@ -66,10 +68,18 @@ will not send this machine's token anywhere but loopback.
 | tmux 3.8 inside Ghostty | Kitty graphics through passthrough  | yes, `tercet doctor` and the acceptance run |
 | zellij, screen          | colored blocks, expected            | untested                                    |
 
-macOS is tested in CI only (typecheck, unit tests, the bundle). Windows is not supported.
+macOS is tested in CI only (typecheck, unit tests, the bundle). Native Windows support is
+experimental; use Windows Terminal and Bun 1.4.0 or newer. See [Windows setup and test
+coverage](docs/windows.md).
 "Expected" follows from how tercet detects images: it asks the terminal, and uses whatever the
 terminal answers. Run `tercet doctor` in yours and see the `images` line. Reports of other
 terminals are welcome.
+
+## Read responses aloud
+
+Click **[read]** below an assistant response to hear it through Kokoro. It plays on the machine you
+click from, including over SSH. **[stop reading]** cancels it. Voice and speed are configurable in settings. Requires
+the same local Kokoro model/venv as Phone Assist hub and an audio player; see [readback setup](docs/settings.md#response-readback-kokoro).
 
 ## Settings
 
@@ -187,7 +197,7 @@ terminal](docs/settings.md#keys-that-depend-on-the-terminal).
 
 ## Known limits
 
-- Windows is not supported.
+- Native Windows support is experimental pending a passing Windows CI run and a hands-on terminal trial.
 - Over SSH tercet can write your local clipboard (OSC 52) but not read it, so paste from the
   computer you type on goes through your terminal's own paste. A `commands.paste` template can
   fetch it another way.
@@ -204,3 +214,25 @@ tercet is built on [OpenTUI](https://github.com/anomalyco/opentui) and React, an
 tercet is an unofficial, community client. It is not made by or affiliated with T3 Tools Inc.
 
 MIT License, Steven O'Dell.
+
+## Edit files inside tercet
+
+Open Files with `Alt+f`, select a file with Enter, then press `e` or click **Edit here**.
+This starts Neovim in a dedicated embedded terminal (`nvim --clean`, falling back to `vi`).
+Press `i` to insert, Esc to return to normal mode, then `:w` Enter to save or `:wq` Enter
+to save and quit. After exit, Enter returns to Files with a fresh preview.
+
+`Alt+h` moves back to chat; `Alt+c` hides the editor; `Alt+r` resumes it. Hidden editors keep
+running, even across thread changes, and show their original workspace at the top. One editor
+runs at a time: opening another file while it runs resumes that session. Use the editor's
+`:edit path` or quit it before opening a different file. Ordinary keys, Esc and Ctrl combinations
+belong to the focused editor. The mouse operates Tercet's buttons and pane focus; edit text
+with the keyboard.
+
+`o` / **External editor** uses your configured launcher, then VISUAL/EDITOR. Terminal editors
+open in a separate terminal window by default; `launchers.editorMode: "tmux"` opts into tmux
+sessions. GUI editors such as VS Code launch directly; settings can link an absolute executable
+path when it is outside PATH. No editor set means a setup prompt. See [settings](docs/settings.md).
+For a different embedded terminal editor, set `commands.embeddedEditor` as described in
+[settings](docs/settings.md). Read-only mode blocks editor launch. Run Tercet on the server
+machine (SSH works); direct connections to remote servers cannot use the embedded editor.

@@ -2,11 +2,11 @@ tercet · live · threads=1 · Supervised                                   Cont
 › opencode/flint-40b-free · effort high
 ↱ branch unknown · /tmp/tercet-sandbox.XXXXXX/work/demo-app
 ╭─≡ Threads──────────────────╮╭─¶ Transcript─────────────────────╮╭─● ± Diff───────────────────────────────────────────╮
-│[h] All threads             ││                                  ││[a All][t Turn][Alt+c Close][r Retry]               │
-│                            ││──────────────────────────────────││Full thread · whitespace ignored                    │
-│  tercet acceptance sandbox ││[+] Thought · 1 work items        ││1 files +1 −1                                       │
-│  › ? waiting · ■ demo-… now││assistant                         ││› • acceptance-fixture.ts +1 −1                     │
-│  ▸ Settled (0)             ││acceptance-stream-ok              ││                                                    │
+│[h] All threads             ││──────────────────────────────────││[a All][t Turn][Alt+c Close][r Retry]               │
+│                            ││[+] Thought · 1 work items        ││Full thread · whitespace ignored                    │
+│  tercet acceptance sandbox ││assistant                         ││1 files +1 −1                                       │
+│  › ? waiting · ■ demo-… now││acceptance-stream-ok              ││› • acceptance-fixture.ts +1 −1                     │
+│  ▸ Settled (0)             ││[read]                            ││                                                    │
 │                            ││[+] checkpoint · completed ·      ││                                                    │
 │                            ││checkpoint                        ││                                                    │
 │                            ││[+] user input request · undefined││                                                    │

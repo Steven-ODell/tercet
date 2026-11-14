@@ -26,9 +26,11 @@ async function exercise(source: FilesApi, cwd: string) {
     search: (input) => track(source.search(input)),
   };
   const calls: unknown[] = [];
+  const edits: string[] = [];
   const view = await testRender(
     <FilesPanel
       api={api}
+      edit={(path) => edits.push(path)}
       cwd={cwd}
       enabled
       height={32}
@@ -76,8 +78,11 @@ async function exercise(source: FilesApi, cwd: string) {
     await wait((f) => f.includes("const greeting"));
     await key("o");
     expect(calls.at(-1)).toEqual({ cwd, path: "src/hello.ts" });
-    await click("[o Editor]");
+    await click("[o External editor]");
     expect(calls).toHaveLength(2);
+    await key("e");
+    await click("[e Edit here]");
+    expect(edits).toEqual(["src/hello.ts", "src/hello.ts"]);
     await key("ESCAPE");
     await key("/");
     await act(async () => {
@@ -363,5 +368,46 @@ test("the row under the cursor previews below the list: text, images through Kit
     await wait((f) => f.includes("Folder: Enter or l opens it"));
   } finally {
     await act(async () => view.renderer.destroy());
+  }
+});
+
+test("external editor setup is explained and saved changes refresh on return", async () => {
+  let contents = "before";
+  const api = {
+    list: async () => ({ entries: [{ path: "file.txt", kind: "file" }], truncated: false }),
+    read: async () => ({
+      relativePath: "file.txt",
+      contents,
+      byteLength: contents.length,
+      truncated: false,
+    }),
+    find: async () => ({ entries: [], truncated: false }),
+    search: async () => ({ matches: [], truncated: false }),
+  } as FilesApi;
+  const view = await testRender(
+    <FilesPanel
+      api={api}
+      cwd="/fixture"
+      path="file.txt"
+      enabled
+      height={30}
+      width={100}
+      close={() => {}}
+    />,
+    { width: 110, height: 30 },
+  );
+  try {
+    await view.waitForFrame((f) => f.includes("before"));
+    await act(async () => {
+      view.mockInput.pressKey("o");
+    });
+    await view.waitForFrame((f) => f.includes("No editor set"));
+    contents = "saved externally";
+    await act(async () => {
+      view.renderer.emit("focus");
+    });
+    await view.waitForFrame((f) => f.includes("saved externally"));
+  } finally {
+    await view.dispose();
   }
 });

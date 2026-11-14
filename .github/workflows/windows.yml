@@ -1,0 +1,54 @@
+name: windows
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      # POSIX shell-stub and tmux rigs stay in Linux/macOS CI. These use native Windows APIs.
+      - name: Native platform, PTY and renderer tests
+        run: |
+          bun test src/windows.test.ts src/client/frame.test.tsx src/client/keymap.test.ts src/client/vim.test.ts src/client/markdown.test.ts src/client/read-only.test.ts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $gitTests = @(Get-ChildItem src/client/git* -Filter '*test*' | ForEach-Object { $_.FullName })
+          if ($gitTests.Count) { bun test @gitTests; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
+      - run: bun scripts/build --check
+      - run: bun dist/tercet.js --version
+      - name: PowerShell installer and global executable shim
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP 'tercet-package'
+          New-Item -ItemType Directory -Force "$stage/dist" | Out-Null
+          Copy-Item dist/tercet.js "$stage/dist/tercet.js"
+          $package = Get-Content package.json -Raw | ConvertFrom-Json -AsHashtable
+          $package.Remove('workspaces'); $package.Remove('devDependencies'); $package.Remove('scripts')
+          $package | ConvertTo-Json -Depth 10 | Set-Content "$stage/package.json" -Encoding utf8
+          & ./install.ps1 -Source $stage
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          tercet --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install pinned stock Windows T3 server
+        run: |
+          $env:T3CODE_HOME = Join-Path $env:RUNNER_TEMP 'tercet-t3-runtime'
+          npm exec --yes --package=t3@0.1.8 -- t3 --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "TERCET_TEST_T3=$env:T3CODE_HOME/runtime/versions/0.1.8/t3.exe" >> $env:GITHUB_ENV
+      - name: Authenticate and read a live snapshot from Windows T3
+        run: bun scripts/windows-server-smoke.ts

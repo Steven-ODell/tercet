@@ -12,7 +12,7 @@
 // NODE_ENV is defined as "production" here, so the bundle carries React's production build.
 // Bun fixes NODE_ENV when it transpiles; setting it at runtime does nothing. Tests and fixture
 // apps run from source and stay on the development build, which act() needs.
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -49,6 +49,6 @@ if (check) {
   }
   console.log("build: dist/tercet.js is up to date");
 } else {
-  await Bun.$`chmod 755 ${built}`;
+  if (process.platform !== "win32") chmodSync(built, 0o755);
   console.log(`build: wrote dist/tercet.js (${(Bun.file(built).size / 1e6).toFixed(2)} MB)`);
 }

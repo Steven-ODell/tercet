@@ -119,7 +119,7 @@ export async function loadPreviewImage(
     return Buffer.concat(chunks);
   }
   const file = source.startsWith("file:") ? fileURLToPath(source) : source;
-  if (!source.startsWith("file:") && /^[a-z][a-z0-9+.-]*:/i.test(source))
+  if (!/^[a-z]:[\\/]/i.test(source) && !source.startsWith("file:") && /^[a-z][a-z0-9+.-]*:/i.test(source))
     throw new Error("Unsupported image source");
   const handle = await open(
     resolve(cwd ?? process.cwd(), file),

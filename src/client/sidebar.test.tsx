@@ -403,6 +403,12 @@ test("project names use web's icon color: the saved icon, else one generated fro
   );
 });
 
+test("a live activity run shows as running when the latest run was cancelled", () => {
+  expect(threadBadge({ ...base, status: "cancelled", activityRunStatus: "running" })).toContain("▶");
+  expect(threadBadge({ ...base, status: "failed", activityRunStatus: "waiting" })).toContain("?");
+  expect(threadBadge({ ...base, status: "cancelled", activityRunStatus: null })).toBe("·");
+});
+
 test("status glyphs include request priority, unread and limit reset", () => {
   expect(threadBadge({ ...base, status: "running" })).toContain("▶");
   expect(threadBadge({ ...base, status: "waiting" })).toContain("?");

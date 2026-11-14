@@ -1,6 +1,8 @@
 import { PullRequestPanel } from "./pull-requests.tsx";
 import { createPullRequestWorkflow } from "./pull-requests.ts";
 import { BranchPanel, createBranchWorkflow, type BranchTarget } from "./git-workflows.tsx";
+import { EditorPanel } from "./editor";
+import type { EditorSession } from "../embedded-editor";
 import { theme } from "./theme";
 import { LaunchersPanel } from "./launchers";
 import { TerminalPanel, type QueuedRun } from "./terminal";
@@ -39,22 +41,13 @@ import { targetKeys } from "../actions";
 import { onMediaNotice } from "./media";
 
 type Pane = "sidebar" | "transcript" | "composer" | "right";
-type RightPanel = "files" | "diff" | "launchers" | "terminal";
+type RightPanel = "files" | "diff" | "launchers" | "terminal" | "editor";
 type Overlay =
-  | "pullRequests"
-  | "branches"
-  | "workspace"
-  | "model"
-  | "effort"
-  | "palette"
-  | "search"
-  | "menu"
-  | "help"
-  | "context";
+  "pullRequests" | "branches" | "workspace" | "model" | "effort" | "palette" | "search" | "menu" | "help" | "context";
 
 /** Outer width of the right pane. Files and diff show file contents, so they take a real share. */
 function rightWidth(kind: RightPanel, width: number) {
-  if (kind === "terminal") return Math.max(24, Math.floor(width * 0.5));
+  if (kind === "terminal" || kind === "editor") return Math.max(24, Math.floor(width * 0.5));
   if (kind === "diff") return Math.max(24, Math.floor(width * 0.45));
   if (width < 100) return 24;
   return kind === "files" ? Math.max(32, Math.floor(width * 0.38)) : 32;
@@ -122,10 +115,7 @@ export function AppFrame({
   const agentsText =
     runningAgents > 0 ? `${runningAgents} ${runningAgents === 1 ? "agent" : "agents"} running` : "";
   const chipColumns =
-    width -
-    Bun.stringWidth(statusText) -
-    (agentsText ? 2 + Bun.stringWidth(agentsText) : 0) -
-    2;
+    width - Bun.stringWidth(statusText) - (agentsText ? 2 + Bun.stringWidth(agentsText) : 0) - 2;
   const headerRows = selected
     ? [
         ...wrapName(
@@ -186,6 +176,7 @@ export function AppFrame({
   }>();
   const [diffTarget, setDiffTarget] = useState<DiffTarget>();
   const [diffSerial, setDiffSerial] = useState(0);
+  const [editorSession, setEditorSession] = useState<EditorSession>();
   const [right, setRight] = useState<RightPanel | null>(null);
   // [run] without a `commands.run` setting types the block into the side terminal and presses Enter.
   const [queuedRun, setQueuedRun] = useState<QueuedRun>();
@@ -294,6 +285,12 @@ export function AppFrame({
   };
   const dispatch = (command: Command) => {
     if (command === "quit") {
+      if (editorSession?.running) {
+        setActionError("Quit the editor with :wq (save) or :q! (discard) before quitting Tercet.");
+        setRight("editor");
+        setFocus("right");
+        return;
+      }
       if (quitArmed) (onQuit ?? (() => renderer.destroy()))();
       else setQuitArmed(true);
       return;
@@ -313,7 +310,8 @@ export function AppFrame({
       // As the [mic] button does, dictation writes in the composer: an external dictation tool
       // (commands.dictation, e.g. voxtype) types its text as keys, and in another pane those keys
       // are commands, so the first words were lost. A focused shell keeps them, to dictate there.
-      if (!(focus === "right" && right === "terminal")) setFocus("composer");
+      if (!(focus === "right" && (right === "terminal" || right === "editor")))
+        setFocus("composer");
       void dictation.toggle(selectedId ?? undefined);
       return;
     }
@@ -363,7 +361,8 @@ export function AppFrame({
       command === "files" ||
       command === "diff" ||
       command === "launchers" ||
-      command === "terminal"
+      command === "terminal" ||
+      command === "editor"
     ) {
       if (command === "diff") setDiffTarget(undefined);
       setRight(right === command ? null : command);
@@ -432,13 +431,23 @@ export function AppFrame({
     // PR drafts and nested Back own Esc and review chords while this overlay is open.
     if (overlay === "pullRequests" && command !== "pullRequests" && command !== "quit") return;
     if (
-      focus === "composer" && key.name === "escape" && !effects?.toggleDictation &&
+      focus === "composer" &&
+      key.name === "escape" &&
+      !effects?.toggleDictation &&
       ["recording", "transcribing"].includes(dictation.getSnapshot())
     ) {
       key.preventDefault();
       dictation.cancel();
       return;
     }
+    // Editor input includes Esc, Ctrl commands and Alt chords, except explicit pane navigation.
+    if (
+      focus === "right" &&
+      right === "editor" &&
+      !overlay &&
+      !(key.meta && (command === "focusLeft" || command === "leave"))
+    )
+      return;
     // A focused terminal owns every key except the Alt bindings, Esc and Ctrl+c included.
     if (focus === "right" && right === "terminal" && !overlay && !key.meta) return;
     if (focus === "right" && !!right && !overlay && !key.ctrl && !key.meta && key.name !== "escape")
@@ -503,7 +512,7 @@ export function AppFrame({
       borderColor={focus === id ? theme.accent : theme.border}
       // The border stays quiet when unfocused; its title must still read.
       titleColor={focus === id ? theme.accent : theme.muted}
-      title={`${focus === id ? "● " : ""}${paneGlyphs[id === "right" ? (right ?? "files") : id]} ${title}`}
+      title={`${focus === id ? "● " : ""}${paneGlyphs[id === "right" ? (right === "editor" ? "terminal" : (right ?? "files")) : id]} ${title}`}
       onMouseDown={() => {
         // Opening on press moves the Send row under this click's release.
         if (id === "composer" && composerCollapsed) return;
@@ -683,7 +692,7 @@ export function AppFrame({
                         !overlay &&
                         !agentId &&
                         (width >= 70 || !right) &&
-                        !(focus === "right" && right === "terminal")
+                        !(focus === "right" && (right === "terminal" || right === "editor"))
                       }
                       collapsed={composerCollapsed}
                       onSent={() => setSent(true)}
@@ -727,11 +736,28 @@ export function AppFrame({
                 ? "Files"
                 : right === "diff"
                   ? "Diff"
-                  : right === "terminal"
-                    ? "Terminal"
-                    : "Launchers",
+                  : right === "editor"
+                    ? "Editor"
+                    : right === "terminal"
+                      ? "Terminal"
+                      : "Launchers",
               content.right ??
-                (right === "terminal" ? (
+                (right === "editor" ? (
+                  <EditorPanel
+                    session={editorSession}
+                    enabled={!overlay && focus === "right"}
+                    width={
+                      (width < 70
+                        ? Math.max(1, width - (sidebar ? 22 : 0))
+                        : rightWidth("editor", width)) - 2
+                    }
+                    height={height - 6 - chromeRows}
+                    close={() => {
+                      setRight("files");
+                      setFocus("right");
+                    }}
+                  />
+                ) : right === "terminal" ? (
                   <TerminalPanel
                     client={client}
                     threadId={selectedId ?? undefined}
@@ -772,6 +798,23 @@ export function AppFrame({
                   <FilesPanel
                     key={`${selectedId}:${filePath?.serial ?? 0}`}
                     api={client.files}
+                    edit={
+                      effects?.embeddedEditor
+                        ? (path) => {
+                            if (!cwd) return;
+                            void effects.embeddedEditor!({ cwd, path })
+                              .then((session) => {
+                                setEditorSession(session);
+                                setRight("editor");
+                                setFocus("right");
+                                setActionError("");
+                              })
+                              .catch((error) =>
+                                setActionError(failureText(error, "Editor failed")),
+                              );
+                          }
+                        : undefined
+                    }
                     cwd={
                       selected?.worktreePath ??
                       snapshot?.projects.find((p) => p.id === selected?.projectId)?.workspaceRoot

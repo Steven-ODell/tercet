@@ -9,6 +9,8 @@ export interface Recording {
 }
 
 export interface Actions {
+  readback?(text: string): Promise<void>;
+  stopReadback?(): void;
   shell?(input: { cwd: string }): Promise<unknown>;
   openThread?(input: { threadId: string }): Promise<unknown>;
   pasteClipboard?(): Promise<{ type: "image"; bytes: Uint8Array } | { type: "text"; text: string }>;
@@ -30,6 +32,7 @@ export interface Actions {
   record?(input?: { onLimit?: () => void; onFailure?: (error: Error) => void }): Promise<Recording>;
   /** Spell checking for the composer; absent when settings `spell.enabled` is false. */
   spell?: import("./client/spell").SpellChecker;
+  embeddedEditor?(input: { cwd: string; path: string }): Promise<import("./embedded-editor").EditorSession>;
   editor?(input: { cwd: string; path: string }): Promise<unknown>;
   /** OSC 52, plus the local clipboard tool when there is one. */
   copy(text: string): void;

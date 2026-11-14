@@ -6,14 +6,20 @@ import { createRoot } from "@opentui/react";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import { resolve } from "node:path";
+import { readdir, readFile } from "node:fs/promises";
+import { editorAction } from "../../src/embedded-editor";
+import { hostActions, systemHost } from "../../src/portable";
+import { defaultSettings } from "../../src/client/settings";
+import { terminalLifecycle } from "../../src/terminal-lifecycle";
 import {
   ProjectId,
+  ProviderInstanceId,
   ThreadId,
   type OrchestrationV2ShellSnapshot,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
-import { createClient } from "../../src/client/runtime";
+import { createClient, waitForLive } from "../../src/client/runtime";
 import { AppFrame } from "../../src/client/frame";
 import { baseThread } from "../../src/client/sidebar-fixture";
 import { emptyTranscript } from "../../src/client/transcript-state";
@@ -24,11 +30,13 @@ import type { Actions } from "../../src/actions";
 const nowIso = "2026-11-12T17:30:00.000Z";
 const at = DateTime.makeUnsafe(nowIso);
 const image = resolve(import.meta.dir, "night-sky.png");
+// Only the appended feature recording enables real I/O, inside its disposable workspace.
+const workspace = process.env.TERCET_DEMO_WORKSPACE;
 
 const project = (id: string, title: string) => ({
   id: ProjectId.make(id),
   title,
-  workspaceRoot: `/home/demo/${id}`,
+  workspaceRoot: workspace ?? `/home/demo/${id}`,
   projectIcon: null,
   defaultModelSelection: null,
   scripts: [],
@@ -44,7 +52,7 @@ const thread = (
   extra: Partial<OrchestrationV2ThreadShell> = {},
 ): OrchestrationV2ThreadShell => ({
   ...baseThread,
-  modelSelection: { provider: "codex", model: "gpt-5.5" },
+  modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.5" },
   id: ThreadId.make(id),
   projectId: ProjectId.make(projectId),
   title,
@@ -242,7 +250,8 @@ const client = createClient(
     issueToken: () => Effect.die("no issuance"),
     wake: () => Effect.void,
     pause: () => Effect.never,
-    follow: () => Effect.never,
+    follow: (_, receive) =>
+      Effect.sync(() => receive({ kind: "snapshot", snapshot })).pipe(Effect.andThen(Effect.never)),
   },
   false,
   () => Date.parse(nowIso),
@@ -257,15 +266,86 @@ client.registry.set(
 );
 client.diffs.full = async (input) => ({ ...input, fromTurnCount: 0, diff });
 
-// Buttons show because the actions exist; none of them does anything.
+// Preserve the original fixture when no feature-recording workspace is supplied.
+const embedded = editorAction("http://127.0.0.1");
+const settings = defaultSettings();
+settings.launchers = { editor: ["nvim", "--clean", "--", "{path}"], editorMode: "tmux" };
+if (workspace) {
+  client.files.list = async () => ({
+    entries: (await readdir(workspace, { withFileTypes: true })).map((entry) => ({
+      path: entry.name,
+      kind: entry.isDirectory() ? ("directory" as const) : ("file" as const),
+    })),
+    truncated: false,
+  });
+  client.files.read = async ({ relativePath }) => {
+    const contents = await readFile(resolve(workspace, relativePath), "utf8");
+    return { relativePath, contents, byteLength: Buffer.byteLength(contents), truncated: false };
+  };
+  client.boundary.terminal = (_, input, receive, bind) =>
+    Effect.callback(() => {
+      const child = Bun.spawn(["bash", "--noprofile", "--norc", "-i"], {
+        cwd: workspace,
+        env: { ...process.env, PS1: "$ ", TERM: "xterm-256color", HISTFILE: "/dev/null" },
+        terminal: {
+          cols: input.cols,
+          rows: input.rows,
+          data: (_, bytes) =>
+            receive({
+              type: "output",
+              threadId: input.threadId,
+              terminalId: input.terminalId,
+              data: Buffer.from(bytes).toString("utf8"),
+            }),
+        },
+      });
+      receive({
+        type: "snapshot",
+        snapshot: {
+          threadId: input.threadId,
+          terminalId: input.terminalId,
+          cwd: workspace,
+          worktreePath: null,
+          status: "running",
+          pid: child.pid,
+          history: "",
+          label: "bash",
+          exitCode: null,
+          exitSignal: null,
+          updatedAt: nowIso,
+        },
+      });
+      bind((op) => {
+        if (op.kind === "write") child.terminal?.write(op.data);
+        else if (op.kind === "resize") child.terminal?.resize(op.cols, op.rows);
+      });
+      return Effect.sync(() => {
+        child.kill();
+        child.terminal?.close();
+      });
+    });
+  client.start();
+  await waitForLive(client);
+}
+
+// Original transcript actions remain harmless fixture actions.
 const effects: Actions = {
   copy() {},
   run: async () => {},
   openUrl: async () => {},
   openImage: async () => {},
   loadImage: (source, cwd) => loadPreviewImage(source, cwd, async () => image),
+  ...(workspace
+    ? {
+        embeddedEditor: embedded.open,
+        editor: hostActions({ settings, host: systemHost(), writeTerminal() {} }).editor,
+      }
+    : {}),
 };
 
-createRoot(await createCliRenderer({ exitOnCtrlC: true, useMouse: true })).render(
-  <AppFrame client={client} effects={effects} />,
-);
+const renderer = await createCliRenderer({ exitOnCtrlC: false, useMouse: true });
+terminalLifecycle(renderer, async () => {
+  embedded.dispose();
+  await client.dispose();
+});
+createRoot(renderer).render(<AppFrame client={client} effects={effects} />);
