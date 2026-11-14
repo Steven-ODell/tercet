@@ -10,7 +10,7 @@ export type GitRequest = <K extends GitOperation>(operation: K, input: GitInput<
 
 /** Exhaustive, independent of host Actions: refreshes are reads; Git and host writes are blocked. */
 export const GIT_READ_ONLY_POLICY = {
-  status: "allow", refs: "allow", createRef: "block", switchRef: "block",
+  prIdentity: "allow", createPR: "block", status: "allow", refs: "allow", createRef: "block", switchRef: "block",
   createWorktree: "block", resolvePR: "allow", preparePR: "block", listPRs: "allow",
   detail: "allow", checks: "allow", activity: "allow", threadComments: "allow",
   diffContents: "allow", diffPreview: "allow", comment: "block", submitReview: "block",
@@ -25,7 +25,8 @@ export class GitWorkflowError extends Error {
 /** Do not display raw transport errors: some servers echo credentials in their causes. */
 export function gitWorkflowError(error: unknown): GitWorkflowError {
   if (error instanceof GitWorkflowError) return error;
-  const e = error as { _tag?: string; reason?: string; name?: string } | null;
+  const e = error as { _tag?: string; reason?: string; name?: string; message?: string } | null;
+  if (e?.message === READ_ONLY_ERROR) return new GitWorkflowError("read-only", READ_ONLY_ERROR);
   if (e?.name === "AbortError") return new GitWorkflowError("cancelled", "Request cancelled");
   if (e?._tag === "EnvironmentAuthInvalidError" || e?._tag === "EnvironmentAuthRequiredError" ||
       e?._tag === "EnvironmentAuthorizationError" || e?.reason === "cli-unauthenticated")

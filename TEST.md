@@ -71,3 +71,13 @@ workspace with no provider runs. It verifies the real Git branch at the returned
 that the managed path stays under its disposable root. Server stops on exit; 3775 and daily
 3773/data remain untouched. POSIX-only process rig; portable controller/renderer tests:
 `bun test src/client/git-workflows.test.ts src/client/git-workflows.test.tsx`.
+
+## PR inspection and review (Git workflow step 4)
+
+`bun test src/client/git-workflows.test.ts src/client/git-workflows.test.tsx` includes
+simulated PR detail/check/discussion, exact host/account/repository/number/body/verdict,
+link/watch commands, creation intent, failure recovery/draft retention, duplicate write
+locking through close, read-only mutation gates and keyboard/mouse confirmation/diff tests.
+No live GitHub writes. Alt+w opens Pull requests; Alt+g opens Branches/Worktrees.
+Full validation remains `bun run build` then `TERCET_SANDBOX_PORT=3776 bun run check`.
+Local comparison is explicitly labeled; remote full diff/history use the host URL.
