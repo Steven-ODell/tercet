@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { act } from "react";
@@ -129,6 +129,26 @@ test("Add to dictionary clears the underline and survives a restart; Ignore does
     expect(underlined(view.captureSpans())).toEqual(["blarg"]);
     expect(await readFile(file, "utf8")).toBe("zorp\n");
     expect(checker.check("and")).toEqual([]);
+  } finally {
+    await act(async () => view.renderer.destroy());
+  }
+});
+
+test("Add to dictionary that cannot save says so and keeps the word for the session", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "tercet-spell-ui."));
+  const blocker = join(dir, "blocker");
+  await writeFile(blocker, "");
+  const { view } = await typed("zorp ", spell(join(blocker, "dictionary.txt")));
+  try {
+    await press(view, "s", { meta: true });
+    await press(view, "1");
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+    await view.flush();
+    expect(underlined(view.captureSpans())).toEqual([]);
+    expect(view.captureCharFrame()).toContain('Could not save "zorp"');
+    await act(async () => view.mockInput.typeText("x"));
+    await view.flush();
+    expect(view.captureCharFrame()).not.toContain("Could not save");
   } finally {
     await act(async () => view.renderer.destroy());
   }

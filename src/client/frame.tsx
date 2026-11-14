@@ -1,6 +1,6 @@
 import { theme } from "./theme";
 import { LaunchersPanel } from "./launchers";
-import { TerminalPanel } from "./terminal";
+import { TerminalPanel, type QueuedRun } from "./terminal";
 import { NewThreadPicker } from "./workspace";
 import { DiffPanel, type DiffTarget } from "./diff";
 import { FilesPanel } from "./files";
@@ -175,7 +175,9 @@ export function AppFrame({
   const [diffSerial, setDiffSerial] = useState(0);
   const [right, setRight] = useState<RightPanel | null>(null);
   // [run] without a `commands.run` setting types the block into the side terminal and presses Enter.
-  const [queuedRun, setQueuedRun] = useState<{ id: number; text: string }>();
+  const [queuedRun, setQueuedRun] = useState<QueuedRun>();
+  const runThread = useRef(selectedId);
+  runThread.current = selectedId;
   const effects = useMemo(
     () =>
       !configured || configured.run || !client.terminalAvailable
@@ -183,7 +185,11 @@ export function AppFrame({
         : {
             ...configured,
             run: ({ command }: { cwd: string; command: string }) => {
-              setQueuedRun((last) => ({ id: (last?.id ?? 0) + 1, text: command }));
+              setQueuedRun((last) => ({
+                id: (last?.id ?? 0) + 1,
+                text: command,
+                threadId: runThread.current ?? undefined,
+              }));
               setRight("terminal");
               setFocus("right");
               return Promise.resolve();
@@ -197,6 +203,11 @@ export function AppFrame({
     client.viewThread(agentId);
   }, [client, agentId]);
   useEffect(() => setAgentStack([]), [selectedId]);
+  // A queued [run] belongs to the thread and the open terminal it was sent to; it never waits for another.
+  useEffect(() => setQueuedRun(undefined), [selectedId]);
+  useEffect(() => {
+    if (right !== "terminal") setQueuedRun(undefined);
+  }, [right]);
   const agentCardKey = agentId && agentCard ? `${agentId}:${requestKey(agentCard)}` : undefined;
   useEffect(() => {
     // A question asked by the agent you are viewing is answered from the composer pane.
@@ -694,7 +705,7 @@ export function AppFrame({
                     worktreePath={selected?.worktreePath ?? null}
                     enabled={!overlay && focus === "right"}
                     queuedRun={queuedRun}
-                    onRunSent={(id) => setQueuedRun((last) => (last?.id === id ? undefined : last))}
+                    onRunDone={(id) => setQueuedRun((last) => (last?.id === id ? undefined : last))}
                     height={height - 6 - chromeRows}
                     width={
                       (width < 70

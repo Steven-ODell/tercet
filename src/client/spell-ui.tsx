@@ -53,6 +53,8 @@ export function useSpellCheck({
   const { width: screenWidth } = useTerminalDimensions();
   const [version, setVersion] = useState(0);
   const [menu, setMenu] = useState<Menu>();
+  // Why the last "Add to dictionary" was not saved; cleared by the next edit.
+  const [notice, setNotice] = useState("");
   useEffect(() => spell?.subscribe(() => setVersion((v) => v + 1)), [spell]);
   const style = useMemo(
     () =>
@@ -85,7 +87,10 @@ export function useSpellCheck({
         });
   }, [editor, style, found, open, text]);
   // The menu belongs to the text it was opened on.
-  useEffect(() => setMenu(undefined), [text]);
+  useEffect(() => {
+    setMenu(undefined);
+    setNotice("");
+  }, [text]);
 
   const show = useCallback(
     (m: Misspelling, x: number, y: number) => {
@@ -103,7 +108,18 @@ export function useSpellCheck({
         items: [
           ...suggestions.map((value) => ({ label: value, run: () => replace(value) })),
           ...(suggestions.length ? [] : [{ label: "No suggestions", run: () => {}, note: true }]),
-          { label: "Add to dictionary", run: () => void spell.add(m.word) },
+          {
+            label: "Add to dictionary",
+            // The word is already known for this session; only saving it to the file failed.
+            run: () =>
+              void spell.add(m.word).catch((error: unknown) => {
+                const code = (error as { code?: unknown } | null)?.code;
+                setNotice(
+                  `Could not save "${m.word}" to the dictionary${typeof code === "string" ? ` (${code})` : ""}; ` +
+                    "it is known until tercet exits.",
+                );
+              }),
+          },
           { label: "Ignore", run: () => spell.ignore(m.word) },
         ],
       });
@@ -119,6 +135,8 @@ export function useSpellCheck({
 
   return {
     open: !!menu,
+    /** A failed save from the menu, for the composer's error line. */
+    notice,
     /** Right-click on the textarea: moves the caret there, and opens the menu if on a flagged word. */
     onMouseUp(event: MouseEvent) {
       if (event.button !== 0) setMenu(undefined);

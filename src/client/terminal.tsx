@@ -11,6 +11,13 @@ import { encodeKey, screenText } from "./terminal-screen";
 
 type State = "connecting" | "running" | "exited" | "closed" | "disconnected";
 
+/** A code block's [run] waiting for the side terminal, tied to the thread it was clicked in. */
+export interface QueuedRun {
+  id: number;
+  text: string;
+  threadId: ThreadId | undefined;
+}
+
 /**
  * The thread's server shell, the same session the web app's terminal drawer shows. While it has
  * focus every key but the Alt bindings goes to the shell, so Alt+h is the way back out.
@@ -22,7 +29,7 @@ export function TerminalPanel({
   worktreePath,
   enabled,
   queuedRun,
-  onRunSent,
+  onRunDone,
   width,
   height,
   close,
@@ -32,9 +39,10 @@ export function TerminalPanel({
   cwd: string | undefined;
   worktreePath: string | null;
   enabled: boolean;
-  /** A command from a code block's [run]: typed and entered once the shell is running. */
-  queuedRun?: { id: number; text: string };
-  onRunSent?: (id: number) => void;
+  /** A command from a code block's [run]: typed and entered once this thread's shell is running. */
+  queuedRun?: QueuedRun;
+  /** The run was typed, or dropped because it was meant for another thread. */
+  onRunDone?: (id: number) => void;
   width: number;
   height: number;
   close: () => void;
@@ -147,11 +155,13 @@ export function TerminalPanel({
         : text.replace(/\r?\n/g, "\r"),
     );
   useEffect(() => {
-    if (!queuedRun || state !== "running") return;
+    if (!queuedRun) return;
+    if (queuedRun.threadId !== threadId) return onRunDone?.(queuedRun.id);
+    if (state !== "running") return;
     pasteText(queuedRun.text.trimEnd());
     write("\r");
-    onRunSent?.(queuedRun.id);
-  }, [queuedRun, state]);
+    onRunDone?.(queuedRun.id);
+  }, [queuedRun, state, threadId]);
   useKeyboard((key) => {
     if (!enabled || key.defaultPrevented || key.meta || key.eventType === "release") return;
     key.preventDefault();

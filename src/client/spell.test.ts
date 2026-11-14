@@ -102,6 +102,29 @@ test("ignore lasts for the session and writes nothing", async () => {
   expect(await readFile(personalFile, "utf8")).toBe("");
 });
 
+test("a word typed with a curly apostrophe is ignored and added like a straight one", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "tercet-spell."));
+  const personalFile = join(dir, "dictionary.txt");
+  const checker = createSpellChecker({ load, personalFile });
+  await ready(checker);
+  expect(checker.check("y’allz")).toHaveLength(1);
+  checker.ignore("y’allz");
+  expect(checker.check("y’allz y'allz")).toEqual([]);
+  await checker.add("Zed’s");
+  expect(checker.check("Zed Zed’s Zed's")).toEqual([]);
+  expect(await readFile(personalFile, "utf8")).toBe("Zed\n");
+});
+
+test("add still teaches the word for the session when the file cannot be written", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "tercet-spell."));
+  const blocker = join(dir, "blocker");
+  await writeFile(blocker, "");
+  const checker = createSpellChecker({ load, personalFile: join(blocker, "dictionary.txt") });
+  await ready(checker);
+  await expect(checker.add("zorp")).rejects.toThrow();
+  expect(checker.check("zorp")).toEqual([]);
+});
+
 test("the bundled English dictionary catches common slips", async () => {
   const checker = createSpellChecker();
   await ready(checker);

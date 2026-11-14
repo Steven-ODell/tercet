@@ -614,7 +614,9 @@ function Editor({
           )}
         </box>
       )}
-      {(error || completionError) && <text fg={theme.red}>{error || completionError}</text>}
+      {(error || completionError || spell.notice) && (
+        <text fg={theme.red}>{error || completionError || spell.notice}</text>
+      )}
     </box>
   );
 }

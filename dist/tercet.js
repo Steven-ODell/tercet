@@ -88691,7 +88691,7 @@ function findMisspellings(text, known) {
       const at = start + piece.index + piece[0].indexOf(word);
       if (word.length < 2 || !LETTERS.test(word) || shouldSkip(word))
         continue;
-      if (!known(word.replace(/\u2019/gu, "'")))
+      if (!known(straight(word)))
         found.push({ start: at, end: at + word.length, word });
     }
   }
@@ -88730,6 +88730,7 @@ function rank(word, suggestions, correct) {
   }
   return [...new Set([...swaps, ...suggestions].map((s) => matchCase(word, s)))];
 }
+var straight = (word) => word.replace(/\u2019/gu, "'");
 async function bundled() {
   const { aff, dic } = await Promise.resolve().then(() => (init_spell_data(), exports_spell_data));
   return { aff, dic };
@@ -88739,7 +88740,8 @@ function createSpellChecker(options = {}) {
   const listeners = new Set;
   const notify = () => listeners.forEach((listener) => listener());
   const added = [];
-  const teach = (word) => {
+  const teach = (raw) => {
+    const word = straight(raw);
     if (speller)
       speller.add(word);
     else
@@ -88759,14 +88761,14 @@ function createSpellChecker(options = {}) {
       const personal = options.personalFile ? await readFile(options.personalFile, "utf8").catch(() => "") : "";
       for (const word of personal.split(/\r?\n/))
         if (word.trim())
-          loaded.add(word.trim());
+          loaded.add(straight(word.trim()));
       for (const word of added)
         loaded.add(word);
       speller = loaded;
       notify();
     } catch {}
   };
-  const stem = (word) => word.replace(/'s$/i, "");
+  const stem = (word) => straight(word).replace(/'s$/i, "");
   const known = (word) => !speller || [word, word.toLowerCase(), stem(word)].some((form) => form.length > 0 && speller.correct(form));
   return {
     ready: () => !!speller,
@@ -147759,7 +147761,7 @@ function TerminalPanel({
   worktreePath,
   enabled,
   queuedRun,
-  onRunSent,
+  onRunDone,
   width: width2,
   height,
   close: close2
@@ -147871,12 +147873,16 @@ function TerminalPanel({
   };
   const pasteText = (text5) => write(term.current?.modes.bracketedPasteMode ? `\x1B[200~${text5}\x1B[201~` : text5.replace(/\r?\n/g, "\r"));
   import_react26.useEffect(() => {
-    if (!queuedRun || state2 !== "running")
+    if (!queuedRun)
+      return;
+    if (queuedRun.threadId !== threadId)
+      return onRunDone?.(queuedRun.id);
+    if (state2 !== "running")
       return;
     pasteText(queuedRun.text.trimEnd());
     write("\r");
-    onRunSent?.(queuedRun.id);
-  }, [queuedRun, state2]);
+    onRunDone?.(queuedRun.id);
+  }, [queuedRun, state2, threadId]);
   useKeyboard((key5) => {
     if (!enabled || key5.defaultPrevented || key5.meta || key5.eventType === "release")
       return;
@@ -152263,6 +152269,7 @@ function useSpellCheck({
   const { width: screenWidth } = useTerminalDimensions();
   const [version2, setVersion] = import_react45.useState(0);
   const [menu, setMenu] = import_react45.useState();
+  const [notice, setNotice] = import_react45.useState("");
   import_react45.useEffect(() => spell?.subscribe(() => setVersion((v) => v + 1)), [spell]);
   const style = import_react45.useMemo(() => spell ? SyntaxStyle.fromStyles({ misspelled: { fg: theme.red, underline: true } }, renderer.nativeScene) : undefined, [spell, renderer]);
   const found = import_react45.useMemo(() => spell?.check(text5) ?? [], [spell, text5, version2]);
@@ -152288,7 +152295,10 @@ function useSpellCheck({
           hlRef: HIGHLIGHT_REF
         });
   }, [editor2, style, found, open2, text5]);
-  import_react45.useEffect(() => setMenu(undefined), [text5]);
+  import_react45.useEffect(() => {
+    setMenu(undefined);
+    setNotice("");
+  }, [text5]);
   const show = import_react45.useCallback((m, x, y) => {
     if (!spell)
       return;
@@ -152306,7 +152316,13 @@ function useSpellCheck({
       items: [
         ...suggestions.map((value4) => ({ label: value4, run: () => replace(value4) })),
         ...suggestions.length ? [] : [{ label: "No suggestions", run: () => {}, note: true }],
-        { label: "Add to dictionary", run: () => void spell.add(m.word) },
+        {
+          label: "Add to dictionary",
+          run: () => void spell.add(m.word).catch((error2) => {
+            const code2 = error2?.code;
+            setNotice(`Could not save "${m.word}" to the dictionary${typeof code2 === "string" ? ` (${code2})` : ""}; ` + "it is known until tercet exits.");
+          })
+        },
         { label: "Ignore", run: () => spell.ignore(m.word) }
       ]
     });
@@ -152320,6 +152336,7 @@ function useSpellCheck({
   };
   return {
     open: !!menu,
+    notice,
     onMouseUp(event) {
       if (event.button !== 0)
         setMenu(undefined);
@@ -154232,9 +154249,9 @@ function Editor({
           })
         ]
       }),
-      (error2 || completionError) && /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+      (error2 || completionError || spell.notice) && /* @__PURE__ */ import_jsx_runtime.jsx("text", {
         fg: theme.red,
-        children: error2 || completionError
+        children: error2 || completionError || spell.notice
       })
     ]
   });
@@ -158263,10 +158280,16 @@ function AppFrame({
   const [diffSerial, setDiffSerial] = import_react54.useState(0);
   const [right, setRight] = import_react54.useState(null);
   const [queuedRun, setQueuedRun] = import_react54.useState();
+  const runThread = import_react54.useRef(selectedId);
+  runThread.current = selectedId;
   const effects = import_react54.useMemo(() => !configured || configured.run || !client.terminalAvailable ? configured : {
     ...configured,
     run: ({ command: command2 }) => {
-      setQueuedRun((last) => ({ id: (last?.id ?? 0) + 1, text: command2 }));
+      setQueuedRun((last) => ({
+        id: (last?.id ?? 0) + 1,
+        text: command2,
+        threadId: runThread.current ?? undefined
+      }));
       setRight("terminal");
       setFocus("right");
       return Promise.resolve();
@@ -158278,6 +158301,11 @@ function AppFrame({
     client.viewThread(agentId);
   }, [client, agentId]);
   import_react54.useEffect(() => setAgentStack([]), [selectedId]);
+  import_react54.useEffect(() => setQueuedRun(undefined), [selectedId]);
+  import_react54.useEffect(() => {
+    if (right !== "terminal")
+      setQueuedRun(undefined);
+  }, [right]);
   const agentCardKey = agentId && agentCard ? `${agentId}:${requestKey(agentCard)}` : undefined;
   import_react54.useEffect(() => {
     if (agentCardKey)
@@ -158682,7 +158710,7 @@ function AppFrame({
               worktreePath: selected?.worktreePath ?? null,
               enabled: !overlay && focus === "right",
               queuedRun,
-              onRunSent: (id3) => setQueuedRun((last) => last?.id === id3 ? undefined : last),
+              onRunDone: (id3) => setQueuedRun((last) => last?.id === id3 ? undefined : last),
               height: height - 6 - chromeRows,
               width: (width2 < 70 ? Math.max(1, width2 - (sidebar ? 22 : 0)) : rightWidth("terminal", width2)) - 2,
               close: () => {

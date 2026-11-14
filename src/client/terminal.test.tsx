@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { act } from "react";
+import { act, useState } from "react";
 import { testRender } from "@opentui/react/test-utils";
 import * as Effect from "effect/Effect";
 import type { TerminalAttachStreamEvent } from "@t3tools/contracts";
@@ -7,6 +7,7 @@ import { Terminal } from "@xterm/headless";
 import { composerFixture } from "./composer.test";
 import type { TerminalOp } from "./connection";
 import { AppFrame } from "./frame";
+import { TerminalPanel, type QueuedRun } from "./terminal";
 import { encodeKey, paletteColor, screenText } from "./terminal-screen";
 
 const write = (term: Terminal, data: string) =>
@@ -157,4 +158,74 @@ test("Alt+j opens the thread shell, keys reach it, and Alt+h is the way out", as
     });
     await h.client.dispose();
   }
+});
+
+test("a queued [run] is typed only into the shell of the thread it was clicked in", async () => {
+  const base = { threadId: "composer", terminalId: "term-1" };
+  const run = async (queuedRun: QueuedRun) => {
+    const h = await composerFixture();
+    const ops: TerminalOp[] = [];
+    let emit: (event: TerminalAttachStreamEvent) => void = () => {};
+    h.client.boundary.terminal = (_, _input, receive, bind) =>
+      Effect.sync(() => {
+        emit = receive;
+        bind((op) => ops.push(op));
+      }).pipe(Effect.andThen(Effect.never));
+    const done: number[] = [];
+    // Clears the run when told, as the frame does.
+    function Host() {
+      const [queued, setQueued] = useState<QueuedRun | undefined>(queuedRun);
+      return (
+        <TerminalPanel
+          client={h.client}
+          threadId={"composer" as never}
+          cwd="/fixture"
+          worktreePath={null}
+          enabled={false}
+          queuedRun={queued}
+          onRunDone={(id) => {
+            done.push(id);
+            setQueued(undefined);
+          }}
+          width={40}
+          height={10}
+          close={() => {}}
+        />
+      );
+    }
+    const view = await testRender(<Host />, { width: 40, height: 10 });
+    try {
+      await act(async () => {
+        emit({
+          type: "snapshot",
+          snapshot: {
+            ...base,
+            cwd: "/fixture",
+            worktreePath: null,
+            status: "running",
+            pid: 1,
+            history: "",
+            exitCode: null,
+            exitSignal: null,
+            label: "zsh",
+            updatedAt: "now",
+          },
+        });
+        await new Promise((resolve) => setTimeout(resolve, 40));
+      });
+      await view.flush();
+      return { ops, done };
+    } finally {
+      await act(async () => view.renderer.destroy());
+    }
+  };
+  const here = await run({ id: 1, text: "echo hi\n", threadId: "composer" as never });
+  expect(here.done).toEqual([1]);
+  expect(here.ops).toEqual([
+    { kind: "write", data: "echo hi" },
+    { kind: "write", data: "\r" },
+  ]);
+  const elsewhere = await run({ id: 2, text: "echo hi", threadId: "other" as never });
+  expect(elsewhere.done).toEqual([2]);
+  expect(elsewhere.ops).toEqual([]);
 });

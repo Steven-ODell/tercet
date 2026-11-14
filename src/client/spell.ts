@@ -59,7 +59,7 @@ export function findMisspellings(text: string, known: (word: string) => boolean)
       const word = piece[0].replace(/^['’]+|['’]+$/gu, "");
       const at = start + piece.index + piece[0].indexOf(word);
       if (word.length < 2 || !LETTERS.test(word) || shouldSkip(word)) continue;
-      if (!known(word.replace(/’/gu, "'"))) found.push({ start: at, end: at + word.length, word });
+      if (!known(straight(word))) found.push({ start: at, end: at + word.length, word });
     }
   }
   return found;
@@ -107,6 +107,8 @@ function rank(word: string, suggestions: string[], correct: (word: string) => bo
   return [...new Set([...swaps, ...suggestions].map((s) => matchCase(word, s)))];
 }
 
+const straight = (word: string) => word.replace(/’/gu, "'");
+
 async function bundled() {
   const { aff, dic } = await import("./spell-data");
   return { aff, dic };
@@ -117,7 +119,9 @@ export function createSpellChecker(options: SpellOptions = {}): SpellChecker {
   const listeners = new Set<() => void>();
   const notify = () => listeners.forEach((listener) => listener());
   const added: string[] = [];
-  const teach = (word: string) => {
+  // Words are checked with straight apostrophes, so they are taught that way too: y’all is y'all.
+  const teach = (raw: string) => {
+    const word = straight(raw);
     if (speller) speller.add(word);
     else added.push(word);
   };
@@ -135,7 +139,7 @@ export function createSpellChecker(options: SpellOptions = {}): SpellChecker {
       const personal = options.personalFile
         ? await readFile(options.personalFile, "utf8").catch(() => "")
         : "";
-      for (const word of personal.split(/\r?\n/)) if (word.trim()) loaded.add(word.trim());
+      for (const word of personal.split(/\r?\n/)) if (word.trim()) loaded.add(straight(word.trim()));
       for (const word of added) loaded.add(word);
       speller = loaded;
       notify();
@@ -143,7 +147,7 @@ export function createSpellChecker(options: SpellOptions = {}): SpellChecker {
       // No dictionary means no underlines; typing is never blocked on it.
     }
   };
-  const stem = (word: string) => word.replace(/'s$/i, "");
+  const stem = (word: string) => straight(word).replace(/'s$/i, "");
   const known = (word: string) =>
     !speller ||
     [word, word.toLowerCase(), stem(word)].some((form) => form.length > 0 && speller!.correct(form));
