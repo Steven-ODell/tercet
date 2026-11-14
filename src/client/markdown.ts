@@ -7,6 +7,8 @@ export type BlockAction = string;
 export interface Target {
   kind: "message" | "code" | "inline" | "file" | "url" | "page" | "image";
   text: string;
+  /** Set on a message's [read] button: which message it speaks. */
+  id?: string;
   /** Set on code blocks only: the actions this block allows. */
   actions?: readonly BlockAction[];
 }
@@ -467,7 +469,7 @@ export function measureMarkdown(
     }
   });
   if (item.kind === "assistant" && item.text.trim() && offered.includes("__readback")) {
-    const target: Target = { kind: "message", text: item.text };
+    const target: Target = { kind: "message", text: item.text, id: String(item.id) };
     rows.push({ id: `${item.id}:readback:0`, chrome: true, target,
       spans: [button("read", target)] });
   }

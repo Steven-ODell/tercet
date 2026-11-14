@@ -898,7 +898,7 @@ export function hostActions(deps: HostDeps): Actions {
       return via ? playReadbackVia(audio, signal, host, via) : playReadback(audio, signal, host);
     });
     actions.stopReadback = readback.stopReadback;
-    actions.readback = (text) => readback.readback(text);
+    actions.readback = (text, onPhase) => readback.readback(text, onPhase);
   }
   return actions;
 }

@@ -207,7 +207,29 @@ export async function playReadbackVia(audio: Uint8Array, signal: AbortSignal, ho
   });
 }
 
-/** One active response at a time, including synthesis. A new Read cancels the old one. */
+/**
+ * Splits speech at sentence ends so playback can start after the first piece is made instead of
+ * after the whole reply. The first piece is small to start sooner; later ones are bigger because
+ * every piece costs a player launch. Never splits inside a sentence.
+ */
+export function speechChunks(text: string, first = 300, rest = 700) {
+  const chunks: string[] = [];
+  let buffer = "";
+  for (const sentence of text.split(/(?<=[.!?])\s+|\n+/)) {
+    if (!sentence.trim()) continue;
+    const budget = chunks.length ? rest : first;
+    if (buffer && buffer.length + sentence.length >= budget) { chunks.push(buffer); buffer = sentence; }
+    else buffer = buffer ? `${buffer} ${sentence}` : sentence;
+  }
+  if (buffer) chunks.push(buffer);
+  return chunks;
+}
+
+const SYNTHESIS_TIMEOUT = 2 * 60_000;
+/**
+ * One active response at a time, including synthesis. A new Read cancels the old one.
+ * Long text is spoken piece by piece: the next piece is made while the current one plays.
+ */
 export function createReadback(
   settings: Settings["readback"],
   synthesize: (text: string, settings: Settings["readback"], signal: AbortSignal) => Promise<Uint8Array> = (text, settings, signal) => settings.engine === "http" ? synthesizeReadback(text, settings, signal) : synthesizeLocalReadback(text, settings, signal),
@@ -216,21 +238,42 @@ export function createReadback(
   let active: AbortController | undefined;
   return {
     stopReadback() { active?.abort(); active = undefined; },
-    async readback(text: string) {
+    async readback(text: string, onPhase?: (phase: "preparing" | "speaking") => void) {
       active?.abort();
       const controller = new AbortController();
       active = controller;
-      const timeout = setTimeout(() => controller.abort(new Error("Readback timed out; retry.")), 5 * 60_000);
+      const spoken = spokenText(text);
+      if (spoken.length > 30_000) throw new Error("Response is too long to read (30,000 character limit).");
+      const pieces = speechChunks(spoken);
+      if (!pieces.length) pieces.push(text); // Let synthesis report "No text to read."
+      let timedOut = false;
+      const make = (piece: string) => {
+        const limit = new AbortController();
+        const timer = setTimeout(() => { timedOut = true; limit.abort(); }, SYNTHESIS_TIMEOUT);
+        const made = synthesize(piece, settings, AbortSignal.any([controller.signal, limit.signal])).finally(() => clearTimeout(timer));
+        made.catch(() => {}); // A piece abandoned by Stop must not become an unhandled rejection.
+        return made;
+      };
       try {
-        const audio = await synthesize(text, settings, controller.signal);
-        controller.signal.throwIfAborted();
-        await play(audio, controller.signal);
+        onPhase?.("preparing");
+        let next = make(pieces[0]!);
+        for (let i = 0; i < pieces.length; i++) {
+          let ready = false;
+          void next.then(() => { ready = true; }, () => {});
+          if (i > 0) await Promise.resolve(); // Let a piece that is already done say so.
+          if (!ready) onPhase?.("preparing");
+          const audio = await next;
+          controller.signal.throwIfAborted();
+          if (i + 1 < pieces.length) next = make(pieces[i + 1]!);
+          onPhase?.("speaking");
+          await play(audio, controller.signal);
+          controller.signal.throwIfAborted();
+        }
       } catch (error) {
+        if (timedOut && !controller.signal.aborted) throw new Error("Readback timed out; retry.");
         if (!controller.signal.aborted) throw error;
-        if (controller.signal.reason instanceof Error && controller.signal.reason.message.startsWith("Readback timed out"))
-          throw controller.signal.reason;
       } finally {
-        clearTimeout(timeout);
+        controller.abort(); // Cancels a piece still being made after a failure.
         if (active === controller) active = undefined;
       }
     },

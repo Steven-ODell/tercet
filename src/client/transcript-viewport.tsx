@@ -134,6 +134,8 @@ const SeparatorRow = memo(function SeparatorRow({ row }: { row: MarkdownRow }) {
     </text>
   );
 });
+/** Braille spinner frames, one per 100 ms tick. */
+const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 export function TranscriptViewport({
   items,
   width,
@@ -166,25 +168,40 @@ export function TranscriptViewport({
   const [target, setTarget] = useState<Target>();
   const [hoveredImage, setHoveredImage] = useState<Target>();
   const [feedback, setFeedback] = useState("");
-  const [reading, setReading] = useState(false);
+  // Which message is being read, and whether its speech is still being made or is playing.
+  const [readState, setReadState] = useState<{ id: string; phase: "preparing" | "speaking" }>();
+  const reading = !!readState;
   const readGeneration = useRef(0);
   useEffect(() => () => { readGeneration.current++; effects?.stopReadback?.(); }, [effects]);
   const stopReading = () => {
     readGeneration.current++;
     effects?.stopReadback?.();
-    setReading(false);
+    setReadState(undefined);
     setFeedback("Readback stopped");
   };
-  const read = (text: string) => {
+  const read = (text: string, id: string) => {
     if (!effects?.readback) return;
+    // Pressing Read again on the message being read stops it.
+    if (readState?.id === id) { stopReading(); return; }
     const generation = ++readGeneration.current;
-    setReading(true);
-    setFeedback("Preparing / reading response…");
-    void effects.readback(text).then(
+    setReadState({ id, phase: "preparing" });
+    setFeedback("Preparing speech…");
+    void effects.readback(text, (phase) => {
+      if (generation !== readGeneration.current) return;
+      setReadState({ id, phase });
+      setFeedback(phase === "speaking" ? "Reading response…" : "Preparing speech…");
+    }).then(
       () => { if (generation === readGeneration.current) setFeedback("Readback finished"); },
       (error) => { if (generation === readGeneration.current) setFeedback(`X ${error instanceof Error ? error.message : "Readback failed"}`); },
-    ).finally(() => { if (generation === readGeneration.current) setReading(false); });
+    ).finally(() => { if (generation === readGeneration.current) setReadState(undefined); });
   };
+  const spinning = readState?.phase === "preparing";
+  const [spinFrame, setSpinFrame] = useState(0);
+  useEffect(() => {
+    if (!spinning) return;
+    const timer = setInterval(() => setSpinFrame((frame) => frame + 1), 100);
+    return () => clearInterval(timer);
+  }, [spinning]);
   const busy = useRef(false);
   const nativeSelection = useRef(false);
   const run = (label: string, task: () => unknown) => {
@@ -207,7 +224,7 @@ export function TranscriptViewport({
   const targets = targetNames(effects);
   const perform = (action: string, value = target) => {
     if (!effects || !value) return;
-    if (action === "read" && value.kind === "message") { read(value.text); return; }
+    if (action === "read" && value.kind === "message") { read(value.text, value.id ?? ""); return; }
     if (
       value.kind === "code" ? !value.actions?.includes(action as BlockAction) : action === "run"
     ) {
@@ -299,11 +316,23 @@ export function TranscriptViewport({
   const [localAnchor, setLocalAnchor] = useState<string | null>(null);
   const anchor = anchorState ? anchorState.value : localAnchor;
   const setAnchor = anchorState?.set ?? setLocalAnchor;
-  const rows = useMemo(
+  const measuredRows = useMemo(
     () =>
       cache.rows(items, width, Math.max(1, height - (effects ? 3 : 1)), [...offeredActions(effects), ...(effects?.readback ? ["__readback"] : [])]),
     [cache, items, width, height, effects],
   );
+  // The [read] button of the message being read gets its state beside it: a spinner while the
+  // speech is made, a play icon while it plays. Only that one row is replaced.
+  const rows = useMemo(() => {
+    if (!readState) return measuredRows;
+    const index = measuredRows.findLastIndex((row) => row.id === `${readState.id}:readback:0`);
+    const row = measuredRows[index];
+    const span = row?.spans[0];
+    if (!row || !span) return measuredRows;
+    const [icon, label] = readState.phase === "preparing" ? [SPINNER[spinFrame % SPINNER.length]!, "preparing"] : ["▶", "reading"];
+    const status: Span = { text: ` ${icon} ${label}`, action: span.action, target: span.target, color: theme.accent };
+    return measuredRows.with(index, { ...row, spans: [span, status] });
+  }, [measuredRows, readState, spinFrame]);
   const [focus, setFocus] = useState<string | null>(null);
   const actions = useMemo(
     () => new Set(items.filter((i) => i.action).map((i) => String(i.id))),
@@ -364,7 +393,7 @@ export function TranscriptViewport({
     if (ch === "R" && effects?.readback) {
       const row = v.cursor ? rows[posOf(v.cursor)!.row] : rows.slice(start, start + viewport).findLast((row) => !!row.target);
       const item = items.find((item) => String(item.id) === (row ? rowMessage(row) : ""));
-      if (item?.kind === "assistant") read(item.text);
+      if (item?.kind === "assistant") read(item.text, String(item.id));
       key.preventDefault();
       return;
     }

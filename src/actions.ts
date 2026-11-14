@@ -9,7 +9,8 @@ export interface Recording {
 }
 
 export interface Actions {
-  readback?(text: string): Promise<void>;
+  /** `onPhase` hears "preparing" while speech is being made and "speaking" while it plays. */
+  readback?(text: string, onPhase?: (phase: "preparing" | "speaking") => void): Promise<void>;
   stopReadback?(): void;
   shell?(input: { cwd: string }): Promise<unknown>;
   openThread?(input: { threadId: string }): Promise<unknown>;

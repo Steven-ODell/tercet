@@ -501,5 +501,7 @@ follows the most recently active client): the WAV is sent through `ssh` to that 
 played with mpv, ffplay, afplay or paplay, with `XDG_RUNTIME_DIR` set so PipeWire/PulseAudio
 is found. That needs passwordless ssh back to the client, which the opener already requires.
 Stop or Esc ends the remote player too. Read-only sessions block Read; Stop stays available. Temporary audio is removed after play
-or cancellation. Limits: 30,000 characters, 64 MB audio and five minutes total. Tercet does
+or cancellation. Long responses are spoken sentence by sentence: the first piece starts as soon
+as it is made while the next is generated. Beside **[read]** a spinner shows speech is being
+prepared and a play icon shows it is playing; clicking **[read]** again stops it. Limits: 30,000 characters, 64 MB audio per piece and two minutes to make any one piece. Tercet does
 not install models or change the hub. Generation errors appear beneath the transcript.

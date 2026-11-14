@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { createReadback, spokenText, synthesizeReadback, playReadback, playReadbackVia } from "./readback";
+import { createReadback, speechChunks, spokenText, synthesizeReadback, playReadback, playReadbackVia } from "./readback";
 import { chmod, mkdtemp, readFile, writeFile, rm, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -106,8 +106,10 @@ test.skipIf(process.platform === "win32")("local generation sends voice/speed/te
     expect(JSON.parse(await readFile(recorded, "utf8"))).toEqual({ text: "hello", voice: "bm_george", speed: 1.25 });
     const abort = new AbortController();
     const pending = synthesizeLocalReadback("cancel", { ...settings, voice: "slow" }, abort.signal);
-    const rejection = expect(pending).rejects.toThrow();
-    abort.abort(new Error("cancelled")); await rejection;
+    // Not `expect(pending).rejects`: Bun 1.4 hangs when the promise rejects in the same tick.
+    const outcome = pending.then(() => "resolved", (error: Error) => error.message);
+    abort.abort(new Error("cancelled"));
+    expect(await outcome).toBe("cancelled");
   } finally {
     if (previous === undefined) delete process.env.KOKORO_PYTHON; else process.env.KOKORO_PYTHON = previous;
     await rm(dir, { recursive: true, force: true });
@@ -154,4 +156,29 @@ test("stopping remote playback kills the player on the client, and ssh failures 
     await writeFile(join(broken.dir, "ssh"), '#!/bin/sh\necho "Permission denied" >&2; exit 255\n');
     await expect(playReadbackVia(wav, new AbortController().signal, broken.host, "laptop")).rejects.toThrow("Permission denied");
   } finally { await broken.done(); }
+});
+
+test("long replies are split at sentences and played while the next piece is made", async () => {
+  const sentence = "This is one sentence of ordinary length for the reader. ";
+  const text = sentence.repeat(40);
+  const pieces = speechChunks(text.trim());
+  expect(pieces.length).toBeGreaterThan(2);
+  expect(pieces[0]!.length).toBeLessThan(400);
+  expect(pieces.every((piece) => piece.endsWith("reader."))).toBe(true);
+  expect(pieces.join(" ")).toBe(text.trim());
+  const events: string[] = [];
+  const phases: string[] = [];
+  const controller = createReadback(settings,
+    async (piece) => { events.push(`make ${piece.length}`); return Buffer.from("x"); },
+    async () => { events.push("play"); });
+  await controller.readback(text, (phase) => phases.push(phase));
+  expect(events.filter((e) => e === "play")).toHaveLength(pieces.length);
+  expect(events.indexOf("make " + pieces[1]!.length)).toBeLessThan(events.indexOf("play", 1)); // second made during first play
+  expect(phases[0]).toBe("preparing");
+  expect(phases).toContain("speaking");
+});
+
+test("a failing piece rejects and a slow first piece reports preparing", async () => {
+  const controller = createReadback(settings, async () => { throw new Error("boom"); }, async () => {});
+  await expect(controller.readback("hello. world.")).rejects.toThrow("boom");
 });

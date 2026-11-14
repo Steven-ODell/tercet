@@ -80961,6 +80961,24 @@ async function playReadbackVia(audio, signal, host, via) {
     });
   });
 }
+function speechChunks(text, first = 300, rest = 700) {
+  const chunks = [];
+  let buffer = "";
+  for (const sentence of text.split(/(?<=[.!?])\s+|\n+/)) {
+    if (!sentence.trim())
+      continue;
+    const budget = chunks.length ? rest : first;
+    if (buffer && buffer.length + sentence.length >= budget) {
+      chunks.push(buffer);
+      buffer = sentence;
+    } else
+      buffer = buffer ? `${buffer} ${sentence}` : sentence;
+  }
+  if (buffer)
+    chunks.push(buffer);
+  return chunks;
+}
+var SYNTHESIS_TIMEOUT = 2 * 60000;
 function createReadback(settings, synthesize = (text, settings2, signal) => settings2.engine === "http" ? synthesizeReadback(text, settings2, signal) : synthesizeLocalReadback(text, settings2, signal), play) {
   let active;
   return {
@@ -80968,22 +80986,54 @@ function createReadback(settings, synthesize = (text, settings2, signal) => sett
       active?.abort();
       active = undefined;
     },
-    async readback(text) {
+    async readback(text, onPhase) {
       active?.abort();
       const controller = new AbortController;
       active = controller;
-      const timeout = setTimeout(() => controller.abort(new Error("Readback timed out; retry.")), 5 * 60000);
+      const spoken = spokenText(text);
+      if (spoken.length > 30000)
+        throw new Error("Response is too long to read (30,000 character limit).");
+      const pieces = speechChunks(spoken);
+      if (!pieces.length)
+        pieces.push(text);
+      let timedOut = false;
+      const make = (piece) => {
+        const limit = new AbortController;
+        const timer = setTimeout(() => {
+          timedOut = true;
+          limit.abort();
+        }, SYNTHESIS_TIMEOUT);
+        const made = synthesize(piece, settings, AbortSignal.any([controller.signal, limit.signal])).finally(() => clearTimeout(timer));
+        made.catch(() => {});
+        return made;
+      };
       try {
-        const audio = await synthesize(text, settings, controller.signal);
-        controller.signal.throwIfAborted();
-        await play(audio, controller.signal);
+        onPhase?.("preparing");
+        let next = make(pieces[0]);
+        for (let i = 0;i < pieces.length; i++) {
+          let ready = false;
+          next.then(() => {
+            ready = true;
+          }, () => {});
+          if (i > 0)
+            await Promise.resolve();
+          if (!ready)
+            onPhase?.("preparing");
+          const audio = await next;
+          controller.signal.throwIfAborted();
+          if (i + 1 < pieces.length)
+            next = make(pieces[i + 1]);
+          onPhase?.("speaking");
+          await play(audio, controller.signal);
+          controller.signal.throwIfAborted();
+        }
       } catch (error) {
+        if (timedOut && !controller.signal.aborted)
+          throw new Error("Readback timed out; retry.");
         if (!controller.signal.aborted)
           throw error;
-        if (controller.signal.reason instanceof Error && controller.signal.reason.message.startsWith("Readback timed out"))
-          throw controller.signal.reason;
       } finally {
-        clearTimeout(timeout);
+        controller.abort();
         if (active === controller)
           active = undefined;
       }
@@ -83505,7 +83555,7 @@ end run`;
       return via ? playReadbackVia(audio2, signal, host, via) : playReadback(audio2, signal, host);
     });
     actions.stopReadback = readback.stopReadback;
-    actions.readback = (text3) => readback.readback(text3);
+    actions.readback = (text3, onPhase) => readback.readback(text3, onPhase);
   }
   return actions;
 }
@@ -150633,7 +150683,7 @@ function measureMarkdown(item, width2, imageHeight = 12, offered = []) {
     }
   });
   if (item.kind === "assistant" && item.text.trim() && offered.includes("__readback")) {
-    const target2 = { kind: "message", text: item.text };
+    const target2 = { kind: "message", text: item.text, id: String(item.id) };
     rows.push({
       id: `${item.id}:readback:0`,
       chrome: true,
@@ -159014,6 +159064,7 @@ var SeparatorRow = import_react55.memo(function SeparatorRow2({ row }) {
     })
   });
 });
+var SPINNER = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"];
 function TranscriptViewport({
   items,
   width: width2,
@@ -159032,7 +159083,8 @@ function TranscriptViewport({
   const [target2, setTarget] = import_react55.useState();
   const [hoveredImage, setHoveredImage] = import_react55.useState();
   const [feedback, setFeedback] = import_react55.useState("");
-  const [reading, setReading] = import_react55.useState(false);
+  const [readState, setReadState] = import_react55.useState();
+  const reading = !!readState;
   const readGeneration = import_react55.useRef(0);
   import_react55.useEffect(() => () => {
     readGeneration.current++;
@@ -159041,16 +159093,25 @@ function TranscriptViewport({
   const stopReading = () => {
     readGeneration.current++;
     effects?.stopReadback?.();
-    setReading(false);
+    setReadState(undefined);
     setFeedback("Readback stopped");
   };
-  const read2 = (text5) => {
+  const read2 = (text5, id3) => {
     if (!effects?.readback)
       return;
+    if (readState?.id === id3) {
+      stopReading();
+      return;
+    }
     const generation = ++readGeneration.current;
-    setReading(true);
-    setFeedback("Preparing / reading response\u2026");
-    effects.readback(text5).then(() => {
+    setReadState({ id: id3, phase: "preparing" });
+    setFeedback("Preparing speech\u2026");
+    effects.readback(text5, (phase) => {
+      if (generation !== readGeneration.current)
+        return;
+      setReadState({ id: id3, phase });
+      setFeedback(phase === "speaking" ? "Reading response\u2026" : "Preparing speech\u2026");
+    }).then(() => {
       if (generation === readGeneration.current)
         setFeedback("Readback finished");
     }, (error2) => {
@@ -159058,9 +159119,17 @@ function TranscriptViewport({
         setFeedback(`X ${error2 instanceof Error ? error2.message : "Readback failed"}`);
     }).finally(() => {
       if (generation === readGeneration.current)
-        setReading(false);
+        setReadState(undefined);
     });
   };
+  const spinning = readState?.phase === "preparing";
+  const [spinFrame, setSpinFrame] = import_react55.useState(0);
+  import_react55.useEffect(() => {
+    if (!spinning)
+      return;
+    const timer = setInterval(() => setSpinFrame((frame) => frame + 1), 100);
+    return () => clearInterval(timer);
+  }, [spinning]);
   const busy = import_react55.useRef(false);
   const nativeSelection = import_react55.useRef(false);
   const run3 = (label, task) => {
@@ -159077,7 +159146,7 @@ function TranscriptViewport({
     if (!effects || !value4)
       return;
     if (action === "read" && value4.kind === "message") {
-      read2(value4.text);
+      read2(value4.text, value4.id ?? "");
       return;
     }
     if (value4.kind === "code" ? !value4.actions?.includes(action) : action === "run") {
@@ -159164,7 +159233,19 @@ function TranscriptViewport({
   const [localAnchor, setLocalAnchor] = import_react55.useState(null);
   const anchor = anchorState ? anchorState.value : localAnchor;
   const setAnchor = anchorState?.set ?? setLocalAnchor;
-  const rows = import_react55.useMemo(() => cache3.rows(items, width2, Math.max(1, height - (effects ? 3 : 1)), [...offeredActions(effects), ...effects?.readback ? ["__readback"] : []]), [cache3, items, width2, height, effects]);
+  const measuredRows = import_react55.useMemo(() => cache3.rows(items, width2, Math.max(1, height - (effects ? 3 : 1)), [...offeredActions(effects), ...effects?.readback ? ["__readback"] : []]), [cache3, items, width2, height, effects]);
+  const rows = import_react55.useMemo(() => {
+    if (!readState)
+      return measuredRows;
+    const index3 = measuredRows.findLastIndex((row2) => row2.id === `${readState.id}:readback:0`);
+    const row = measuredRows[index3];
+    const span = row?.spans[0];
+    if (!row || !span)
+      return measuredRows;
+    const [icon9, label] = readState.phase === "preparing" ? [SPINNER[spinFrame % SPINNER.length], "preparing"] : ["\u25B6", "reading"];
+    const status2 = { text: ` ${icon9} ${label}`, action: span.action, target: span.target, color: theme.accent };
+    return measuredRows.with(index3, { ...row, spans: [span, status2] });
+  }, [measuredRows, readState, spinFrame]);
   const [focus, setFocus] = import_react55.useState(null);
   const actions = import_react55.useMemo(() => new Set(items.filter((i) => i.action).map((i) => String(i.id))), [items]);
   const rowMessage = (row) => row.id.slice(0, row.id.lastIndexOf(":", row.id.lastIndexOf(":") - 1));
@@ -159211,7 +159292,7 @@ function TranscriptViewport({
       const row = v.cursor ? rows[posOf(v.cursor).row] : rows.slice(start, start + viewport).findLast((row2) => !!row2.target);
       const item = items.find((item2) => String(item2.id) === (row ? rowMessage(row) : ""));
       if (item?.kind === "assistant")
-        read2(item.text);
+        read2(item.text, String(item.id));
       key5.preventDefault();
       return;
     }
