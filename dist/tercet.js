@@ -90039,7 +90039,13 @@ var list = (item) => (value, path, problem) => {
   return value.map((entry, index2) => item(entry, `${path}[${index2}]`, problem));
 };
 var schema = struct({
-  server: struct({ url: origin, tokenFile: text2, baseDir: text2, ignoreVersion: bool }),
+  server: struct({
+    url: origin,
+    tokenFile: text2,
+    baseDir: text2,
+    ignoreVersion: bool,
+    hideWarning: bool
+  }),
   theme: struct({ preset: oneOf(PRESET_NAMES), accent: color }),
   keys: record(/^[A-Za-z][\w.-]*$/, "action names use letters, digits, ., _ and -", text2),
   icons: oneOf(ICON_MODES),
@@ -90808,6 +90814,7 @@ async function connectionConfig(args2, read, home = homedir(), env = process.env
     hello,
     readOnly,
     ignoreVersion: ignoreVersion || settings.server.ignoreVersion === true,
+    hideWarning: settings.server.hideWarning === true,
     settings,
     settingsPath: path,
     settingsFound: found
@@ -143697,6 +143704,7 @@ function ServerGate({
   initial: initial2,
   check: check2,
   ignoreVersion,
+  hideWarning = false,
   onReady,
   onQuit,
   children: children2
@@ -143735,7 +143743,7 @@ function ServerGate({
       recheck();
   });
   if (!blocked) {
-    const warning = dismissed ? null : compatWarning(state2);
+    const warning = dismissed || hideWarning ? null : compatWarning(state2);
     return /* @__PURE__ */ import_jsx_runtime.jsx(ServerNotice.Provider, {
       value: warning ? { text: warning, dismiss: () => setDismissed(true) } : null,
       children: children2
@@ -159037,6 +159045,7 @@ ${lines.join(`
       initial: firstCheck,
       check: check2,
       ignoreVersion: config.ignoreVersion,
+      hideWarning: config.hideWarning,
       onReady: () => client.start(),
       onQuit: () => renderer.destroy(),
       children: /* @__PURE__ */ import_jsx_runtime.jsx(AppFrame, {

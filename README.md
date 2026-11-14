@@ -177,8 +177,8 @@ terminal](docs/settings.md#keys-that-depend-on-the-terminal).
   placeholders.
 - **"Built for T3 0.1.8, you're on ..." banner.** Your T3 server is a version tercet was not
   tested on. It still works, but screens or actions T3 added since may be missing or broken.
-  `Alt+x` or a click hides the banner for the session. Update tercet when a release for your T3
-  version is out.
+  `Alt+x` or a click hides the banner for the session; `"hideWarning": true` under `server` in
+  the settings file never draws it. Update tercet when a release for your T3 version is out.
 - **"Incompatible server protocol".** The server speaks another orchestration protocol, so
   tercet stops before it connects. Update tercet (or T3). `tercet --ignore-version`, or
   `"ignoreVersion": true` under `server` in the settings file, tries anyway at your own risk.

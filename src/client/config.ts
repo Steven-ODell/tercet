@@ -13,6 +13,8 @@ export interface Config {
   readOnly: boolean;
   /** Start even when the server's version is outside `supportedRange` or missing (flag or setting). */
   ignoreVersion: boolean;
+  /** Never show the server warning banner (`server.hideWarning`). */
+  hideWarning: boolean;
   settings: Settings;
   /** Where the settings file is or would be, and whether it exists. */
   settingsPath: string;
@@ -138,6 +140,7 @@ export async function connectionConfig(
     hello,
     readOnly,
     ignoreVersion: ignoreVersion || settings.server.ignoreVersion === true,
+    hideWarning: settings.server.hideWarning === true,
     settings,
     settingsPath: path,
     settingsFound: found,

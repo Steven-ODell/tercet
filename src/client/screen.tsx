@@ -68,6 +68,7 @@ export function ServerGate({
   initial,
   check,
   ignoreVersion,
+  hideWarning = false,
   onReady,
   onQuit,
   children,
@@ -76,6 +77,8 @@ export function ServerGate({
   initial: ServerCheck;
   check: () => Promise<ServerCheck>;
   ignoreVersion: boolean;
+  /** Draw no warning banner (`server.hideWarning`); a blocking screen still shows. */
+  hideWarning?: boolean;
   onReady: () => void;
   onQuit: () => void;
   children: ReactNode;
@@ -109,7 +112,7 @@ export function ServerGate({
     else if (key.name === "r") recheck();
   });
   if (!blocked) {
-    const warning = dismissed ? null : compatWarning(state);
+    const warning = dismissed || hideWarning ? null : compatWarning(state);
     return (
       <ServerNotice.Provider
         value={warning ? { text: warning, dismiss: () => setDismissed(true) } : null}

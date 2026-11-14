@@ -29,6 +29,8 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
     "baseDir": "~/.t3",
     // Start on a server with another protocol or no version (same as --ignore-version).
     "ignoreVersion": false,
+    // Never draw the server warning banner (default false).
+    "hideWarning": false,
   },
   "defaults": {
     // New threads start with this model when an enabled provider offers it.
@@ -75,6 +77,7 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
 | `server.tokenFile`                                    | path                                                            | `<settings dir>/token`                     | now       |
 | `server.baseDir`                                      | path                                                            | `~/.t3`                                    | now       |
 | `server.ignoreVersion`                                | true or false                                                   | `false`                                    | now       |
+| `server.hideWarning`                                  | true or false                                                   | `false`                                    | now       |
 | `defaults.provider`                                   | provider instance id                                            | any                                        | now       |
 | `defaults.model`                                      | model slug                                                      | the thread's or project's model            | now       |
 | `defaults.mode`                                       | `approval-required`, `auto-accept-edits`, `auto`, `full-access` | per provider                               | now       |
@@ -313,7 +316,8 @@ its descriptor. A version outside the tested range (now `>=0.1.8 <0.2.0`, tested
 normally under a one-line banner, "Built for T3 0.1.8, you're on 0.2.0: some things may not
 work." `Alt+x` (the `dismissNotice` key) or a click hides it for the session. `--ignore-version`,
 or `"ignoreVersion": true` under `server`, gets past a protocol mismatch or a missing version at
-your own risk.
+your own risk. `"hideWarning": true` under `server` never draws the banner; a server tercet
+refuses to open on still shows its full-screen message.
 
 ## tercet doctor
 

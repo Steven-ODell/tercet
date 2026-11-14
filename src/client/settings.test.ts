@@ -322,3 +322,20 @@ test("spell defaults on, can be switched off, and takes a dictionary path", () =
   expect(parse('{"spell":{"dictionary":"~/words.txt"}}').spell.dictionary).toBe("/home/u/words.txt");
   expect(failure('{"spell":{"enabled":"yes"}}')).toContain("spell.enabled");
 });
+
+test("server.hideWarning is off unless the settings file turns it on", async () => {
+  const env = { XDG_CONFIG_HOME: "/xdg" };
+  const withFile = (text?: string) => async (path: string) =>
+    path === "/xdg/tercet/settings.json" ? text : undefined;
+  expect((await connectionConfig([], withFile(), "/home/u", env)).hideWarning).toBe(false);
+  const on = await connectionConfig(
+    [],
+    withFile('{ "server": { "hideWarning": true } }'),
+    "/home/u",
+    env,
+  );
+  expect(on.hideWarning).toBe(true);
+  await expect(
+    connectionConfig([], withFile('{ "server": { "hideWarning": 1 } }'), "/home/u", env),
+  ).rejects.toThrow("server.hideWarning: expected true or false");
+});

@@ -306,3 +306,26 @@ test("the pinned release and its patches draw no banner and list no dismiss key"
     }
   }
 });
+
+test("hideWarning opens a newer server with no banner", async () => {
+  const view = await testRender(
+    <ServerGate
+      url="http://box:3773"
+      initial={checkDescriptor(descriptor("0.2.0"))}
+      check={async () => checkDescriptor(descriptor("0.2.0"))}
+      ignoreVersion={false}
+      hideWarning
+      onReady={() => {}}
+      onQuit={() => {}}
+    >
+      <AppFrame client={fakeClient()} />
+    </ServerGate>,
+    { width: 120, height: 30, kittyKeyboard: true, exitOnCtrlC: false },
+  );
+  try {
+    await view.flush();
+    expect(view.captureCharFrame()).not.toContain("Built for T3");
+  } finally {
+    await act(async () => view.dispose());
+  }
+});

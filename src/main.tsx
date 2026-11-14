@@ -256,6 +256,7 @@ try {
           initial={firstCheck}
           check={check}
           ignoreVersion={config.ignoreVersion}
+          hideWarning={config.hideWarning}
           onReady={() => client.start()}
           onQuit={() => renderer.destroy()}
         >
