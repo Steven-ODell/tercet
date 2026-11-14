@@ -68,7 +68,15 @@ export const settingsTargetKeys = (settings: Pick<Settings, "targets">) =>
   );
 
 export interface Settings {
-  readback: { enabled: boolean; engine: "local" | "http"; endpoint: string; voice: string; speed: number };
+  readback: {
+    enabled: boolean;
+    engine: "local" | "http";
+    endpoint: string;
+    voice: string;
+    speed: number;
+    /** Kokoro home for `engine: "local"`; empty means tercet's own data directory. `KOKORO_HOME` wins. */
+    home: string;
+  };
   server: {
     url?: string;
     tokenFile?: string;
@@ -123,7 +131,7 @@ export interface Settings {
 }
 
 export const defaultSettings = (): Settings => ({
-  readback: { enabled: true, engine: "local", endpoint: "http://127.0.0.1:8880/v1/audio/speech", voice: "af_heart", speed: 1 },
+  readback: { enabled: true, engine: "local", endpoint: "http://127.0.0.1:8880/v1/audio/speech", voice: "af_heart", speed: 1, home: "" },
   server: {},
   theme: {},
   keys: {},
@@ -532,6 +540,7 @@ const schema = struct({
     }),
     voice: text,
     speed: expect("a number from 0.25 to 4", (v) => typeof v === "number" && Number.isFinite(v) && v >= 0.25 && v <= 4),
+    home: expect("a path (empty for the default)", (v) => typeof v === "string"),
   }),
   dictation: struct({
     language: expect(
@@ -594,5 +603,7 @@ export function parseSettings(
     settings.server.baseDir = expandPath(settings.server.baseDir, where.home, where.dir);
   if (settings.spell.dictionary)
     settings.spell.dictionary = expandPath(settings.spell.dictionary, where.home, where.dir);
+  if (settings.readback.home)
+    settings.readback.home = expandPath(settings.readback.home, where.home, where.dir);
   return settings;
 }

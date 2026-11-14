@@ -80771,10 +80771,24 @@ with wave.open(audio, "wb") as wav:
     wav.writeframes(pcm)
 sys.stdout.buffer.write(audio.getvalue())
 `;
-function localReadbackCommand(env = process.env, home = homedir(), windows = process.platform === "win32") {
-  const pathJoin = windows ? win32.join : join;
-  const modelHome = env.KOKORO_HOME || pathJoin(home, "Projects", "Side", "kokoro");
-  const python = env.KOKORO_PYTHON || pathJoin(modelHome, ".venv", ...windows ? ["Scripts", "python.exe"] : ["bin", "python"]);
+function readbackHome(env = process.env, settingsHome = "", platform = process.platform, home = homedir()) {
+  if (env.KOKORO_HOME)
+    return env.KOKORO_HOME;
+  if (settingsHome)
+    return settingsHome;
+  if (platform === "win32")
+    return win32.join(env.LOCALAPPDATA || win32.join(home, "AppData", "Local"), "tercet", "kokoro");
+  if (platform === "darwin")
+    return join(home, "Library", "Application Support", "tercet", "kokoro");
+  const data = env.XDG_DATA_HOME?.startsWith("/") ? env.XDG_DATA_HOME : join(home, ".local", "share");
+  return join(data, "tercet", "kokoro");
+}
+function venvPython(modelHome, platform) {
+  return platform === "win32" ? win32.join(modelHome, ".venv", "Scripts", "python.exe") : join(modelHome, ".venv", "bin", "python");
+}
+function localReadbackCommand(env = process.env, settingsHome = "", platform = process.platform, home = homedir()) {
+  const modelHome = readbackHome(env, settingsHome, platform, home);
+  const python = env.KOKORO_PYTHON || venvPython(modelHome, platform);
   return { python, args: ["-c", LOCAL_SYNTHESIS, modelHome] };
 }
 async function synthesizeLocalReadback(text, settings, signal) {
@@ -80784,7 +80798,7 @@ async function synthesizeLocalReadback(text, settings, signal) {
   if (input.length > 30000)
     throw new Error("Response is too long to read (30,000 character limit).");
   signal.throwIfAborted();
-  const command = localReadbackCommand();
+  const command = localReadbackCommand(process.env, settings.home);
   return new Promise((resolve, reject) => {
     const child = spawn(command.python, command.args, { stdio: ["pipe", "pipe", "ignore"], windowsHide: true, signal });
     const abort = () => {
@@ -80799,7 +80813,7 @@ async function synthesizeLocalReadback(text, settings, signal) {
     let failure;
     child.once("error", (error) => {
       failure = error;
-      reject(signal.aborted ? signal.reason : new Error("Cannot start local Kokoro Python. Check KOKORO_HOME and its .venv, or KOKORO_PYTHON."));
+      reject(signal.aborted ? signal.reason : new Error("Cannot start local Kokoro Python. Run `tercet readback setup`, or check KOKORO_HOME, readback.home and KOKORO_PYTHON."));
     });
     child.stdin.on("error", () => {});
     child.stdout.on("data", (part) => {
@@ -80817,7 +80831,7 @@ async function synthesizeLocalReadback(text, settings, signal) {
         return;
       }
       if (failure || code !== 0) {
-        reject(new Error("Local Kokoro generation failed. Check KOKORO_HOME, its .venv, model/voice files and selected voice (same setup as Phone Assist hub)."));
+        reject(new Error("Local Kokoro generation failed. Run `tercet readback setup` to repair the install, and check readback.voice."));
         return;
       }
       const audio = Buffer.concat(parts);
@@ -82475,7 +82489,7 @@ var RESERVED_TARGET_KEYS = ["Y", "T", "X", "F", "O", "G", "V"];
 var RESERVED_TARGET_NAMES = ["copy", "open", "tmux", "run", "send", "path", "read", "stop reading", "__readback"];
 var settingsTargetKeys = (settings) => Object.fromEntries(Object.entries(settings.targets).flatMap(([name, t]) => t.key ? [[t.key, name]] : []));
 var defaultSettings = () => ({
-  readback: { enabled: true, engine: "local", endpoint: "http://127.0.0.1:8880/v1/audio/speech", voice: "af_heart", speed: 1 },
+  readback: { enabled: true, engine: "local", endpoint: "http://127.0.0.1:8880/v1/audio/speech", voice: "af_heart", speed: 1, home: "" },
   server: {},
   theme: {},
   keys: {},
@@ -82789,7 +82803,8 @@ var schema = struct({
       }
     }),
     voice: text2,
-    speed: expect("a number from 0.25 to 4", (v) => typeof v === "number" && Number.isFinite(v) && v >= 0.25 && v <= 4)
+    speed: expect("a number from 0.25 to 4", (v) => typeof v === "number" && Number.isFinite(v) && v >= 0.25 && v <= 4),
+    home: expect("a path (empty for the default)", (v) => typeof v === "string")
   }),
   dictation: struct({
     language: expect("a language code (2\u201316 characters)", (v) => typeof v === "string" && v.length >= 2 && v.length <= 16),
@@ -82838,6 +82853,8 @@ function parseSettings(source, path, where) {
     settings.server.baseDir = expandPath(settings.server.baseDir, where.home, where.dir);
   if (settings.spell.dictionary)
     settings.spell.dictionary = expandPath(settings.spell.dictionary, where.home, where.dir);
+  if (settings.readback.home)
+    settings.readback.home = expandPath(settings.readback.home, where.home, where.dir);
   return settings;
 }
 
