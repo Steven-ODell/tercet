@@ -10,14 +10,14 @@ export interface WorkspaceChoice {
   branch: string | null;
   worktreePath: string | null;
 }
-export function workspaceChoices(root: string, refs: readonly VcsRef[]): WorkspaceChoice[] {
-  const current = refs.find((ref) => ref.current);
-  return [
-    { branch: current?.name ?? null, worktreePath: null },
-    ...refs
-      .filter((ref) => ref.worktreePath && ref.worktreePath !== root)
-      .map((ref) => ({ branch: ref.name, worktreePath: ref.worktreePath })),
-  ];
+export function workspaceChoices(root: string, refs: readonly VcsRef[], known: readonly WorkspaceChoice[] = []): WorkspaceChoice[] {
+  const current = refs.find((ref) => ref.worktreePath === root) ?? refs.find((ref) => ref.current && !ref.worktreePath);
+  const choices = new Map<string, WorkspaceChoice>();
+  choices.set(root, { branch: current?.name ?? null, worktreePath: null });
+  for (const row of [...refs.map((ref) => ({ branch: ref.name, worktreePath: ref.worktreePath ?? null })), ...known]) {
+    if (row.worktreePath && row.worktreePath !== root && !choices.has(row.worktreePath)) choices.set(row.worktreePath, row);
+  }
+  return [...choices.values()];
 }
 /** The current project first, so Enter alone starts where you already are. */
 export function projectChoices<P extends { id: string }>(
@@ -181,7 +181,7 @@ export function WorkspacePicker({
       .workspaceRefs(root)
       .then((refs) => {
         if (!stale) {
-          const choices = workspaceChoices(root, refs);
+          const choices = workspaceChoices(root, refs, client.registry.get(client.snapshot)?.threads.filter((t) => t.projectId === project?.id) ?? []);
           setRows(choices);
           setCursor(0);
           if (chooseSoleRow && choices.length === 1) void create(choices[0]!);
