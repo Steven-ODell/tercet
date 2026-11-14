@@ -1,3 +1,4 @@
+import { BranchPanel, createBranchWorkflow, type BranchTarget } from "./git-workflows.tsx";
 import { theme } from "./theme";
 import { LaunchersPanel } from "./launchers";
 import { TerminalPanel, type QueuedRun } from "./terminal";
@@ -38,6 +39,7 @@ import { onMediaNotice } from "./media";
 type Pane = "sidebar" | "transcript" | "composer" | "right";
 type RightPanel = "files" | "diff" | "launchers" | "terminal";
 type Overlay =
+  | "branches"
   | "workspace"
   | "model"
   | "effort"
@@ -256,6 +258,17 @@ export function AppFrame({
   const cwd =
     selected?.worktreePath ??
     snapshot?.projects.find((p) => p.id === selected?.projectId)?.workspaceRoot;
+  const branchTarget = useRef<BranchTarget | undefined>(undefined);
+  branchTarget.current = selected && cwd ? {
+    projectId: selected.projectId, threadId: selected.id,
+    projectCwd: snapshot!.projects.find((p) => p.id === selected.projectId)!.workspaceRoot,
+    worktreePath: selected.worktreePath, branch: selected.branch,
+    running: (snapshot?.threads ?? []).filter((t) =>
+      (t.worktreePath ?? snapshot?.projects.find((p) => p.id === t.projectId)?.workspaceRoot) === cwd
+    ).some((t) => !!t.activeRunId || !!t.activityRunStatus || client.getThread(t.id).projection?.runs.some((run) =>
+      !["completed", "failed", "cancelled", "interrupted", "rolled_back"].includes(run.status))),
+  } : undefined;
+  const branchWorkflow = useMemo(() => createBranchWorkflow(client, () => branchTarget.current), [client]);
   const runShell = () =>
     Promise.resolve().then(() => {
       if (!cwd || !effects?.shell) throw new Error("Unavailable");
@@ -314,6 +327,7 @@ export function AppFrame({
     }
     if (
       command === "help" ||
+      command === "branches" ||
       command === "context" ||
       command === "model" ||
       command === "effort" ||
@@ -551,7 +565,7 @@ export function AppFrame({
           </box>
         )}
         {headerRows.map((row) => (
-          <text
+          <text onMouseUp={(event) => { if (event.button === 0 && row.includes(`${paneGlyphs.branch} `)) dispatch("branches"); }}
             key={row}
             height={1}
             flexShrink={0}
@@ -851,6 +865,7 @@ export function AppFrame({
             height={height}
           />
         )}
+        {overlay === "branches" && <BranchPanel workflow={branchWorkflow} target={branchTarget.current} close={() => setOverlay(null)} />}
         {overlay === "workspace" && (
           <NewThreadPicker
             client={client}

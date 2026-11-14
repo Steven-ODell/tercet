@@ -81,7 +81,7 @@ mutations. Only the user's eventual trial connects this new UI to their daily se
   workspace targeting, unsupported/auth errors and policy, not only mock function invocation.
   Write exact next-step symbols and artifacts in NOTES.md.
 
-- [ ] 2. Add branch status, listing, creation and switching.
+- [x] 2. Add branch status, listing, creation and switching.
   Files: new Git workflow primitives from step 1; src/client/{frame,keymap,read-only}.tsx/ts,
   new src/client/git-workflows.tsx and tests. Use the actual file names recorded by step 1.
   Respect dirty trees and branches checked out elsewhere. Never force checkout. Keep selected
@@ -129,7 +129,11 @@ spaces and UNC paths; all Git/worktree actions remain pinned server RPCs. Step 1
 fixtures in `src/client/git-workflows.test.ts` for Windows CI. Windows work owns windows.ts,
 portable/settings/doctor adapters, build/installer/CI/docs; coordinate before overlapping edits.
 Do not commit the Windows thread's changes or bundle. Carry coordination into every packet
-and verify convergence in step 5 before the final trial. Step 1 finished files are
+and verify convergence in step 5 before the final trial. Windows source was integrated into root by its owner during step 2 before the combined
+build/check (369 pass/19 skip). Preserve these uncommitted changes; no stale worktree bundle.
+Native CI/manual Windows Terminal trial remain pending; keep experimental status. Final
+step 5 includes src/windows.test.ts/native Git tests. Windows owner plans no further edits.
+Step 1 finished files are
 src/client/{connection,runtime,platform,git-workflows,git-workflows.test}.ts and docs/git-workflows.md.
 
 ## Handoff mechanics

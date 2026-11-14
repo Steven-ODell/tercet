@@ -1,5 +1,5 @@
-import { assertGitPolicy } from "./git-workflows";
-import type { GitBoundary, GitOperation, GitInput, GitOutput } from "./git-workflows";
+import { assertGitPolicy } from "./git-workflows.ts";
+import type { GitBoundary, GitOperation, GitInput, GitOutput } from "./git-workflows.ts";
 import {
   ModelFavorites,
   OrchestrationV2ThreadHistoryPage,
