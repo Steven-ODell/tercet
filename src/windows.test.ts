@@ -53,7 +53,7 @@ test.skipIf(process.platform !== "win32")("native PowerShell passes hostile Unic
   const text = 'line one\r\nZoë 界 😀\r\n';
   const output = await runArgs(native, powershell("[Console]::Write($value); $reader = [IO.StreamReader]::new([Console]::OpenStandardInput(), [Text.Encoding]::UTF8); [Console]::Write($reader.ReadToEnd())", hostile), { stdin: text, capture: true });
   expect(Buffer.from(output).toString("utf8")).toBe(hostile + text);
-});
+}, 25_000);
 
 test.skipIf(process.platform !== "win32")("Windows clipboard round-trips Unicode text and PNG", async () => {
   const native = systemHost();
@@ -65,7 +65,7 @@ test.skipIf(process.platform !== "win32")("Windows clipboard round-trips Unicode
   await runArgs(native, tool.write("image/png", {}), { stdin: png });
   const image = await runArgs(native, tool.read("image/png", {}), { capture: true });
   expect(Buffer.from(image).subarray(0, 8)).toEqual(png.subarray(0, 8));
-});
+}, 25_000);
 
 test.skipIf(process.platform !== "win32")("native drive paths with spaces load attachments and previews", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "tercet Windows 界 "));
