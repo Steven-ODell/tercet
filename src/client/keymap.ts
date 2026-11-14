@@ -42,6 +42,7 @@ export const COMMANDS = [
   { id: "dismissNotice", keys: "Alt+x", label: "Dismiss server warning", needs: "notice" },
   { id: "close", keys: "Esc", label: "Close overlay / next pane", fixed: true },
   { id: "quit", keys: "Ctrl+c", label: "Quit", fixed: true, twice: true },
+  { id: "pullRequests", keys: "Alt+w", label: "Pull requests" },
   { id: "branches", keys: "Alt+g", label: "Branches" },
 ] as const satisfies readonly {
   id: string;

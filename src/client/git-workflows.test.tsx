@@ -258,3 +258,150 @@ test("moving a thread detaches idle provider sessions before binding and refuses
     expect(commands.map((c) => c.type)).toEqual(sessionStatus === "ready" ? ["provider-session.detach", "thread.metadata.update"] : []);
   }
 });
+
+// GitHub effects below are simulated only; no host or server is contacted.
+import { createPullRequestWorkflow, prKey, type PRSelection } from "./pull-requests.ts";
+import { PullRequestPanel } from "./pull-requests.tsx";
+const pr: PRSelection = { ref: { projectId: target.projectId, host: "github.example", expectedAccountId: "account-1", repository: "owner/repo", number: 42 }, url: "https://github.example/owner/repo/pull/42" };
+function prFixture() {
+  const calls: { operation: string; input: any }[] = [];
+  let now = { ...target };
+  let fail = false;
+  let hold = false;
+  let release: (() => void) | undefined;
+  let commentAllowed = true;
+  const detail = { projectId: target.projectId, repository: "owner/repo", number: 42, url: pr.url, title: "Review me", body: "PR body", state: "open", mergeability: "conflicting", isDraft: false, headBranch: "main", baseBranch: "base", additions: 3, deletions: 1, capabilities: { comment: true, review: { verdicts: ["comment", "approve", "request-changes"] } }, viewerPermissions: { comment: true, verdicts: ["comment", "approve", "request-changes"] } };
+  const client = {
+    git: async (operation: string, input: any) => {
+      calls.push({ operation, input });
+      if (operation === "prIdentity") return { accountId: "account-1" };
+      if (operation === "detail") return { ...detail, viewerPermissions: { ...detail.viewerPermissions, comment: commentAllowed } };
+      if (operation === "checks") return { checks: [{ name: "CI", status: "pending" }] };
+      if (operation === "activity") return { comments: [{ id: "c", author: { login: "reviewer" }, body: "Please fix", kind: "issue-comment" }], reviewThreads: [], commits: [] };
+      if (operation === "listPRs") return { entries: [{ ...detail, host: pr.ref.host }], errors: [], providers: [], viewers: {}, truncated: false };
+      if (operation === "status") return { ...status, isDefaultRef: false, hasPrimaryRemote: true };
+      if (operation === "createPR") return [{ kind: "action_finished" }];
+      if (operation === "diffPreview") return { sources: [{ diff: "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new" }] };
+      if (hold) await new Promise<void>((done) => { release = done; });
+      if (fail) throw new Error("ambiguous credential secret");
+    },
+    dispatch: async (input: any) => { calls.push({ operation: "dispatch", input }); },
+  } as unknown as Pick<Client, "git" | "dispatch">;
+  const workflow = createPullRequestWorkflow(client, () => now);
+  return { workflow, calls, client, setNow: (value: BranchTarget) => { now = value; }, fail: (value = true) => { fail = value; }, hold: () => { hold = true; }, release: () => release?.(), deny: () => { commentAllowed = false; } };
+}
+
+test("PR writes preserve exact target/account/body and distinct review verdicts", async () => {
+  for (const verdict of ["discussion", "comment", "approve", "request-changes"] as const) {
+    const f = prFixture(); const body = "  Markdown\n\n**keep whitespace**  \n";
+    f.workflow.setDraft(prKey(target, pr), body);
+    await f.workflow.submit(target, pr, verdict);
+    const write = f.calls.find((c) => c.operation === (verdict === "discussion" ? "comment" : "submitReview"));
+    expect(write?.input).toEqual({ ...pr.ref, allowStale: false, body, ...(verdict === "discussion" ? {} : { verdict, comments: [] }) });
+    expect(f.calls.findIndex((c) => c.operation === "detail")).toBeLessThan(f.calls.indexOf(write!));
+    expect(f.workflow.draft(prKey(target, pr))).toBe("");
+  }
+});
+
+test("ambiguous PR failure preserves draft and requires refresh; no automatic or duplicate retry", async () => {
+  const f = prFixture(); const key = prKey(target, pr); f.workflow.setDraft(key, "body"); f.fail();
+  await f.workflow.submit(target, pr, "discussion");
+  expect(f.workflow.snapshot()).toMatchObject({ status: "error" });
+  expect(JSON.stringify(f.workflow.snapshot())).not.toContain("secret");
+  expect(f.workflow.draft(key)).toBe("body");
+  await f.workflow.submit(target, pr, "discussion");
+  expect(f.calls.filter((c) => c.operation === "comment")).toHaveLength(1);
+  f.fail(false); await f.workflow.refresh(target, pr); await f.workflow.submit(target, pr, "discussion");
+  expect(f.calls.filter((c) => c.operation === "comment")).toHaveLength(2);
+  expect(f.workflow.draft(key)).toBe("");
+});
+
+test("closing a PR action retains write lock until settlement and cannot clear another draft", async () => {
+  const f = prFixture(); const key = prKey(target, pr); f.workflow.setDraft(key, "original"); f.hold();
+  const pending = f.workflow.submit(target, pr, "approve");
+  for (let i = 0; i < 20 && !f.calls.some((c) => c.operation === "submitReview"); i++) await Promise.resolve();
+  f.workflow.cancel(); f.workflow.setDraft(key, "next draft");
+  await f.workflow.submit(target, pr, "approve");
+  f.release(); await pending;
+  expect(f.calls.filter((c) => c.operation === "submitReview")).toHaveLength(1);
+  expect(f.workflow.snapshot().status).toBe("idle");
+  expect(f.workflow.draft(key)).toBe("next draft");
+});
+
+test("PR identity, permissions and changed workspace guard writes", async () => {
+  for (const reason of ["identity", "permissions", "workspace"] as const) {
+    const f = prFixture(); f.workflow.setDraft(prKey(target, pr), "body");
+    if (reason === "permissions") f.deny();
+    if (reason === "workspace") f.setNow({ ...target, worktreePath: "\\\\server\\different" });
+    await f.workflow.submit(target, reason === "identity" ? { ...pr, url: "https://wrong.example" } : pr, "discussion");
+    expect(f.workflow.snapshot().status).toBe("error");
+    expect(f.calls.some((c) => c.operation === "comment")).toBe(false);
+  }
+});
+
+test("PR link/unlink/watch/unwatch dispatch exact host/repository/thread and intent", async () => {
+  for (const action of ["link", "unlink", "watch", "unwatch"] as const) {
+    const f = prFixture(); await f.workflow.link(target, pr, action);
+    const command = f.calls.find((c) => c.operation === "dispatch")?.input;
+    expect(command).toMatchObject({ commandId: expect.any(String), threadId: target.threadId, host: pr.ref.host, repository: pr.ref.repository, number: 42, type: `thread.pull-request.${action === "unwatch" ? "watch" : action}` });
+    if (action === "watch" || action === "unwatch") expect(command.watching).toBe(action === "watch");
+    if (action === "link") expect(command).toMatchObject({ source: "manual", url: pr.url });
+  }
+});
+
+test("create PR uses only explicit stock create_pr action at opaque workspace and guards running threads", async () => {
+  const f = prFixture(); await f.workflow.create(target);
+  expect(f.calls.find((c) => c.operation === "createPR")?.input).toEqual({ action: "create_pr", actionId: expect.any(String), cwd: target.projectCwd, projectId: target.projectId, threadId: target.threadId });
+  const running = prFixture(); running.setNow({ ...target, running: true }); await running.workflow.create(target);
+  expect(running.calls.some((c) => c.operation === "createPR")).toBe(false);
+});
+
+test("PR panel keyboard and mouse show checks/discussion/diff, preserve drafts and confirm exact action", async () => {
+  const f = prFixture(); let closed = 0;
+  const view = await testRender(<PullRequestPanel workflow={f.workflow} target={target} close={() => closed++} />, { width: 70, height: 40, kittyKeyboard: true, exitOnCtrlC: false });
+  const key = async (name: string) => { await act(async () => { view.mockInput.pressKey(name); }); await view.flush(); };
+  const click = async (label: string) => {
+    const lines = view.captureCharFrame().split("\n"); const y = lines.findIndex((l) => l.includes(label)); expect(y).toBeGreaterThanOrEqual(0);
+    await act(async () => { await view.mockMouse.click(lines[y]!.indexOf(label) + 1, y); }); await view.flush();
+  };
+  try {
+    await view.waitForFrame((frame) => frame.includes("#42"));
+    await key("RETURN");
+    expect(view.captureCharFrame()).toContain("owner/repo #42");
+    expect(view.captureCharFrame()).toContain("pending · CI");
+    expect(view.captureCharFrame()).toContain("Please fix");
+    await key("d"); expect(view.captureCharFrame()).toContain("Local branch comparison");
+    await key("RETURN"); expect(view.captureCharFrame()).toContain("+new");
+    await key("ESCAPE"); await key("ESCAPE");
+    await key("c");
+    await act(async () => { view.mockInput.typeText("my review"); }); await view.flush();
+    await click("Approve"); expect(view.captureCharFrame()).toContain("Submit approve to owner/repo #42");
+    expect(f.calls.some((c) => c.operation === "submitReview")).toBe(false);
+    await key("RETURN"); expect(f.calls.find((c) => c.operation === "submitReview")?.input.body).toBe("my review");
+    await key("ESCAPE"); await key("ESCAPE"); expect(closed).toBe(1);
+  } finally { view.renderer.destroy(); }
+});
+
+test("read-only PR writes and linkage fail before I/O and retain review draft", async () => {
+  const { platform } = await import("./platform");
+  const { connectionConfig } = await import("./config");
+  const Effect = await import("effect/Effect");
+  const config = await connectionConfig(["--read-only"], async () => undefined, "/fake", {});
+  const boundary = platform(config);
+  for (const action of ["discussion", "approve", "link", "watch", "create"] as const) {
+    const f = prFixture();
+    const client = {
+      git: (operation: any, input: any) => ["comment", "submitReview", "createPR"].includes(operation)
+        ? Effect.runPromise(boundary.git("canary", operation, input)) : f.client.git(operation, input),
+      dispatch: (command: any) => Effect.runPromise(boundary.dispatch!("canary", command)),
+    } as Pick<Client, "git" | "dispatch">;
+    const workflow = createPullRequestWorkflow(client, () => target);
+    const key = prKey(target, pr); workflow.setDraft(key, "retained");
+    if (action === "create") await workflow.create(target);
+    else if (action === "link" || action === "watch") await workflow.link(target, pr, action);
+    else await workflow.submit(target, pr, action);
+    expect(workflow.snapshot()).toMatchObject({ status: "error" });
+    expect(workflow.draft(key)).toBe("retained");
+    expect(f.calls.some((c) => ["comment", "submitReview", "dispatch", "createPR"].includes(c.operation))).toBe(false);
+  }
+});

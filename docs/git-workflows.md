@@ -16,6 +16,8 @@ thread and cwd. PR identity additionally includes host/account/repository/number
 Inputs/results below are exported by `@t3tools/contracts`; exact fields remain authoritative
 in `vendor/t3/packages/contracts/src/{rpc,git,pullRequest,review}.ts`.
 
+- `prIdentity`: `pullRequests.routingIdentity(host) -> PullRequestRoutingIdentityResult`.
+- `createPR`: scoped collection of `git.runStackedAction` events (never retried).
 - `status`: `vcs.refreshStatus(VcsStatusInput & {localOnly?:boolean}) -> VcsStatusResult`.
   Includes repo/ref, dirty files, upstream ahead/behind, optional PR. Local-only avoids remote refresh.
 - `refs`: `vcs.listRefs(VcsListRefsInput) -> VcsListRefsResult`. `cwd`, optional query,
@@ -66,7 +68,7 @@ paginated refs (worktreePath) and known thread bindings. Worktree setup has
 PR creation uses streaming `git.runStackedAction(GitRunStackedActionInput)` with action
 `create_pr` (or compound actions), actionId and optional threadId/projectId; events include
 progress and completion. Wire this only with explicit confirmation of the repository/action;
-never replay on reconnect. Not yet included in unary gitMethods. Removal, force, merge,
+never replay on reconnect. Collected within the scoped connection by gitMethods.createPR. Removal, force, merge,
 delete and push are outside this loop's default UI scope.
 
 ## Upstream UI reference points
@@ -101,9 +103,9 @@ stale result rejection and write locking. These are server-free tests with simul
 actual branch/worktree side effects on disposable server repositories belong to steps 2–3.
 No live GitHub writes are tested.
 
-Next: create `src/client/git-workflows.tsx` branch dialog using `client.git`,
-`workspaceCwd`/`workspaceKey`, `createWorkflowResource`, `GitWorkflowError.kind`, and
-`GIT_READ_ONLY_POLICY`; integrate frame/keymap without replacing editor changes.
+Current UI: `git-workflows.tsx` owns branch/worktree controls; `pull-requests.ts` owns PR
+resources, drafts and mutation locking, and `pull-requests.tsx` renders the PR overlay.
+Both controllers are frame-owned and use explicit .ts/.tsx imports.
 
 ## Branches
 
@@ -145,3 +147,41 @@ The POSIX rig below also proves real server-managed worktree setup, durable thre
 new-thread workspace choice, correct Git cwd and preservation of dirty source files. All
 server data, managed worktrees and Git effects stay inside its disposable /tmp directory;
 no provider turns or GitHub writes run. Native Windows CI still needs a native execution.
+
+## Pull requests
+
+Alt+w / Help / Palette → Pull requests opens the current project's PRs. Enter or click a
+row for details, mergeability, checks (unknown is never passing) and discussion/review threads.
+The first 100 results and truncated discussion are labeled; Open PR supplies full host history.
+The account is resolved through `pullRequests.routingIdentity` before selection and its
+`expectedAccountId` is retained on subsequent reads and writes. Host/repository/number and
+thread/cwd are shown. j/k scroll details; Esc backs out of files, comparison, drafts and detail.
+
+`c` opens a multiline draft. Ctrl+s posts a discussion comment; Ctrl+e submits a comment
+review; Ctrl+a approves; Ctrl+r requests changes. The same mouse buttons are provided. Every
+submission first shows the action, exact PR and full body, and requires Enter / Confirm.
+Drafts live in the frame-owned controller and survive closing and failures. Pending writes
+stay locked through close; no reconnect or refresh replays writes. After an uncertain failure,
+refresh and inspect the host before another explicit submission. Fresh details check capabilities
+and viewer permissions before writing. Read-only policy blocks comments, reviews, creation,
+linkage and watches before mutation I/O. Drafts are in-memory only, not persisted across exit.
+
+`l` links, `u` unlinks, `w` watches and `W` unwatches the displayed PR for the displayed thread.
+Watching explicitly enables stock server notifications; it can wake the thread. These controls
+do not change the thread's workspace or stop its run. `o` opens the PR; `y` copies its URL.
+
+`d` opens a **local branch comparison**, requiring the workspace branch to match the PR head;
+Enter/click navigates its files. It can differ from the remote PR and is labeled accordingly.
+The pinned RPC surface has no remote PR patch-list method; Open host diff provides that view.
+Incomplete/deferred/truncated comparisons are labeled. No local checkout is performed.
+
+`n` / Create PR asks for confirmation of current branch/cwd and explains possible push and
+server-generated text. It requires an idle, clean feature branch with a remote, uses only
+stock `git.runStackedAction` with action `create_pr`, a unique actionId and project/thread,
+and collects its stream inside the scoped RPC session. Failure or missing completion is
+uncertain; inspect the host before retrying. No automatic commit, force, merge or deletion.
+The stock workflow owns PR generation/linkage; refresh the listing after confirmed completion.
+
+Focused tests simulate every GitHub write, exact body/account/verdict, uncertain failure,
+duplicate locking, read-only enforcement, keyboard/mouse review confirmation and diff navigation.
+No live PR, review, comment or message was posted during development.

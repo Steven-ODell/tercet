@@ -99,7 +99,7 @@ mutations. Only the user's eventual trial connects this new UI to their daily se
   test verifies worktree setup, branch/path binding and new thread operations use the selected
   workspace, with no changes outside sandbox. Record verification script in docs/TEST.
 
-- [ ] 4. Add PR inspection and review actions.
+- [x] 4. Add PR inspection and review actions.
   Files: workflow RPC boundary/state, src/client/{frame,diff,read-only,keymap}.tsx/ts; pinned
   pullRequest schemas and v0.1.8 web implementations mapped in step 1. Add PR status/checks,
   details and discussion, diff navigation, comments/review submission, link/open/copy,
@@ -148,3 +148,20 @@ actual files/symbols, prior check and logs, baseline command, stop conditions an
 constraints. Retain launch ID; inspect before retrying a failed launch. Settle successful
 intermediate threads only after launching their successor, using t3-thread settle current
 --after-turn as the last shell command. Keep a blocked or final thread open.
+
+## Combined Kokoro trial (Sao steering during step 4)
+
+Sao explicitly requested one command for all outstanding changes, then instructed this thread
+to inspect and integrate "Add Kokoro Voice Readbacks" (29112898-fb18-4cb4-bae2-054762c1654c).
+Its terminal source was integrated from /home/sao/.t3/worktrees/t3t-public/feat-kokoro-readback,
+without copying dist or its sandbox port changes. Delta saved at
+~/.cache/handoffs/2026-11-14-tercet-kokoro-only.patch; root pre-integration diff saved beside it.
+Readback source/tests/docs and its seven intentional acceptance snapshots remain UNCOMMITTED
+with the editor/Windows baseline. Preserve all; do not sweep them into the step 4/5 Git commit.
+Step 5 convergence includes src/readback.test.ts and src/client/readback.test.tsx, plus editors,
+Windows and Git tests. Bundle must contain all of these changes. T3 web readback remains in
+/home/sao/Projects/Side/t3code-wt/kokoro-readback and is outside this terminal bundle.
+Default Kokoro endpoint http://127.0.0.1:8880 was unavailable (curl exit 7, HTTP 000); mpv exists.
+Actual natural voice playback has NOT been verified. Preserve no settings edit/install/restart
+boundary; report service requirement honestly, do not silently install/start a model/service.
+Kokoro readback is explicit only; tests use simulated synthesis/player and remain muted.

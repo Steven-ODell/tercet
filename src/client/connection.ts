@@ -257,6 +257,10 @@ export const diffMethods = {
 
 /** Pinned stock RPCs. Authentication and response decoding stay in RpcSessionFactory. */
 export const gitMethods = {
+  prIdentity: (url: string, token: string, input: C.PullRequestRoutingIdentityInput) =>
+    withConnection(url, token, session => session.client[WS_METHODS.pullRequestsRoutingIdentity](input)),
+  createPR: (url: string, token: string, input: C.GitRunStackedActionInput) =>
+    withConnection(url, token, session => Stream.runCollect(session.client[WS_METHODS.gitRunStackedAction](input))),
   status: (url: string, token: string, input: C.VcsStatusInput & { localOnly?: boolean }) =>
     withConnection(url, token, session => session.client[WS_METHODS.vcsRefreshStatus](input)),
   refs: (url: string, token: string, input: C.VcsListRefsInput) =>

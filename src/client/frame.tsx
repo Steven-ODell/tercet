@@ -1,3 +1,5 @@
+import { PullRequestPanel } from "./pull-requests.tsx";
+import { createPullRequestWorkflow } from "./pull-requests.ts";
 import { BranchPanel, createBranchWorkflow, type BranchTarget } from "./git-workflows.tsx";
 import { theme } from "./theme";
 import { LaunchersPanel } from "./launchers";
@@ -39,6 +41,7 @@ import { onMediaNotice } from "./media";
 type Pane = "sidebar" | "transcript" | "composer" | "right";
 type RightPanel = "files" | "diff" | "launchers" | "terminal";
 type Overlay =
+  | "pullRequests"
   | "branches"
   | "workspace"
   | "model"
@@ -273,6 +276,7 @@ export function AppFrame({
     running: busyWorkspace(cwd),
   } : undefined;
   const branchWorkflow = useMemo(() => createBranchWorkflow(client, () => branchTarget.current, (path) => busyWorkspaceRef.current(path)), [client]);
+  const pullRequestWorkflow = useMemo(() => createPullRequestWorkflow(client, () => branchTarget.current), [client]);
   const runShell = () =>
     Promise.resolve().then(() => {
       if (!cwd || !effects?.shell) throw new Error("Unavailable");
@@ -332,6 +336,7 @@ export function AppFrame({
     if (
       command === "help" ||
       command === "branches" ||
+      command === "pullRequests" ||
       command === "context" ||
       command === "model" ||
       command === "effort" ||
@@ -424,6 +429,8 @@ export function AppFrame({
         ? undefined
         : found;
     if (key.defaultPrevented) return;
+    // PR drafts and nested Back own Esc and review chords while this overlay is open.
+    if (overlay === "pullRequests" && command !== "pullRequests" && command !== "quit") return;
     if (
       focus === "composer" && key.name === "escape" && !effects?.toggleDictation &&
       ["recording", "transcribing"].includes(dictation.getSnapshot())
@@ -869,6 +876,7 @@ export function AppFrame({
             height={height}
           />
         )}
+        {overlay === "pullRequests" && <PullRequestPanel workflow={pullRequestWorkflow} target={branchTarget.current} effects={effects} close={() => setOverlay(null)} />}
         {overlay === "branches" && <BranchPanel workflow={branchWorkflow} target={branchTarget.current} close={() => setOverlay(null)} />}
         {overlay === "workspace" && (
           <NewThreadPicker
