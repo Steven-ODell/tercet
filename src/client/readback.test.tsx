@@ -4,6 +4,26 @@ import { testRender } from "@opentui/react/test-utils";
 import { TranscriptViewport } from "./transcript-viewport";
 import { MarkdownCache, measureMarkdown, blockActions } from "./markdown";
 
+test("Read shortcut preserves an existing custom R target", async () => {
+  for (const custom of [false, true]) {
+    const calls: string[] = [];
+    const effects = {
+      copy() {},
+      targets: custom ? [{ name: "remote", key: "R" }] : [],
+      copyTo: async (name: string) => { calls.push(name); },
+      readback: async () => { calls.push("read"); },
+    };
+    const view = await testRender(<TranscriptViewport items={[{ id: "a", kind: "assistant", text: "Hello world" }]} width={60} height={12} effects={effects} />, { width: 60, height: 12 });
+    try {
+      await view.renderOnce();
+      await act(async () => { view.mockInput.pressKey("v"); });
+      await act(async () => { view.mockInput.pressKey("R"); });
+      await view.flush();
+      expect(calls).toEqual([custom ? "remote" : "read"]);
+    } finally { await act(async () => view.renderer.destroy()); }
+  }
+});
+
 test("Read appears below assistant text, stays out of code blocks, and survives streamed cache updates", () => {
   const item = {id: "a", kind: "assistant", text: "Hello"};
   const cache = new MarkdownCache();

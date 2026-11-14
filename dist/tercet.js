@@ -159288,7 +159288,7 @@ function TranscriptViewport({
         return;
     }
     const ch = key5.ctrl ? `C-${key5.name}` : /^[\x21-\x7e]$/.test(key5.sequence) ? key5.sequence : key5.name;
-    if (ch === "R" && effects?.readback) {
+    if (ch === "R" && effects?.readback && !Object.hasOwn(targetActions, ch)) {
       const row = v.cursor ? rows[posOf(v.cursor).row] : rows.slice(start, start + viewport).findLast((row2) => !!row2.target);
       const item = items.find((item2) => String(item2.id) === (row ? rowMessage(row) : ""));
       if (item?.kind === "assistant")
