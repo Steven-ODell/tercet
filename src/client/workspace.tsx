@@ -10,6 +10,28 @@ export interface WorkspaceChoice {
   branch: string | null;
   worktreePath: string | null;
 }
+/** Thread bindings are historical hints, not proof that a worktree still exists. */
+export async function verifiedWorkspaceChoices(
+  root: string,
+  refs: readonly VcsRef[],
+  known: readonly WorkspaceChoice[],
+  status: (cwd: string) => Promise<{ isRepo: boolean; refName: string | null }>,
+): Promise<WorkspaceChoice[]> {
+  const live = workspaceChoices(root, refs);
+  const paths = new Set(live.map((row) => row.worktreePath ?? root));
+  const candidates = known.filter((row) => {
+    if (!row.worktreePath || paths.has(row.worktreePath)) return false;
+    paths.add(row.worktreePath);
+    return true;
+  });
+  const checked = await Promise.all(candidates.map(async (row) => {
+    try {
+      const value = await status(row.worktreePath!);
+      return value.isRepo ? { branch: value.refName, worktreePath: row.worktreePath } : undefined;
+    } catch { return undefined; }
+  }));
+  return workspaceChoices(root, refs, checked.filter((row): row is WorkspaceChoice => row !== undefined));
+}
 export function workspaceChoices(root: string, refs: readonly VcsRef[], known: readonly WorkspaceChoice[] = []): WorkspaceChoice[] {
   const current = refs.find((ref) => ref.worktreePath === root) ?? refs.find((ref) => ref.current && !ref.worktreePath);
   const choices = new Map<string, WorkspaceChoice>();
@@ -179,9 +201,11 @@ export function WorkspacePicker({
     }
     void client
       .workspaceRefs(root)
-      .then((refs) => {
+      .then(async (refs) => {
+        const choices = await verifiedWorkspaceChoices(root, refs,
+          client.registry.get(client.snapshot)?.threads.filter((t) => t.projectId === project?.id) ?? [],
+          (cwd) => client.git("status", { cwd, localOnly: true }));
         if (!stale) {
-          const choices = workspaceChoices(root, refs, client.registry.get(client.snapshot)?.threads.filter((t) => t.projectId === project?.id) ?? []);
           setRows(choices);
           setCursor(0);
           if (chooseSoleRow && choices.length === 1) void create(choices[0]!);

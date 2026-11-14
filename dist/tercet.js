@@ -148250,6 +148250,25 @@ var import_react29 = __toESM(require_react(), 1);
 
 // src/client/workspace.tsx
 var import_react27 = __toESM(require_react(), 1);
+async function verifiedWorkspaceChoices(root, refs, known, status2) {
+  const live2 = workspaceChoices(root, refs);
+  const paths = new Set(live2.map((row) => row.worktreePath ?? root));
+  const candidates = known.filter((row) => {
+    if (!row.worktreePath || paths.has(row.worktreePath))
+      return false;
+    paths.add(row.worktreePath);
+    return true;
+  });
+  const checked = await Promise.all(candidates.map(async (row) => {
+    try {
+      const value4 = await status2(row.worktreePath);
+      return value4.isRepo ? { branch: value4.refName, worktreePath: row.worktreePath } : undefined;
+    } catch {
+      return;
+    }
+  }));
+  return workspaceChoices(root, refs, checked.filter((row) => row !== undefined));
+}
 function workspaceChoices(root, refs, known = []) {
   const current2 = refs.find((ref) => ref.worktreePath === root) ?? refs.find((ref) => ref.current && !ref.worktreePath);
   const choices = new Map;
@@ -148402,9 +148421,9 @@ function WorkspacePicker({
       setLoading(false);
       return;
     }
-    client.workspaceRefs(root).then((refs) => {
+    client.workspaceRefs(root).then(async (refs) => {
+      const choices = await verifiedWorkspaceChoices(root, refs, client.registry.get(client.snapshot)?.threads.filter((t) => t.projectId === project2?.id) ?? [], (cwd) => client.git("status", { cwd, localOnly: true }));
       if (!stale) {
-        const choices = workspaceChoices(root, refs, client.registry.get(client.snapshot)?.threads.filter((t) => t.projectId === project2?.id) ?? []);
         setRows(choices);
         setCursor(0);
         if (chooseSoleRow && choices.length === 1)
@@ -148541,7 +148560,8 @@ function createBranchWorkflow(client, current2, busyWorkspace = () => false) {
         throw new GitWorkflowError("failed", "Branch pagination did not advance");
       cursor = page.nextCursor ?? undefined;
     } while (cursor !== undefined);
-    return { status: status2, refs };
+    const workspaces = await verifiedWorkspaceChoices(target2.projectCwd, refs, target2.knownWorkspaces ?? [], (cwd2) => client.git("status", { cwd: cwd2, localOnly: true }, signal));
+    return { status: status2, refs, workspaces };
   };
   async function bind2(target2, choice) {
     if (target2.threadId && choice.worktreePath !== target2.worktreePath && client.getThread) {
@@ -148607,7 +148627,7 @@ function createBranchWorkflow(client, current2, busyWorkspace = () => false) {
             const result3 = await client.git("createWorktree", { cwd: workspaceCwd(target2), refName: before.status.refName ?? "HEAD", newRefName: newBranch, path: null });
             selected = { branch: result3.worktree.refName, worktreePath: result3.worktree.path };
           } else {
-            const choices = workspaceChoices(target2.projectCwd, before.refs, target2.knownWorkspaces);
+            const choices = before.workspaces;
             if (!choices.some((row) => row.worktreePath === choice.worktreePath && row.branch === choice.branch))
               throw new GitWorkflowError("busy", "Workspace list changed. Refresh before selecting.");
             const status2 = await client.git("status", { cwd: choice.worktreePath ?? target2.projectCwd, localOnly: true });
@@ -148688,7 +148708,7 @@ function BranchPanel({ workflow, target: target2, close: close2 }) {
     return workflow.cancel;
   }, [workflow, key5]);
   const data = state2.status === "ready" && state2.target === key5 ? state2.value : undefined;
-  const rows = data && target2 ? workspaceChoices(target2.projectCwd, data.refs, target2.knownWorkspaces) : [];
+  const rows = data && target2 ? data.workspaces ?? workspaceChoices(target2.projectCwd, data.refs) : [];
   const choose = (index3) => {
     if (worktrees) {
       if (target2 && rows[index3])

@@ -131,7 +131,9 @@ In Branches (Alt+g), `w` or Branches / Worktrees toggles the workspace list. Sel
 j/k, arrows, Enter or mouse; `n` / Create worktree asks for a new branch name. The server
 chooses its managed directory (`path:null`). Creation preserves source edits; they are
 not copied into the new worktree. No worktree removal, force checkout or automatic retry.
-Refs are paginated; known thread bindings supplement and deduplicate their worktree paths.
+Refs are paginated; known thread bindings supplement and deduplicate their worktree paths
+only after server status confirms those directories still contain repositories. Deleted
+workspaces are omitted, and surviving bindings use their current branch.
 Root branch detection uses its checked-out ref, even when reading from another worktree.
 The new-thread workspace picker includes those same known bindings.
 
