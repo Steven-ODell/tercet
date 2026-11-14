@@ -2,13 +2,11 @@ tercet · live · threads=1 · Supervised                                   Cont
 › opencode/flint-40b-free · effort high
 ↱ branch unknown · /tmp/tercet-sandbox.XXXXXX/work/demo-app
 ╭─≡ Threads──────────────────╮╭─¶ Transcript──────────────────────────────╮╭─● ▤ Files─────────────────────────────────╮
-│[h] All threads             ││user                                       ││[b Tree][/ Find][s Search][p Preview on]   │
-│                            ││Reply exactly acceptance-stream-ok. Do not ││[Alt+c Close]                              │
-│  tercet acceptance sandbox ││use tools or change files.                 ││/tmp/tercet-sandbox.XXXXXX/work/demo-app   │
-│  › ? waiting · ■ demo-… now││                                           ││› ▸ ▸ src                                  │
-│  ▸ Settled (0)             ││───────────────────────────────────────────││    • README.md                            │
-│                            ││[+] Thought · 1 work items                 ││                                           │
-│                            ││assistant                                  ││                                           │
+│[h] All threads             ││use tools or change files.                 ││[b Tree][/ Find][s Search][p Preview on]   │
+│                            ││                                           ││[Alt+c Close]                              │
+│  tercet acceptance sandbox ││───────────────────────────────────────────││/tmp/tercet-sandbox.XXXXXX/work/demo-app   │
+│  › ? waiting · ■ demo-… now││[+] Thought · 1 work items                 ││› ▸ ▸ src                                  │
+│  ▸ Settled (0)             ││assistant                                  ││    • README.md                            │
 │                            ││acceptance-stream-ok                       ││                                           │
 │                            ││[+] checkpoint · completed · checkpoint    ││                                           │
 │                            ││[+] user input request · undefined · user  ││                                           │
@@ -21,8 +19,10 @@ tercet · live · threads=1 · Supervised                                   Cont
 │                            │╭─» Composer────────────────────────────────╮│                                           │
 │                            ││┌─────────────────────────────────────────┐││                                           │
 │                            │││Question 1/1: Acceptance fixture: choose │││                                           │
-│                            │││Purple                                   │││── src ────────────────────────────────────│
-│                            │││Answer sent; waiting for server update.  │││Folder: Enter or l opens it                │
+│                            │││Purple                                   │││                                           │
+│                            │││Answer sent; waiting for server update.  │││                                           │
+│                            │││                                         │││── src ────────────────────────────────────│
+│                            │││                                         │││Folder: Enter or l opens it                │
 │                            │││                                         │││                                           │
 │                            │││                                         │││                                           │
 │                            │││                                         │││                                           │

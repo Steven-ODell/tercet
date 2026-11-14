@@ -11,8 +11,6 @@ tercet · live · threads=1 · Supervised                                   Cont
 │                            ││acceptance-stream-ok                                                                    │
 │                            ││[+] checkpoint · completed · checkpoint                                                 │
 │                            ││[+] user input request · undefined · user input request                                 │
-│                            ││                                                                                        │
-│                            ││                                                                                        │
 │                            ││[copy]                                                                                  │
 │                            ││✓ yank                                                                                  │
 │                            ││Following tail · {/} work · Enter expand                                                │
@@ -22,6 +20,8 @@ tercet · live · threads=1 · Supervised                                   Cont
 │                            ││┌──────────────────────────────────────────────────────────────────────────────────────┐│
 │                            │││Question 1/1: Acceptance fixture: choose Purple                                       ││
 │                            │││Answer sent; waiting for server update.                                               ││
+│                            │││                                                                                      ││
+│                            │││                                                                                      ││
 │                            │││                                                                                      ││
 │                            │││                                                                                      ││
 │                            │││                                                                                      ││

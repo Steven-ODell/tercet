@@ -2,13 +2,11 @@ tercet · live · threads=1 · Supervised                                   Cont
 › opencode/flint-40b-free · effort high
 ↱ branch unknown · /tmp/tercet-sandbox.XXXXXX/work/demo-app
 ╭─≡ Threads──────────────────╮╭─¶ Transcript─────────────────────╮╭─● ± Diff───────────────────────────────────────────╮
-│[h] All threads             ││acceptance-stream-ok. Do not use  ││[a All][t Turn][Alt+c Close][r Retry]               │
-│                            ││tools or change files.            ││Full thread · whitespace ignored                    │
-│  tercet acceptance sandbox ││                                  ││1 files +1 −1                                       │
-│  › ? waiting · ■ demo-… now││──────────────────────────────────││› • acceptance-fixture.ts +1 −1                     │
-│  ▸ Settled (0)             ││[+] Thought · 1 work items        ││                                                    │
-│                            ││assistant                         ││                                                    │
-│                            ││acceptance-stream-ok              ││                                                    │
+│[h] All threads             ││                                  ││[a All][t Turn][Alt+c Close][r Retry]               │
+│                            ││──────────────────────────────────││Full thread · whitespace ignored                    │
+│  tercet acceptance sandbox ││[+] Thought · 1 work items        ││1 files +1 −1                                       │
+│  › ? waiting · ■ demo-… now││assistant                         ││› • acceptance-fixture.ts +1 −1                     │
+│  ▸ Settled (0)             ││acceptance-stream-ok              ││                                                    │
 │                            ││[+] checkpoint · completed ·      ││                                                    │
 │                            ││checkpoint                        ││                                                    │
 │                            ││[+] user input request · undefined││                                                    │
@@ -24,6 +22,8 @@ tercet · live · threads=1 · Supervised                                   Cont
 │                            │││fixture: choose Purple          │││                                                    │
 │                            │││Answer sent; waiting for server │││                                                    │
 │                            │││update.                         │││                                                    │
+│                            │││                                │││                                                    │
+│                            │││                                │││                                                    │
 │                            │││                                │││                                                    │
 │                            │││                                │││                                                    │
 │                            │││                                │││                                                    │

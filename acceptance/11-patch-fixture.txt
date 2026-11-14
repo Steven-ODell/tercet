@@ -2,19 +2,17 @@ tercet · live · threads=1 · Supervised                                   Cont
 › opencode/flint-40b-free · effort high
 ↱ branch unknown · /tmp/tercet-sandbox.XXXXXX/work/demo-app
 ╭─≡ Threads──────────────────╮╭─¶ Transcript─────────────────────╮╭─● ± Diff───────────────────────────────────────────╮
-│[h] All threads             ││acceptance-stream-ok. Do not use  ││[a All][t Turn][Esc Back][r Retry]                  │
-│                            ││tools or change files.            ││Full thread · whitespace ignored                    │
-│  tercet acceptance sandbox ││                                  ││1 files +1 −1                                       │
-│  › ? waiting · ■ demo-… now││──────────────────────────────────││• acceptance-fixture.ts                             │
-│  ▸ Settled (0)             ││[+] Thought · 1 work items        ││diff --git a/acceptance-fixture.ts b/acceptance-    │
-│                            ││assistant                         ││fixture.ts                                          │
-│                            ││acceptance-stream-ok              ││--- a/acceptance-fixture.ts                         │
-│                            ││[+] checkpoint · completed ·      ││+++ b/acceptance-fixture.ts                         │
-│                            ││checkpoint                        ││@@ -1 +1 @@                                         │
-│                            ││[+] user input request · undefined││-old fixture                                        │
-│                            ││ · user input request             ││+purple fixture                                     │
-│                            ││[copy]                            ││                                                    │
-│                            ││✓ yank                            ││                                                    │
+│[h] All threads             ││                                  ││[a All][t Turn][Esc Back][r Retry]                  │
+│                            ││──────────────────────────────────││Full thread · whitespace ignored                    │
+│  tercet acceptance sandbox ││[+] Thought · 1 work items        ││1 files +1 −1                                       │
+│  › ? waiting · ■ demo-… now││assistant                         ││• acceptance-fixture.ts                             │
+│  ▸ Settled (0)             ││acceptance-stream-ok              ││diff --git a/acceptance-fixture.ts b/acceptance-    │
+│                            ││[+] checkpoint · completed ·      ││fixture.ts                                          │
+│                            ││checkpoint                        ││--- a/acceptance-fixture.ts                         │
+│                            ││[+] user input request · undefined││+++ b/acceptance-fixture.ts                         │
+│                            ││ · user input request             ││@@ -1 +1 @@                                         │
+│                            ││[copy]                            ││-old fixture                                        │
+│                            ││✓ yank                            ││+purple fixture                                     │
 │                            ││Following tail · {/} work · Enter ││                                                    │
 │                            ││                                  ││                                                    │
 │                            │╰──────────────────────────────────╯│                                                    │
@@ -24,6 +22,8 @@ tercet · live · threads=1 · Supervised                                   Cont
 │                            │││fixture: choose Purple          │││                                                    │
 │                            │││Answer sent; waiting for server │││                                                    │
 │                            │││update.                         │││                                                    │
+│                            │││                                │││                                                    │
+│                            │││                                │││                                                    │
 │                            │││                                │││                                                    │
 │                            │││                                │││                                                    │
 │                            │││                                │││                                                    │
