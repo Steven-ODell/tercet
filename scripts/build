@@ -41,10 +41,18 @@ if (!result.success) {
 }
 const built = join(outdir, "tercet.js");
 if (check) {
-  const same = existsSync(outfile) && readFileSync(built).equals(readFileSync(outfile));
+  const generated = readFileSync(built);
+  const committed = existsSync(outfile) ? readFileSync(outfile) : undefined;
+  const same = committed?.equals(generated);
   rmSync(outdir, { recursive: true, force: true });
   if (!same) {
     console.error("build: dist/tercet.js is stale; run `bun run build` and commit it");
+    if (committed) {
+      const expected = committed.toString().split("\n");
+      const actual = generated.toString().split("\n");
+      const line = actual.findIndex((value, i) => value !== expected[i]);
+      console.error(`build: first difference at line ${line + 1}: committed ${JSON.stringify(expected[line]?.slice(0, 300))}, generated ${JSON.stringify(actual[line]?.slice(0, 300))}`);
+    }
     process.exit(1);
   }
   console.log("build: dist/tercet.js is up to date");
