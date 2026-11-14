@@ -390,7 +390,7 @@ export function TranscriptViewport({
       : /^[\x21-\x7e]$/.test(key.sequence)
         ? key.sequence
         : key.name;
-    if (ch === "R" && effects?.readback) {
+    if (ch === "R" && effects?.readback && !Object.hasOwn(targetActions, ch)) {
       const row = v.cursor ? rows[posOf(v.cursor)!.row] : rows.slice(start, start + viewport).findLast((row) => !!row.target);
       const item = items.find((item) => String(item.id) === (row ? rowMessage(row) : ""));
       if (item?.kind === "assistant") read(item.text, String(item.id));
