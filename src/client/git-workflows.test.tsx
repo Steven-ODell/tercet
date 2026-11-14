@@ -3,7 +3,7 @@ import { act } from "react";
 import { testRender } from "@opentui/react/test-utils";
 import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { BranchPanel, createBranchWorkflow, type BranchTarget, type BranchData } from "./git-workflows.tsx";
-import { workspaceChoices } from "./workspace";
+import { workspaceChoices, verifiedWorkspaceChoices } from "./workspace";
 import type { Client } from "./runtime";
 
 const target: BranchTarget = { projectId: ProjectId.make("p"), threadId: ThreadId.make("t"), projectCwd: "C:\\project with spaces", worktreePath: null, branch: "main", running: false };
@@ -140,6 +140,25 @@ test("workspaces deduplicate paths and find root branch even when read from a wo
   ], [{ branch: "topic", worktreePath: "/tree" }, { branch: null, worktreePath: "/detached" }])).toEqual([
     { branch: "main", worktreePath: null }, { branch: "topic", worktreePath: "/tree" }, { branch: null, worktreePath: "/detached" },
   ]);
+});
+
+test("workspace choices exclude deleted thread bindings but retain live detached workspaces", async () => {
+  const checked: string[] = [];
+  const choices = await verifiedWorkspaceChoices("/root", [
+    { name: "main", current: true, isDefault: true, worktreePath: "/root" },
+  ], [
+    { branch: "feat/kokoro-readback", worktreePath: "/deleted" },
+    { branch: "old", worktreePath: "/not-repo" },
+    { branch: "old", worktreePath: "/detached" },
+    { branch: "old", worktreePath: "/detached" },
+  ], async (cwd) => {
+    checked.push(cwd);
+    if (cwd === "/deleted") throw new Error("Directory removed");
+    return { isRepo: cwd !== "/not-repo", refName: null };
+  });
+  expect(checked).toEqual(["/deleted", "/not-repo", "/detached"]);
+  expect(choices).toEqual([{ branch: "main", worktreePath: null }, { branch: null, worktreePath: "/detached" }]);
+  expect(await verifiedWorkspaceChoices("/root", [], [{ branch: "topic", worktreePath: "/deleted" }], async () => { throw new Error("removed"); })).toEqual([{ branch: null, worktreePath: null }]);
 });
 
 test("worktree selection only binds verified branch/path, and source/destination runs refuse writes", async () => {

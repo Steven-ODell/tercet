@@ -2,7 +2,7 @@ import { CommandId, type VcsRef } from "@t3tools/contracts";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useKeyboard } from "@opentui/react";
 import type { Client } from "./runtime";
-import { workspaceChoices, type WorkspaceChoice } from "./workspace";
+import { workspaceChoices, verifiedWorkspaceChoices, type WorkspaceChoice } from "./workspace";
 import { theme } from "./theme";
 import { createWorkflowResource, GitWorkflowError, workspaceCwd, workspaceKey, type GitWorkspace, type GitOutput, type WorkflowState } from "./git-workflows.ts";
 
@@ -11,7 +11,7 @@ export interface BranchTarget extends GitWorkspace {
   running: boolean;
   knownWorkspaces?: readonly WorkspaceChoice[];
 }
-export interface BranchData { status: GitOutput<"status">; refs: readonly VcsRef[] }
+export interface BranchData { status: GitOutput<"status">; refs: readonly VcsRef[]; workspaces?: WorkspaceChoice[] }
 
 /** Owned by the frame, so closing/reopening a view cannot unlock an in-flight write. */
 export function createBranchWorkflow(client: Pick<Client, "git" | "dispatch"> & Partial<Pick<Client, "getThread">>, current: () => BranchTarget | undefined, busyWorkspace: (cwd: string) => boolean = () => false) {
@@ -33,7 +33,9 @@ export function createBranchWorkflow(client: Pick<Client, "git" | "dispatch"> & 
       if (page.nextCursor !== null && page.nextCursor === cursor) throw new GitWorkflowError("failed", "Branch pagination did not advance");
       cursor = page.nextCursor ?? undefined;
     } while (cursor !== undefined);
-    return { status, refs };
+    const workspaces = await verifiedWorkspaceChoices(target.projectCwd, refs, target.knownWorkspaces ?? [],
+      (cwd) => client.git("status", { cwd, localOnly: true }, signal));
+    return { status, refs, workspaces };
   };
   async function bind(target: BranchTarget, choice: WorkspaceChoice) {
     if (target.threadId && choice.worktreePath !== target.worktreePath && client.getThread) {
@@ -80,7 +82,7 @@ export function createBranchWorkflow(client: Pick<Client, "git" | "dispatch"> & 
             const result = await client.git("createWorktree", { cwd: workspaceCwd(target), refName: before.status.refName ?? "HEAD", newRefName: newBranch, path: null });
             selected = { branch: result.worktree.refName, worktreePath: result.worktree.path };
           } else {
-            const choices = workspaceChoices(target.projectCwd, before.refs, target.knownWorkspaces);
+            const choices = before.workspaces!;
             if (!choices.some((row) => row.worktreePath === choice.worktreePath && row.branch === choice.branch))
               throw new GitWorkflowError("busy", "Workspace list changed. Refresh before selecting.");
             const status = await client.git("status", { cwd: choice.worktreePath ?? target.projectCwd, localOnly: true });
@@ -147,7 +149,7 @@ export function BranchPanel({ workflow, target, close }: { workflow: BranchWorkf
     return workflow.cancel;
   }, [workflow, key]);
   const data = state.status === "ready" && state.target === key ? state.value : undefined;
-  const rows = data && target ? workspaceChoices(target.projectCwd, data.refs, target.knownWorkspaces) : [];
+  const rows = data && target ? data.workspaces ?? workspaceChoices(target.projectCwd, data.refs) : [];
   const choose = (index: number) => {
     if (worktrees) { if (target && rows[index]) void workflow.workspace(target, rows[index]!); return; }
     if (target && data?.refs[index]) void workflow.change(target, data.refs[index]!.name);
