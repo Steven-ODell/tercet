@@ -1,3 +1,5 @@
+import { GitWorkflowError, gitWorkflowError } from "./git-workflows";
+import type { GitBoundary, GitRequest } from "./git-workflows";
 import type {
   OrchestrationV2ThreadStreamItem,
   OrchestrationV2ThreadHistoryPage,
@@ -25,6 +27,7 @@ import * as ManagedRuntime from "effect/ManagedRuntime";
 import { Atom, AtomRegistry } from "effect/reactivity";
 
 export interface Boundary {
+  git?: GitBoundary;
   terminal?: (
     token: string,
     input: import("@t3tools/contracts").TerminalAttachInput,
@@ -312,7 +315,20 @@ export function createClient(
   );
   const loop = Effect.forever(cycle.pipe(Effect.andThen(() => boundary.pause())));
   let fiber: ReturnType<typeof runtime.runFork> | undefined;
+  const git: GitRequest = async (operation, input, signal) => {
+    if (signal?.aborted) throw new GitWorkflowError("cancelled", "Request cancelled");
+    if (!token) throw new GitWorkflowError("offline", "Offline: connect to the server first");
+    if (!boundary.git) throw new GitWorkflowError("unsupported", "Git/PR operations unavailable on this connection");
+    try {
+    const result = await runtime.runPromise(boundary.git(token, operation, input).pipe(
+      Effect.match({ onFailure: error => ({ ok: false as const, error }), onSuccess: value => ({ ok: true as const, value }) }),
+    ), { signal });
+    if (!result.ok) throw gitWorkflowError(result.error);
+    return result.value;
+    } catch (error) { throw gitWorkflowError(error); }
+  };
   return {
+    git,
     workspaceRefs(cwd: string) {
       if (!token || !boundary.workspaceRefs) return Promise.reject(new Error("Offline"));
       return runtime.runPromise(boundary.workspaceRefs(token, cwd));

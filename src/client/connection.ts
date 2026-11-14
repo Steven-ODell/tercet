@@ -1,3 +1,4 @@
+import type * as C from "@t3tools/contracts";
 import { threadWebUrl } from "../actions";
 import {
   ORCHESTRATION_V2_WS_METHODS as RPC,
@@ -252,6 +253,42 @@ export const diffMethods = {
     token: string,
     input: import("@t3tools/contracts").OrchestrationGetTurnDiffInput,
   ) => withConnection(url, token, (session) => session.client[RPC.getTurnDiff](input)),
+};
+
+/** Pinned stock RPCs. Authentication and response decoding stay in RpcSessionFactory. */
+export const gitMethods = {
+  status: (url: string, token: string, input: C.VcsStatusInput & { localOnly?: boolean }) =>
+    withConnection(url, token, session => session.client[WS_METHODS.vcsRefreshStatus](input)),
+  refs: (url: string, token: string, input: C.VcsListRefsInput) =>
+    withConnection(url, token, session => session.client[WS_METHODS.vcsListRefs](input)),
+  createRef: (url: string, token: string, input: C.VcsCreateRefInput) =>
+    withConnection(url, token, session => session.client[WS_METHODS.vcsCreateRef](input)),
+  switchRef: (url: string, token: string, input: C.VcsSwitchRefInput) =>
+    withConnection(url, token, session => session.client[WS_METHODS.vcsSwitchRef](input)),
+  createWorktree: (url: string, token: string, input: Omit<C.VcsCreateWorktreeInput, "path"> & { path: null }) =>
+    withConnection(url, token, session => session.client[WS_METHODS.vcsCreateWorktree](input)),
+  resolvePR: (url: string, token: string, input: C.GitPullRequestRefInput) =>
+    withConnection(url, token, session => session.client[WS_METHODS.gitResolvePullRequest](input)),
+  preparePR: (url: string, token: string, input: C.GitPreparePullRequestThreadInput) =>
+    withConnection(url, token, session => session.client[WS_METHODS.gitPreparePullRequestThread](input)),
+  listPRs: (url: string, token: string, input: C.PullRequestListInput) =>
+    withConnection(url, token, session => session.client[WS_METHODS.pullRequestsList](input)),
+  detail: (url: string, token: string, input: C.PullRequestRef) =>
+    withConnection(url, token, session => session.client[WS_METHODS.pullRequestsDetail](input)),
+  checks: (url: string, token: string, input: C.PullRequestRef) =>
+    withConnection(url, token, session => session.client[WS_METHODS.pullRequestsChecks](input)),
+  activity: (url: string, token: string, input: C.PullRequestRef) =>
+    withConnection(url, token, session => session.client[WS_METHODS.pullRequestsActivity](input)),
+  threadComments: (url: string, token: string, input: C.PullRequestThreadCommentsInput) =>
+    withConnection(url, token, session => session.client[WS_METHODS.pullRequestsThreadComments](input)),
+  diffContents: (url: string, token: string, input: C.PullRequestDiffFileContentsInput) =>
+    withConnection(url, token, session => session.client[WS_METHODS.pullRequestsDiffFileContents](input)),
+  diffPreview: (url: string, token: string, input: C.ReviewDiffPreviewInput) =>
+    withConnection(url, token, session => session.client[WS_METHODS.reviewGetDiffPreview](input)),
+  comment: (url: string, token: string, input: C.PullRequestCommentInput) =>
+    withConnection(url, token, session => session.client[WS_METHODS.pullRequestsComment](input)),
+  submitReview: (url: string, token: string, input: C.PullRequestSubmitReviewInput) =>
+    withConnection(url, token, session => session.client[WS_METHODS.pullRequestsSubmitReview](input)),
 };
 
 export function workspaceRefs(url: string, token: string, cwd: string) {
