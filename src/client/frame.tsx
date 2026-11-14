@@ -224,10 +224,8 @@ export function AppFrame({
   };
   const [menuTarget, setMenuTarget] = useState<OrchestrationV2ThreadShell>();
   const [actionError, setActionError] = useState("");
-  const dictation = useMemo(
-    () => createDictation(client, effects, setActionError),
-    [client, effects],
-  );
+  // Its messages show beside the composer's mic button, not on this status line.
+  const dictation = useMemo(() => createDictation(client, effects), [client, effects]);
   useEffect(() => () => dictation.dispose(), [dictation]);
   // The media ladder's one-time hint (tmux passthrough off) when the first image falls back.
   useEffect(() => onMediaNotice(setActionError), []);

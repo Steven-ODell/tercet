@@ -184,3 +184,95 @@ test("capture limit automatically stops and transcribes exactly once", async () 
   expect(inserted).toEqual(["at limit"]);
   c.dispose();
 });
+
+test("the limit landing during the stop flush does not cancel the transcription", async () => {
+  let limit: (() => void) | undefined;
+  const response = deferred<string>();
+  let signal: AbortSignal | undefined;
+  const inserted: string[] = [];
+  const c = createDictation(
+    {
+      speechStatus: async () => ({ supported: true, state: "ready" }) as never,
+      transcribe: async (_pcm, _options, abort) => {
+        signal = abort;
+        return response.promise;
+      },
+    },
+    {
+      copy() {},
+      record: async (options) => {
+        limit = options?.onLimit;
+        return { stop: async () => new Uint8Array(4), cancel() {} };
+      },
+    },
+  );
+  c.setFallback((_id, text) => inserted.push(text));
+  await c.toggle(a);
+  const done = c.toggle();
+  expect(c.getSnapshot()).toBe("transcribing");
+  limit?.();
+  await Promise.resolve();
+  expect(signal?.aborted).not.toBe(true);
+  response.resolve("kept");
+  await done;
+  expect(inserted).toEqual(["kept"]);
+  expect(c.getSnapshot()).toBe("idle");
+  c.dispose();
+});
+
+test("a recorder that dies mid-recording turns into an error, not a stuck Recording", async () => {
+  let fail: ((error: Error) => void) | undefined;
+  let cancelled = 0;
+  const c = createDictation(
+    {
+      speechStatus: async () => ({ supported: true, state: "ready" }) as never,
+      transcribe: async () => "",
+    },
+    {
+      copy() {},
+      record: async (options) => {
+        fail = options?.onFailure;
+        return {
+          stop: async () => new Uint8Array(4),
+          cancel() {
+            cancelled++;
+          },
+        };
+      },
+    },
+  );
+  await c.toggle(a);
+  expect(c.getSnapshot()).toBe("recording");
+  fail?.(new Error("pw-record exited with 1: device unplugged"));
+  expect(c.getSnapshot()).toBe("error");
+  expect(c.getMessage()).toBe("pw-record exited with 1: device unplugged");
+  expect(cancelled).toBe(1);
+  // The next press starts a fresh recording.
+  await c.toggle(a);
+  expect(c.getSnapshot()).toBe("recording");
+  c.dispose();
+});
+
+test("a finished session's message clears; a live one stays", async () => {
+  const c = createDictation(
+    {
+      speechStatus: async () => ({ supported: true, state: "ready" }) as never,
+      transcribe: async () => "words",
+    },
+    { copy() {}, record: async () => ({ stop: async () => new Uint8Array(4), cancel() {} }) },
+    undefined,
+    20,
+  );
+  let changes = 0;
+  c.subscribe(() => changes++);
+  await c.toggle(a);
+  await Bun.sleep(40);
+  expect(c.getMessage()).toContain("Mic recording");
+  await c.toggle();
+  expect(c.getMessage()).toBe("Mic transcript added ✓");
+  const before = changes;
+  await Bun.sleep(40);
+  expect(c.getMessage()).toBe("");
+  expect(changes).toBe(before + 1);
+  c.dispose();
+});

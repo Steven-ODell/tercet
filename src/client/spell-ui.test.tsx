@@ -112,6 +112,35 @@ test("Alt+s opens the menu on the next misspelling; a number picks; Esc closes w
   }
 });
 
+test("a left-click in the textarea closes the menu; a left-click on a row still picks", async () => {
+  const { view } = await typed("hello wrold the quick");
+  const rightClickWrold = async () => {
+    const lines = view.captureCharFrame().split("\n");
+    const y = lines.findIndex((line) => line.includes("hello wrold"));
+    await act(async () => view.mockMouse.click(lines[y]!.indexOf("wrold") + 2, y, 2 /* right */));
+    await view.flush();
+    return y;
+  };
+  try {
+    const y = await rightClickWrold();
+    expect(view.captureCharFrame()).toContain("Add to dictionary");
+    const x = view.captureCharFrame().split("\n")[y]!.indexOf("quick");
+    await act(async () => view.mockMouse.click(x, y));
+    await view.flush();
+    expect(view.captureCharFrame()).not.toContain("Add to dictionary");
+    expect(view.captureCharFrame()).toContain("hello wrold the quick");
+    await rightClickWrold();
+    const rows = view.captureCharFrame().split("\n");
+    const row = rows.findIndex((line) => line.includes("Ignore"));
+    await act(async () => view.mockMouse.click(rows[row]!.indexOf("Ignore"), row));
+    await view.flush();
+    expect(view.captureCharFrame()).not.toContain("Add to dictionary");
+    expect(underlined(view.captureSpans())).toEqual([]);
+  } finally {
+    await act(async () => view.renderer.destroy());
+  }
+});
+
 test("Add to dictionary clears the underline and survives a restart; Ignore does too", async () => {
   const dir = await mkdtemp(join(tmpdir(), "tercet-spell-ui."));
   const file = join(dir, "dictionary.txt");

@@ -86,7 +86,14 @@ export function platform(config: Config) {
         pcm: Uint8Array,
         options: Partial<import("@t3tools/contracts").SpeechTranscriptionOptions>,
         signal?: AbortSignal,
-      ) => transcribeSpeech(config.url, token, pcm, { speechLanguage: config.settings.dictation.language, ...options }, signal),
+      ) =>
+        transcribeSpeech(
+          config.url,
+          token,
+          pcm,
+          { speechLanguage: config.settings.dictation.language, ...options },
+          signal,
+        ),
     },
     diffs: {
       full: (token: string, input: Parameters<typeof diffMethods.full>[2]) =>

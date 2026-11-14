@@ -123,7 +123,15 @@ function Editor({
   const [mediaBusy, setMediaBusy] = useState(false);
   const mediaLock = useRef(false);
   const micState = useSyncExternalStore(dictation.subscribe, dictation.getSnapshot);
+  const micMessage = useSyncExternalStore(dictation.subscribe, dictation.getMessage);
   const recording = micState === "recording";
+  const micLabel = recording
+    ? effects?.toggleDictation
+      ? "Stop mic"
+      : "Recording"
+    : micState === "transcribing"
+      ? "Transcribing"
+      : "mic";
   async function media(kind: "paste" | "clipboard" | "mic" | "files") {
     if (kind === "mic") {
       setMediaStatus("");
@@ -302,7 +310,8 @@ function Editor({
       if (spell.openAtCaret()) key.preventDefault();
       return;
     }
-    if (key.name === "escape" && !effects?.toggleDictation && (recording || micState === "transcribing")) {
+    const micBusy = recording || micState === "transcribing";
+    if (key.name === "escape" && !effects?.toggleDictation && micBusy) {
       key.preventDefault();
       dictation.cancel();
       return;
@@ -520,10 +529,10 @@ function Editor({
                 if (event.button === 0) void media("mic");
               }}
             >
-              [{hintFor("dictation")} {recording ? (effects?.toggleDictation ? "Stop mic" : "Recording") : micState === "transcribing" ? "Transcribing" : "mic"}]
+              [{hintFor("dictation")} {micLabel}]
             </text>
           )}
-          <text fg={theme.plain}>{mediaBusy ? " …" : mediaStatus || dictation.getMessage()}</text>
+          <text fg={theme.plain}>{mediaBusy ? " …" : mediaStatus || micMessage}</text>
         </box>
       )}
       <textarea

@@ -29,6 +29,25 @@ test("recorder stop flushes PCM and cancel terminates the child", async () => {
   second.cancel();
   second.cancel();
 });
+test("a recorder that exits after starting reports it through onFailure", async () => {
+  let failure: Error | undefined;
+  const reported = new Promise<void>((done) => {
+    void startRecording(
+      systemHost(),
+      [process.execPath, "-e", 'setTimeout(()=>{console.error("device gone");process.exit(3)},150)'],
+      {
+        startGraceMs: 50,
+        onFailure: (error) => {
+          failure = error;
+          done();
+        },
+      },
+    );
+  });
+  await reported;
+  expect(failure?.message).toContain("exited with 3: device gone");
+});
+
 test("bad recorder arguments fail at startup", async () => {
   await expect(
     startRecording(systemHost(), [process.execPath, "-e", "process.exit(2)"]),

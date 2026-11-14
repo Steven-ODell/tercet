@@ -14,7 +14,12 @@ export async function runKeys(env = process.env, home = homedir()) {
     const effects = hostActions({ settings, host: systemHost(), writeTerminal: () => {} });
     const sheet = cheatSheet(
       keymap(),
-      { shell: !!effects.shell, dictation: hasDictation(effects), attach: !!effects.pickFiles, spell: !!effects.spell },
+      {
+        shell: !!effects.shell,
+        dictation: hasDictation(effects),
+        attach: !!effects.pickFiles,
+        spell: !!effects.spell,
+      },
       targetKeys(effects),
     );
     console.log(cheatSheetText(sheet, true));

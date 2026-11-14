@@ -6,14 +6,19 @@ import { hintFor } from "./keymap";
 
 export type DictationState = "idle" | "recording" | "transcribing" | "error";
 
+/** How long a finished session's message ("Mic transcript added ✓", an error) stays shown. */
+export const MESSAGE_MS = 6000;
+
 /** One session owns its destination even when the selected thread changes. */
 export function createDictation(
   client: Pick<Client, "speechStatus" | "transcribe">,
   effects: Actions | undefined,
   notice: (text: string) => void = () => {},
+  messageMs = MESSAGE_MS,
 ) {
   let state: DictationState = "idle";
   let message = "";
+  let clearTimer: ReturnType<typeof setTimeout> | undefined;
   let generation = 0;
   let capture: Recording | undefined;
   let request: AbortController | undefined;
@@ -23,11 +28,31 @@ export function createDictation(
   let fallback: ((id: ThreadId, text: string) => void) | undefined;
   const editors = new Map<ThreadId, (text: string) => void>();
   const listeners = new Set<() => void>();
+  const emit = () => {
+    for (const listener of listeners) listener();
+  };
   const update = (next: DictationState, text: string) => {
     state = next;
     message = text;
     notice(text);
-    for (const listener of listeners) listener();
+    clearTimeout(clearTimer);
+    clearTimer = undefined;
+    // A live session keeps its message; a finished one clears after a while.
+    if (text && (next === "idle" || next === "error")) {
+      clearTimer = setTimeout(() => {
+        clearTimer = undefined;
+        message = "";
+        emit();
+      }, messageMs);
+      clearTimer.unref?.();
+    }
+    emit();
+  };
+  /** The recorder died while recording: drop the capture and say why. */
+  const failed = (error: Error) => {
+    capture?.cancel();
+    capture = undefined;
+    update("error", error.message);
   };
   function cancel() {
     if (effects?.toggleDictation) return;
@@ -89,10 +114,17 @@ export function createDictation(
         if (generation !== run || disposed) return;
         if (problem) throw new Error(problem);
         let reachedLimit = false;
+        let died: Error | undefined;
+        // Both fire only while this session is recording, never once its stop has begun.
+        const live = () => generation === run && !disposed && state === "recording";
         const recording = await effects.record({
           onLimit: () => {
             reachedLimit = true;
-            if (!pending) void toggle();
+            if (!pending && live()) void toggle();
+          },
+          onFailure: (error) => {
+            died = error;
+            if (!pending && live()) failed(error);
           },
         });
         if (generation !== run || disposed) {
@@ -102,7 +134,8 @@ export function createDictation(
         capture = recording;
         pending = false;
         update("recording", `Mic recording · ${hintFor("dictation")} stop`);
-        if (reachedLimit) void toggle();
+        if (died) failed(died);
+        else if (reachedLimit) void toggle();
       }
     } catch (error) {
       if (generation === run && !disposed) {
@@ -140,6 +173,7 @@ export function createDictation(
     },
     dispose() {
       cancel();
+      clearTimeout(clearTimer);
       disposed = true;
       editors.clear();
       fallback = undefined;

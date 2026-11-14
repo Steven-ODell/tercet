@@ -137,9 +137,12 @@ export function useSpellCheck({
     open: !!menu,
     /** A failed save from the menu, for the composer's error line. */
     notice,
-    /** Right-click on the textarea: moves the caret there, and opens the menu if on a flagged word. */
+    /**
+     * Right-click on the textarea: moves the caret there, and opens the menu if on a flagged word.
+     * Any click on the textarea closes an open menu; picks land on the menu's own rows.
+     */
     onMouseUp(event: MouseEvent) {
-      if (event.button !== 0) setMenu(undefined);
+      setMenu(undefined);
       if (event.button !== 2 || !spell || !editor.current) return;
       const target = editor.current;
       const localX = Math.max(0, event.x - target.x);

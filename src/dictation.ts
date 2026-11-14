@@ -153,6 +153,8 @@ export interface StartOptions {
   /** A recorder that exits within this time failed to start (no device, bad flags). */
   startGraceMs?: number;
   onLimit?: () => void;
+  /** The recorder exited after starting without being asked to (unplugged device, crash). */
+  onFailure?: (error: Error) => void;
 }
 
 const tail = (text: string) => text.trim().split("\n").at(-1)?.slice(0, 200) ?? "";
@@ -237,10 +239,16 @@ export function startRecording(
     };
     child.once("error", (error) => reject(new Error(`${program}: ${error.message}`)));
     child.once("spawn", () => {
-      const timer = setTimeout(() => resolve(recording), startGraceMs);
+      let started = false;
+      const timer = setTimeout(() => {
+        started = true;
+        resolve(recording);
+      }, startGraceMs);
       child.once("close", () => {
         clearTimeout(timer);
-        if (!stopping) reject(failure());
+        if (stopping) return;
+        if (started) options.onFailure?.(failure());
+        else reject(failure());
       });
     });
   });

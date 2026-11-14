@@ -516,7 +516,13 @@ const schema = struct({
   ),
   targets,
   spell: struct({ enabled: bool, dictionary: text }),
-  dictation: struct({ language: expect("a language code (2–16 characters)", (v) => typeof v === "string" && v.length >= 2 && v.length <= 16), recorder: template([]) }),
+  dictation: struct({
+    language: expect(
+      "a language code (2–16 characters)",
+      (v) => typeof v === "string" && v.length >= 2 && v.length <= 16,
+    ),
+    recorder: template([]),
+  }),
 });
 
 /** `~/x` is under home; other relative paths are relative to the settings directory. */

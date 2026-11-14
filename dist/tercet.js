@@ -88978,10 +88978,18 @@ function startRecording(host, args2, options = {}) {
     };
     child.once("error", (error) => reject(new Error(`${program}: ${error.message}`)));
     child.once("spawn", () => {
-      const timer = setTimeout(() => resolve3(recording), startGraceMs);
+      let started = false;
+      const timer = setTimeout(() => {
+        started = true;
+        resolve3(recording);
+      }, startGraceMs);
       child.once("close", () => {
         clearTimeout(timer);
-        if (!stopping)
+        if (stopping)
+          return;
+        if (started)
+          options.onFailure?.(failure());
+        else
           reject(failure());
       });
     });
@@ -90065,7 +90073,10 @@ var schema = struct({
   commands: struct(Object.fromEntries(Object.entries(COMMANDS2).map(([name, vars]) => [name, withHost(vars)]))),
   targets,
   spell: struct({ enabled: bool, dictionary: text2 }),
-  dictation: struct({ language: expect("a language code (2\u201316 characters)", (v) => typeof v === "string" && v.length >= 2 && v.length <= 16), recorder: template([]) })
+  dictation: struct({
+    language: expect("a language code (2\u201316 characters)", (v) => typeof v === "string" && v.length >= 2 && v.length <= 16),
+    recorder: template([])
+  })
 });
 var expandPath = (path, home, dir) => path === "~" ? home : path.startsWith("~/") ? join2(home, path.slice(2)) : resolve3(dir, path);
 function parseSettings(source, path, where) {
@@ -90631,7 +90642,10 @@ function hostActions(deps) {
     const custom = settings.dictation.recorder;
     const recorder = recorderStatus(host, custom ? expand(custom, {}) : undefined);
     if (recorder.ready)
-      actions.record = (input) => startRecording(host, recorder.args, { onLimit: input?.onLimit });
+      actions.record = (input) => startRecording(host, recorder.args, {
+        onLimit: input?.onLimit,
+        onFailure: input?.onFailure
+      });
   }
   return actions;
 }
@@ -143474,7 +143488,8 @@ async function actionsReport(settings2, host, probes, readOnly2) {
   if (settings2.commands.dictation)
     await command2("dictation", "commands.dictation", settings2.commands.dictation);
   else {
-    const recorder = recorderStatus(host, settings2.dictation.recorder ? expand(settings2.dictation.recorder, {}) : undefined);
+    const custom = settings2.dictation.recorder;
+    const recorder = recorderStatus(host, custom ? expand(custom, {}) : undefined);
     add4("dictation", recorder.ready, recorder.ready ? `${recorder.name}; T3 web app \u2192 Settings \u2192 Voice must have a model installed` : recorder.reason);
   }
   await command2("link mapping", "commands.mapUrl", settings2.commands.mapUrl);
@@ -152095,9 +152110,11 @@ function ThreadPalette({
 }
 
 // src/client/dictation.ts
-function createDictation(client, effects, notice = () => {}) {
+var MESSAGE_MS = 6000;
+function createDictation(client, effects, notice = () => {}, messageMs = MESSAGE_MS) {
   let state2 = "idle";
   let message = "";
+  let clearTimer;
   let generation = 0;
   let capture;
   let request2;
@@ -152107,12 +152124,30 @@ function createDictation(client, effects, notice = () => {}) {
   let fallback;
   const editors = new Map;
   const listeners = new Set;
+  const emit = () => {
+    for (const listener of listeners)
+      listener();
+  };
   const update4 = (next2, text5) => {
     state2 = next2;
     message = text5;
     notice(text5);
-    for (const listener of listeners)
-      listener();
+    clearTimeout(clearTimer);
+    clearTimer = undefined;
+    if (text5 && (next2 === "idle" || next2 === "error")) {
+      clearTimer = setTimeout(() => {
+        clearTimer = undefined;
+        message = "";
+        emit();
+      }, messageMs);
+      clearTimer.unref?.();
+    }
+    emit();
+  };
+  const failed = (error2) => {
+    capture?.cancel();
+    capture = undefined;
+    update4("error", error2.message);
   };
   function cancel() {
     if (effects?.toggleDictation)
@@ -152182,11 +152217,18 @@ function createDictation(client, effects, notice = () => {}) {
         if (problem)
           throw new Error(problem);
         let reachedLimit = false;
+        let died;
+        const live2 = () => generation === run3 && !disposed && state2 === "recording";
         const recording = await effects.record({
           onLimit: () => {
             reachedLimit = true;
-            if (!pending)
+            if (!pending && live2())
               toggle();
+          },
+          onFailure: (error2) => {
+            died = error2;
+            if (!pending && live2())
+              failed(error2);
           }
         });
         if (generation !== run3 || disposed) {
@@ -152196,7 +152238,9 @@ function createDictation(client, effects, notice = () => {}) {
         capture = recording;
         pending = false;
         update4("recording", `Mic recording \xB7 ${hintFor("dictation")} stop`);
-        if (reachedLimit)
+        if (died)
+          failed(died);
+        else if (reachedLimit)
           toggle();
       }
     } catch (error2) {
@@ -152238,6 +152282,7 @@ function createDictation(client, effects, notice = () => {}) {
     },
     dispose() {
       cancel();
+      clearTimeout(clearTimer);
       disposed = true;
       editors.clear();
       fallback = undefined;
@@ -152338,8 +152383,7 @@ function useSpellCheck({
     open: !!menu,
     notice,
     onMouseUp(event) {
-      if (event.button !== 0)
-        setMenu(undefined);
+      setMenu(undefined);
       if (event.button !== 2 || !spell || !editor2.current)
         return;
       const target2 = editor2.current;
@@ -153738,7 +153782,9 @@ function Editor({
   const [mediaBusy, setMediaBusy] = import_react46.useState(false);
   const mediaLock = import_react46.useRef(false);
   const micState = import_react46.useSyncExternalStore(dictation.subscribe, dictation.getSnapshot);
+  const micMessage = import_react46.useSyncExternalStore(dictation.subscribe, dictation.getMessage);
   const recording = micState === "recording";
+  const micLabel = recording ? effects?.toggleDictation ? "Stop mic" : "Recording" : micState === "transcribing" ? "Transcribing" : "mic";
   async function media3(kind) {
     if (kind === "mic") {
       setMediaStatus("");
@@ -153920,7 +153966,8 @@ function Editor({
         key5.preventDefault();
       return;
     }
-    if (key5.name === "escape" && !effects?.toggleDictation && (recording || micState === "transcribing")) {
+    const micBusy = recording || micState === "transcribing";
+    if (key5.name === "escape" && !effects?.toggleDictation && micBusy) {
       key5.preventDefault();
       dictation.cancel();
       return;
@@ -154147,13 +154194,13 @@ function Editor({
               "[",
               hintFor("dictation"),
               " ",
-              recording ? effects?.toggleDictation ? "Stop mic" : "Recording" : micState === "transcribing" ? "Transcribing" : "mic",
+              micLabel,
               "]"
             ]
           }),
           /* @__PURE__ */ import_jsx_runtime.jsx("text", {
             fg: theme.plain,
-            children: mediaBusy ? " \u2026" : mediaStatus || dictation.getMessage()
+            children: mediaBusy ? " \u2026" : mediaStatus || micMessage
           })
         ]
       }),
@@ -158322,7 +158369,7 @@ function AppFrame({
   };
   const [menuTarget, setMenuTarget] = import_react54.useState();
   const [actionError, setActionError] = import_react54.useState("");
-  const dictation = import_react54.useMemo(() => createDictation(client, effects, setActionError), [client, effects]);
+  const dictation = import_react54.useMemo(() => createDictation(client, effects), [client, effects]);
   import_react54.useEffect(() => () => dictation.dispose(), [dictation]);
   import_react54.useEffect(() => onMediaNotice(setActionError), []);
   const [quitArmed, setQuitArmed] = import_react54.useState(false);
@@ -158891,7 +158938,12 @@ async function runKeys(env = process.env, home = homedir3()) {
     const { settings: settings5 } = await loadSettings(settingsDir(env, home), readOptional, home);
     applyLook(settings5);
     const effects = hostActions({ settings: settings5, host: systemHost(), writeTerminal: () => {} });
-    const sheet = cheatSheet(keymap(), { shell: !!effects.shell, dictation: hasDictation(effects), attach: !!effects.pickFiles, spell: !!effects.spell }, targetKeys(effects));
+    const sheet = cheatSheet(keymap(), {
+      shell: !!effects.shell,
+      dictation: hasDictation(effects),
+      attach: !!effects.pickFiles,
+      spell: !!effects.spell
+    }, targetKeys(effects));
     console.log(cheatSheetText(sheet, true));
     console.log(`
 Rebind with the name in the last column, e.g. "keys": { "palette": "Ctrl+k" }.`);

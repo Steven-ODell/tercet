@@ -23,8 +23,11 @@ export interface Actions {
    * its own recording and types its own text, so tercet only learns whether it is recording.
    */
   toggleDictation?(): Promise<{ recording: boolean }>;
-  /** Built-in dictation: starts recording the microphone. Absent when no recorder is usable. */
-  record?(input?: { onLimit?: () => void }): Promise<Recording>;
+  /**
+   * Built-in dictation: starts recording the microphone. Absent when no recorder is usable.
+   * `onLimit` fires at the five-minute cap; `onFailure` when the recorder exits on its own.
+   */
+  record?(input?: { onLimit?: () => void; onFailure?: (error: Error) => void }): Promise<Recording>;
   /** Spell checking for the composer; absent when settings `spell.enabled` is false. */
   spell?: import("./client/spell").SpellChecker;
   editor?(input: { cwd: string; path: string }): Promise<unknown>;

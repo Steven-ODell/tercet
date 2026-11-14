@@ -666,7 +666,11 @@ export function hostActions(deps: HostDeps): Actions {
     const custom = settings.dictation.recorder;
     const recorder = recorderStatus(host, custom ? expand(custom, {}) : undefined);
     if (recorder.ready)
-      actions.record = (input) => startRecording(host, recorder.args, { onLimit: input?.onLimit });
+      actions.record = (input) =>
+        startRecording(host, recorder.args, {
+          onLimit: input?.onLimit,
+          onFailure: input?.onFailure,
+        });
   }
   return actions;
 }
