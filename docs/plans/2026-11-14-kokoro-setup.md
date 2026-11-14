@@ -45,7 +45,7 @@ automatic, a clear not-set-up message.
 
 ## Steps
 
-- [ ] 1. Home resolution, readiness check, `readback.home` setting
+- [x] 1. Home resolution, readiness check, `readback.home` setting
   Files: src/readback.ts (localReadbackCommand, synthesizeLocalReadback, error strings),
   src/readback.test.ts, src/client/settings.ts (readback struct, defaults near line 126,
   merge near line 572), src/client/settings.test.ts.

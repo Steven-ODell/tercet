@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { createReadback, speechChunks, spokenText, synthesizeReadback, playReadback, playReadbackVia } from "./readback";
-import { chmod, mkdtemp, readFile, writeFile, rm, access } from "node:fs/promises";
+import { createReadback, speechChunks, spokenText, synthesizeReadback, playReadback, playReadbackVia, readbackHome, localReadbackCommand, readbackStatus } from "./readback";
+import { chmod, mkdir, mkdtemp, readFile, writeFile, rm, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultSettings, parseSettings } from "./client/settings";
@@ -79,16 +79,63 @@ test("Markdown cleanup preserves code and labels; missing player fails explicitl
   await expect(playReadback(wav, new AbortController().signal, {env: {}, platform: "linux", which: () => null})).rejects.toThrow("needs mpv");
 });
 
-test("local Kokoro defaults match hub model/venv and Windows paths stay intact", async () => {
-  const { localReadbackCommand } = await import("./readback");
+test("the default Kokoro home is tercet's own data directory on each OS", () => {
+  expect(readbackHome({}, "", "linux", "/home/example")).toBe("/home/example/.local/share/tercet/kokoro");
+  expect(readbackHome({ XDG_DATA_HOME: "/data" }, "", "linux", "/home/example")).toBe("/data/tercet/kokoro");
+  expect(readbackHome({ XDG_DATA_HOME: "relative" }, "", "linux", "/home/example")).toBe("/home/example/.local/share/tercet/kokoro");
+  expect(readbackHome({}, "", "darwin", "/Users/example")).toBe("/Users/example/Library/Application Support/tercet/kokoro");
+  expect(readbackHome({ LOCALAPPDATA: String.raw`C:\Users\Jane Doe\AppData\Local` }, "", "win32", "ignored")).toBe(String.raw`C:\Users\Jane Doe\AppData\Local\tercet\kokoro`);
+  expect(readbackHome({}, "", "win32", String.raw`C:\Users\Jane Doe`)).toBe(String.raw`C:\Users\Jane Doe\AppData\Local\tercet\kokoro`);
+});
+
+test("Kokoro home precedence: KOKORO_HOME, then readback.home, then the default", () => {
+  expect(readbackHome({ KOKORO_HOME: "/env", XDG_DATA_HOME: "/data" }, "/settings", "linux", "/h")).toBe("/env");
+  expect(readbackHome({ XDG_DATA_HOME: "/data" }, "/settings", "linux", "/h")).toBe("/settings");
+  expect(readbackHome({ XDG_DATA_HOME: "/data" }, "", "linux", "/h")).toBe("/data/tercet/kokoro");
+  expect(readbackHome({ KOKORO_HOME: "" }, "/settings", "darwin", "/h")).toBe("/settings");
+});
+
+test("local Kokoro command uses the resolved home and per-OS venv Python, and never the old private default", () => {
   expect(defaultSettings().readback.engine).toBe("local");
-  const command = localReadbackCommand({}, "/home/example", false);
-  expect(command.python).toBe("/home/example/Projects/Side/kokoro/.venv/bin/python");
-  expect(command.args.at(-1)).toBe("/home/example/Projects/Side/kokoro");
+  expect(defaultSettings().readback.home).toBe("");
+  const command = localReadbackCommand({}, "", "linux", "/home/example");
+  expect(command.python).toBe("/home/example/.local/share/tercet/kokoro/.venv/bin/python");
+  expect(command.args.at(-1)).toBe("/home/example/.local/share/tercet/kokoro");
   expect(command.args[1]).toContain('"en-gb"');
-  const windows = localReadbackCommand({ KOKORO_HOME: String.raw`C:\models with spaces\kokoro` }, "ignored", true);
+  expect(command.args.join(" ")).not.toContain("Projects/Side");
+  const fromSettings = localReadbackCommand({}, "/models/kokoro", "linux", "/home/example");
+  expect(fromSettings.python).toBe("/models/kokoro/.venv/bin/python");
+  expect(fromSettings.args.at(-1)).toBe("/models/kokoro");
+  const windows = localReadbackCommand({ KOKORO_HOME: String.raw`C:\models with spaces\kokoro` }, "", "win32", "ignored");
   expect(windows.python).toBe(String.raw`C:\models with spaces\kokoro\.venv\Scripts\python.exe`);
+  expect(windows.args.at(-1)).toBe(String.raw`C:\models with spaces\kokoro`);
+  const spaced = localReadbackCommand({}, String.raw`D:\Kokoro Models\home`, "win32", "ignored");
+  expect(spaced.python).toBe(String.raw`D:\Kokoro Models\home\.venv\Scripts\python.exe`);
   expect(localReadbackCommand({ KOKORO_PYTHON: "/custom/python", KOKORO_HOME: "/custom/models" }).python).toBe("/custom/python");
+});
+
+test("readbackStatus reports what is missing: nothing, some, then all files", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "tercet-readback-status-"));
+  try {
+    const home = join(dir, "kokoro");
+    const none = readbackStatus({}, home, "linux", "/unused");
+    expect(none).toEqual({ ready: false, home, python: join(home, ".venv", "bin", "python"), missing: [".venv", "kokoro-v1.0.onnx", "voices-v1.0.bin"] });
+    await mkdir(join(home, ".venv", "bin"), { recursive: true });
+    await writeFile(join(home, ".venv", "bin", "python"), "");
+    await writeFile(join(home, "kokoro-v1.0.onnx"), "model");
+    const some = readbackStatus({}, home, "linux", "/unused");
+    expect(some.ready).toBe(false);
+    expect(some.missing).toEqual(["voices-v1.0.bin"]);
+    await mkdir(join(home, "voices-v1.0.bin")); // a directory is not a file
+    expect(readbackStatus({}, home, "linux", "/unused").missing).toEqual(["voices-v1.0.bin"]);
+    await rm(join(home, "voices-v1.0.bin"), { recursive: true });
+    await writeFile(join(home, "voices-v1.0.bin"), "voices");
+    expect(readbackStatus({}, home, "linux", "/unused")).toEqual({ ready: true, home, python: join(home, ".venv", "bin", "python"), missing: [] });
+    // Env KOKORO_HOME wins over the settings home; a custom KOKORO_PYTHON is checked instead of the venv.
+    expect(readbackStatus({ KOKORO_HOME: join(dir, "other") }, home, "linux", "/unused").ready).toBe(false);
+    const custom = readbackStatus({ KOKORO_PYTHON: join(dir, "no-python") }, home, "linux", "/unused");
+    expect(custom.missing).toEqual([join(dir, "no-python")]);
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
 test.skipIf(process.platform === "win32")("local generation sends voice/speed/text on stdin, returns WAV and aborts worker", async () => {

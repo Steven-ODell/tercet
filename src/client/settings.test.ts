@@ -326,6 +326,19 @@ test("spell defaults on, can be switched off, and takes a dictionary path", () =
   expect(failure('{"spell":{"enabled":"yes"}}')).toContain("spell.enabled");
 });
 
+test("readback.home defaults to empty, expands ~, resolves relative paths and rejects non-strings", () => {
+  expect(parse("{}").readback.home).toBe("");
+  expect(parse('{"readback":{"home":""}}').readback.home).toBe("");
+  expect(parse('{"readback":{"home":"~/Projects/Side/kokoro"}}').readback.home).toBe(
+    "/home/u/Projects/Side/kokoro",
+  );
+  expect(parse('{"readback":{"home":"/opt/kokoro"}}').readback.home).toBe("/opt/kokoro");
+  expect(parse('{"readback":{"home":"models/kokoro"}}').readback.home).toBe(
+    "/home/u/.config/tercet/models/kokoro",
+  );
+  expect(failure('{"readback":{"home":12}}')).toContain("readback.home");
+});
+
 test("server.hideWarning is off unless the settings file turns it on", async () => {
   const env = { XDG_CONFIG_HOME: "/xdg" };
   const withFile = (text?: string) => async (path: string) =>

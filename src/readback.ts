@@ -1,5 +1,6 @@
 // Kokoro synthesis is independent of T3's dictation service. Never send T3 credentials here.
 import { spawn } from "node:child_process";
+import { statSync } from "node:fs";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, win32 } from "node:path";
@@ -19,8 +20,8 @@ export function spokenText(text: string) {
     .trim();
 }
 
-// Same local model/venv and voice-language mapping as Phone Assist's tts_worker.py.
-// One cancellable process per Read; no hub credentials, HTTP service or resident worker.
+// One cancellable Python process per Read, using kokoro-onnx from the Kokoro home's venv.
+// No HTTP service, credentials or resident worker. The voice prefix picks the language.
 const LOCAL_SYNTHESIS = String.raw`
 import io, json, sys, wave
 from pathlib import Path
@@ -39,18 +40,70 @@ with wave.open(audio, "wb") as wav:
     wav.writeframes(pcm)
 sys.stdout.buffer.write(audio.getvalue())
 `;
-export function localReadbackCommand(env: NodeJS.ProcessEnv = process.env, home = homedir(), windows = process.platform === "win32") {
-  const pathJoin = windows ? win32.join : join;
-  const modelHome = env.KOKORO_HOME || pathJoin(home, "Projects", "Side", "kokoro");
-  const python = env.KOKORO_PYTHON || pathJoin(modelHome, ".venv", ...(windows ? ["Scripts", "python.exe"] : ["bin", "python"]));
+export const KOKORO_MODEL_FILE = "kokoro-v1.0.onnx";
+export const KOKORO_VOICES_FILE = "voices-v1.0.bin";
+
+/**
+ * Where the Kokoro model files and venv live: `KOKORO_HOME`, then `readback.home` (already
+ * expanded by the settings parser), then tercet's own data directory for the platform.
+ */
+export function readbackHome(
+  env: NodeJS.ProcessEnv = process.env,
+  settingsHome = "",
+  platform: NodeJS.Platform = process.platform,
+  home = homedir(),
+) {
+  if (env.KOKORO_HOME) return env.KOKORO_HOME;
+  if (settingsHome) return settingsHome;
+  if (platform === "win32")
+    return win32.join(env.LOCALAPPDATA || win32.join(home, "AppData", "Local"), "tercet", "kokoro");
+  if (platform === "darwin") return join(home, "Library", "Application Support", "tercet", "kokoro");
+  // A relative XDG_DATA_HOME is ignored (XDG spec).
+  const data = env.XDG_DATA_HOME?.startsWith("/") ? env.XDG_DATA_HOME : join(home, ".local", "share");
+  return join(data, "tercet", "kokoro");
+}
+
+function venvPython(modelHome: string, platform: NodeJS.Platform) {
+  return platform === "win32"
+    ? win32.join(modelHome, ".venv", "Scripts", "python.exe")
+    : join(modelHome, ".venv", "bin", "python");
+}
+
+export function localReadbackCommand(
+  env: NodeJS.ProcessEnv = process.env,
+  settingsHome = "",
+  platform: NodeJS.Platform = process.platform,
+  home = homedir(),
+) {
+  const modelHome = readbackHome(env, settingsHome, platform, home);
+  const python = env.KOKORO_PYTHON || venvPython(modelHome, platform);
   return { python, args: ["-c", LOCAL_SYNTHESIS, modelHome] };
+}
+
+const isFile = (path: string) => { try { return statSync(path).isFile(); } catch { return false; } };
+
+/** Whether local Read aloud can run: the venv Python and both model files exist. */
+export function readbackStatus(
+  env: NodeJS.ProcessEnv = process.env,
+  settingsHome = "",
+  platform: NodeJS.Platform = process.platform,
+  home = homedir(),
+) {
+  const modelHome = readbackHome(env, settingsHome, platform, home);
+  const { python } = localReadbackCommand(env, settingsHome, platform, home);
+  const pathJoin = platform === "win32" ? win32.join : join;
+  const missing: string[] = [];
+  if (!isFile(python)) missing.push(env.KOKORO_PYTHON ? python : ".venv");
+  for (const name of [KOKORO_MODEL_FILE, KOKORO_VOICES_FILE])
+    if (!isFile(pathJoin(modelHome, name))) missing.push(name);
+  return { ready: missing.length === 0, home: modelHome, python, missing };
 }
 export async function synthesizeLocalReadback(text: string, settings: Settings["readback"], signal: AbortSignal) {
   const input = spokenText(text);
   if (!input) throw new Error("No text to read.");
   if (input.length > 30_000) throw new Error("Response is too long to read (30,000 character limit).");
   signal.throwIfAborted();
-  const command = localReadbackCommand();
+  const command = localReadbackCommand(process.env, settings.home);
   return new Promise<Uint8Array>((resolve, reject) => {
     const child = spawn(command.python, command.args, { stdio: ["pipe", "pipe", "ignore"], windowsHide: true, signal });
     const abort = () => { child.kill(); reject(signal.reason); };
@@ -61,7 +114,7 @@ export async function synthesizeLocalReadback(text: string, settings: Settings["
     let failure: Error | undefined;
     child.once("error", (error) => {
       failure = error;
-      reject(signal.aborted ? signal.reason : new Error("Cannot start local Kokoro Python. Check KOKORO_HOME and its .venv, or KOKORO_PYTHON."));
+      reject(signal.aborted ? signal.reason : new Error("Cannot start local Kokoro Python. Run `tercet readback setup`, or check KOKORO_HOME, readback.home and KOKORO_PYTHON."));
     });
     child.stdin.on("error", () => {}); // Early worker exit is reported through close below.
     child.stdout.on("data", (part: Buffer) => {
@@ -72,7 +125,7 @@ export async function synthesizeLocalReadback(text: string, settings: Settings["
     child.once("close", (code) => {
       signal.removeEventListener("abort", abort);
       if (signal.aborted) { reject(signal.reason); return; }
-      if (failure || code !== 0) { reject(new Error("Local Kokoro generation failed. Check KOKORO_HOME, its .venv, model/voice files and selected voice (same setup as Phone Assist hub).")); return; }
+      if (failure || code !== 0) { reject(new Error("Local Kokoro generation failed. Run `tercet readback setup` to repair the install, and check readback.voice.")); return; }
       const audio = Buffer.concat(parts);
       if (audio.toString("ascii", 0, 4) !== "RIFF" || audio.toString("ascii", 8, 12) !== "WAVE") { reject(new Error("Local Kokoro returned invalid WAV audio.")); return; }
       resolve(audio);
