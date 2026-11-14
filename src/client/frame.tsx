@@ -66,7 +66,10 @@ export function AppFrame({
   onQuit,
   content = {},
   effects: configured,
+  attached = false,
 }: {
+  /** `tercet attach`: one thread, so no thread list and the composer has focus. */
+  attached?: boolean;
   effects?: import("../actions").Actions;
   client: Client;
   onQuit?: () => void;
@@ -147,10 +150,10 @@ export function AppFrame({
   }, [client]);
   // Rows outside the panes: header and banner above, the hint rows below.
   const chromeRows = topRows + (hintsShown ? 2 : 0);
-  const [sidebarWanted, setSidebar] = useState(true);
+  const [sidebarWanted, setSidebar] = useState(!attached);
   const [narrowSidebar, setNarrowSidebar] = useState(false);
   const sidebar = width >= 70 ? sidebarWanted : narrowSidebar;
-  const [focus, setFocusPane] = useState<Pane>("sidebar");
+  const [focus, setFocusPane] = useState<Pane>(attached ? "composer" : "sidebar");
   // The composer shrinks to its draft line while another pane has focus or right after a send.
   // Anything that focuses it (click, key command, paste) opens it again.
   const [sent, setSent] = useState(false);

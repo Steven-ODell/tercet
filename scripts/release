@@ -94,4 +94,7 @@ git -C "$root" tag -a "$tag" --cleanup=whitespace -F - <<<"$notes"
 echo "release: committed 'release $tag' and tagged $tag (nothing pushed). To publish:"
 echo
 echo "  git push origin main $tag"
-echo "  gh release create $tag --verify-tag --notes-from-tag"
+echo
+echo "The tag starts .github/workflows/release.yml, which builds the binaries for every platform and"
+echo "publishes the GitHub release (notes from the tag, SHA256SUMS attached). Watch it with:"
+echo "  gh run watch"

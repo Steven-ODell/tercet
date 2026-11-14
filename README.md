@@ -17,19 +17,26 @@ over SSH and inside tmux, and needs no window.
   live in one settings file. Anything you don't set up has no button, and `tercet doctor`
   tells you what works on your setup.
 
-```bash
-bun install -g github:Steven-ODell/tercet
-```
-
-You need [Bun](https://bun.com) (tested with 1.4.0) and a T3 Code server on the same machine.
-tercet is built and tested against T3 0.1.8; other versions start under a warning banner. No Bun yet? `curl -fsSL https://bun.com/install | bash`, or
-use the install script, which checks for Bun first and then runs the line above:
+Pick whichever install suits you. All three give you the same `tercet` command:
 
 ```bash
+# 1. Prebuilt binary: no Bun, checksum-verified, goes in ~/.local/bin
 curl -fsSL https://raw.githubusercontent.com/Steven-ODell/tercet/main/install.sh | sh
+
+# 2. With Bun 1.4.0 or newer
+bun install -g github:Steven-ODell/tercet
+
+# 3. From a clone, built by hand
+git clone https://github.com/Steven-ODell/tercet && cd tercet && bun install && bun run build && bun link
 ```
 
-Updating, removing and running from a checkout: [docs/install.md](docs/install.md).
+Windows (PowerShell): `irm https://raw.githubusercontent.com/Steven-ODell/tercet/main/install.ps1 | iex`.
+Binaries for Linux and macOS (x64 and arm64) and Windows (x64) are also on the
+[releases page](https://github.com/Steven-ODell/tercet/releases), each release listing the T3
+Code versions it was tested against. You need a T3 Code server on the same machine; tercet is built
+and tested against T3 0.1.8, and other versions start under a warning banner. The Bun and clone
+routes need [Bun](https://bun.com) (tested with 1.4.0); the install script's `--bun` flag checks
+for it first.
 
 Then:
 
@@ -37,6 +44,8 @@ Then:
 tercet doctor   # what tercet found: server, token, terminal, images, clipboard
 tercet          # open it
 ```
+
+Updating (`tercet upgrade` for the binary), removing and every install option: [docs/install.md](docs/install.md).
 
 ## Run it on the machine that has your T3 server
 
@@ -74,6 +83,35 @@ coverage](docs/windows.md).
 "Expected" follows from how tercet detects images: it asks the terminal, and uses whatever the
 terminal answers. Run `tercet doctor` in yours and see the `images` line. Reports of other
 terminals are welcome.
+
+## From the command line
+
+The same server and token, without the screen:
+
+```bash
+tercet list                  # threads as a table: id, state, project, title
+tercet list --json           # the same as JSON, for scripts (add --all for archived ones)
+tercet attach 3f9a1c2e       # one thread full screen: its id, short id or part of its title
+tercet tmux                  # a tmux window per active thread, each running `tercet attach`
+tercet tmux --watch          # keep going: a window opens when a thread starts working
+tercet upgrade               # replace the binary with the newest release (--check: only look)
+```
+
+`state` is `running`, `waiting` (stopped on an approval or question), `failed`, `limited` or
+`idle`. `list --json` gives `id`, `shortId`, `title`, `project`, `projectId`, `state`, `pinned`,
+`archived`, `provider`, `model`, `branch` and `updatedAt`, so
+`tercet list --json | jq -r '.[] | select(.state == "waiting") | .title'` finds what needs you.
+
+`tercet tmux` puts the active threads (running or waiting) in a session called `tercet`
+(`--session NAME` to change it, `--socket NAME` for `tmux -L NAME`) and exits; attach with
+`tmux attach -t tercet`. With `--watch` it stays running, opens a window for each thread as it
+starts working, and closes a window once its thread has been idle for 30 seconds and nobody is
+looking at it (`--keep` never closes). Close a window yourself while its thread still works and
+it stays closed until the thread settles. Both commands take the connection options of
+`tercet --help`, and `tmux` passes them on to each window.
+
+Inside the app, Enter while a turn runs queues your message after it, Alt+Enter steers it into
+the running turn, and `Ctrl+x` drops a queued one.
 
 ## Read responses aloud
 

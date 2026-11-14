@@ -42,6 +42,10 @@ jobs:
         run: scripts/build --check
       - name: the bundle starts
         run: dist/tercet.js --version
+      - name: the standalone binary builds and starts
+        run: |
+          bun scripts/build-binary --out "$RUNNER_TEMP/bin"
+          "$RUNNER_TEMP"/bin/tercet-* list --help
 
   canary:
     name: canary (upstream main)

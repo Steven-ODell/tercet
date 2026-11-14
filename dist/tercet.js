@@ -83941,7 +83941,7 @@ function imageOpenAction(load, attachmentsDir, openPath, tmp = "/tmp/tercet-imag
 
 // src/main.tsx
 import { homedir as homedir5 } from "os";
-import { join as join6 } from "path";
+import { join as join7 } from "path";
 
 // src/terminal-lifecycle.ts
 var TERMINAL_RESET = "\x1B[?1000l\x1B[?1002l\x1B[?1003l\x1B[?1006l\x1B[?2004l\x1B[<u\x1B[?25h\x1B[?1049l";
@@ -91396,6 +91396,10 @@ var isLoopback = (hostname) => hostname === "localhost" || hostname === "[::1]" 
 var USAGE = `Usage: tercet [options]
        tercet doctor [--json] [options]
        tercet keys
+       tercet list [--json] [--all] [options]
+       tercet attach THREAD [options]
+       tercet tmux [--watch] [--session NAME] [options]
+       tercet upgrade [--check]
 
 Options:
   --url ORIGIN        The T3 server, e.g. http://127.0.0.1:3773
@@ -160205,7 +160209,8 @@ function AppFrame({
   client,
   onQuit,
   content = {},
-  effects: configured
+  effects: configured,
+  attached = false
 }) {
   const renderer = useRenderer();
   const { width: width2, height } = useTerminalDimensions();
@@ -160247,10 +160252,10 @@ function AppFrame({
     client.boundary.showHints?.().then(setHintsShown).catch(() => {});
   }, [client]);
   const chromeRows = topRows + (hintsShown ? 2 : 0);
-  const [sidebarWanted, setSidebar] = import_react60.useState(true);
+  const [sidebarWanted, setSidebar] = import_react60.useState(!attached);
   const [narrowSidebar, setNarrowSidebar] = import_react60.useState(false);
   const sidebar = width2 >= 70 ? sidebarWanted : narrowSidebar;
-  const [focus, setFocusPane] = import_react60.useState("sidebar");
+  const [focus, setFocusPane] = import_react60.useState(attached ? "composer" : "sidebar");
   const [sent, setSent] = import_react60.useState(false);
   const setFocus = (next2) => {
     if (next2 === "composer")
@@ -160957,9 +160962,467 @@ Rebind with the name in the last column, e.g. "keys": { "palette": "Ctrl+k" }.`)
   }
 }
 
+// src/threads.ts
+var LIVE = new Set(["preparing", "queued", "starting", "running"]);
+function threadState(thread) {
+  if (thread.lastErrorClass === "usage_limit")
+    return "limited";
+  const status2 = thread.activityRunStatus ?? thread.status;
+  if (thread.pendingRuntimeRequest || status2 === "waiting")
+    return "waiting";
+  if (status2 === "failed")
+    return "failed";
+  if (LIVE.has(status2))
+    return "running";
+  return "idle";
+}
+var isActive = (state2) => state2 === "running" || state2 === "waiting";
+var iso3 = (at) => new Date(toEpochMillis2(at)).toISOString();
+function threadRows(snapshot2, options2 = {}) {
+  const projects2 = new Map(snapshot2.projects.map((project2) => [String(project2.id), project2.title]));
+  return snapshot2.threads.filter((thread) => !thread.deletedAt && thread.lineage.relationshipToParent !== "subagent" && (options2.all || thread.archivedAt === null)).map((thread) => ({
+    id: String(thread.id),
+    shortId: String(thread.id).slice(0, 8),
+    title: thread.title,
+    project: projects2.get(String(thread.projectId)) ?? String(thread.projectId),
+    projectId: String(thread.projectId),
+    state: threadState(thread),
+    pinned: thread.pinnedAt != null,
+    archived: thread.archivedAt !== null,
+    provider: String(thread.providerInstanceId),
+    model: String(thread.modelSelection.model),
+    branch: thread.branch,
+    updatedAt: iso3(thread.updatedAt)
+  })).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+function resolveThread(rows, query2) {
+  const q = query2.trim();
+  if (!q)
+    return { kind: "none" };
+  const exact = rows.find((row) => row.id === q);
+  if (exact)
+    return { kind: "found", row: exact };
+  const lower = q.toLowerCase();
+  for (const matches of [
+    rows.filter((row) => row.id.toLowerCase().startsWith(lower)),
+    rows.filter((row) => row.title.toLowerCase().includes(lower))
+  ]) {
+    if (matches.length === 1)
+      return { kind: "found", row: matches[0] };
+    if (matches.length > 1)
+      return { kind: "ambiguous", rows: matches };
+  }
+  return { kind: "none" };
+}
+function formatTable(rows) {
+  if (!rows.length)
+    return "No threads.";
+  const cell = (text5, width2) => text5 + " ".repeat(Math.max(0, width2 - Bun.stringWidth(text5)));
+  const stateWidth = Math.max(5, ...rows.map((row) => row.state.length));
+  const projectWidth = Math.min(24, Math.max(7, ...rows.map((row) => Bun.stringWidth(row.project))));
+  const head3 = `${cell("ID", 8)}  ${cell("STATE", stateWidth)}  ${cell("PROJECT", projectWidth)}  TITLE`;
+  const lines = rows.map((row) => {
+    const project2 = Bun.stringWidth(row.project) > projectWidth ? `${row.project.slice(0, projectWidth - 1)}\u2026` : row.project;
+    return `${cell(row.shortId, 8)}  ${cell(row.state, stateWidth)}  ${cell(project2, projectWidth)}  ${row.pinned ? "\u25C6 " : ""}${row.title.replace(/\s+/g, " ")}`;
+  });
+  return [head3, ...lines].join(`
+`);
+}
+
+// src/cli.ts
+async function connectLive(config) {
+  const boundary = platform(config);
+  const client = createClient(boundary, config.managedToken);
+  let result3 = await checkServer(config.url);
+  if (result3.kind === "unreachable") {
+    await runPromise2(boundary.wake()).catch(() => {});
+    result3 = await checkServer(config.url);
+  }
+  if (blocksStart(result3, config.ignoreVersion)) {
+    const { title, lines } = compatMessage(result3, config.url);
+    return { error: `${title}
+${lines.join(`
+`)}` };
+  }
+  const warning = compatWarning(result3);
+  if (warning)
+    console.error(`tercet: warning: ${warning}`);
+  client.start();
+  let unsubscribe2 = () => {};
+  const rejected = new Promise((_, reject) => {
+    unsubscribe2 = client.registry.subscribe(client.status, (status2) => {
+      if (status2 === "rejected")
+        reject(new Error("rejected"));
+    });
+  });
+  try {
+    await Promise.race([waitForLive(client), rejected]);
+  } catch {
+    const text5 = `${client.registry.get(client.status)}: ${client.registry.get(client.message)}`;
+    await client.dispose();
+    return { error: text5 };
+  } finally {
+    unsubscribe2();
+  }
+  return { client };
+}
+function takeFlags(args2, bools, valued = []) {
+  const found = new Set;
+  const values2 = new Map;
+  const rest = [];
+  for (let i = 0;i < args2.length; i++) {
+    const arg = args2[i];
+    const bool2 = bools.find((flag) => flag === arg);
+    if (bool2) {
+      found.add(bool2);
+      continue;
+    }
+    const name = valued.find((flag) => arg === flag || arg.startsWith(`${flag}=`));
+    if (name) {
+      const value4 = arg === name ? args2[++i] : arg.slice(name.length + 1);
+      if (!value4 || value4.startsWith("--"))
+        throw new ConfigError(`missing value for ${name}`);
+      values2.set(name, value4);
+      continue;
+    }
+    rest.push(arg);
+  }
+  return { found, values: values2, rest };
+}
+async function withClient(args2, run3) {
+  let config;
+  try {
+    config = await connectionConfig(args2, readOptional);
+  } catch (error2) {
+    if (error2 instanceof SettingsError || error2 instanceof ConfigError) {
+      console.error(`tercet: ${error2.message}`);
+      return 1;
+    }
+    throw error2;
+  }
+  const live2 = await connectLive(config);
+  if ("error" in live2) {
+    console.error(`tercet: ${live2.error}`);
+    return 1;
+  }
+  try {
+    await waitForSnapshot(live2.client);
+    return await run3(live2.client, config);
+  } finally {
+    await live2.client.dispose();
+  }
+}
+async function waitForSnapshot(client, timeoutMs = 5000) {
+  const start = Date.now();
+  while (!client.registry.get(client.snapshot) && Date.now() - start < timeoutMs)
+    await Bun.sleep(25);
+}
+var LIST_USAGE = `Usage: tercet list [--json] [--all] [connection options]
+
+Print the threads on the server and exit. The default is a table; --json prints one JSON array
+with id, shortId, title, project, state, pinned, archived, provider, model, branch and updatedAt.
+Archived threads and sub-agent threads are left out unless --all is given.`;
+async function runList(args2) {
+  if (args2.includes("--help") || args2.includes("-h")) {
+    console.log(LIST_USAGE);
+    return 0;
+  }
+  const { found, rest } = takeFlags(args2, ["--json", "--all"]);
+  return withClient(rest, async (client) => {
+    const snapshot2 = client.registry.get(client.snapshot);
+    const rows = snapshot2 ? threadRows(snapshot2, { all: found.has("--all") }) : [];
+    console.log(found.has("--json") ? JSON.stringify(rows, null, 2) : formatTable(rows));
+    return 0;
+  });
+}
+function planWindows(rows, windows, options2) {
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const have = new Set(windows.filter((w) => w.threadId).map((w) => w.threadId));
+  const open2 = rows.filter((row) => isActive(row.state) && !have.has(row.id) && !options2.dismissed.has(row.id));
+  const close2 = options2.prune ? windows.filter((w) => {
+    if (!w.threadId)
+      return false;
+    const row = byId.get(w.threadId);
+    if (!row)
+      return !w.viewed;
+    if (isActive(row.state))
+      return false;
+    return !w.viewed && (options2.idleMs.get(row.id) ?? 0) >= options2.graceMs;
+  }) : [];
+  return { open: open2, close: close2 };
+}
+var shellQuote2 = (word) => /^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`;
+function selfCommand() {
+  const compiled = Bun.main.startsWith("/$bunfs/") || Bun.main.startsWith("B:/~BUN");
+  return compiled ? [process.execPath] : [process.execPath, Bun.main];
+}
+var TMUX_USAGE = `Usage: tercet tmux [--watch] [--session NAME] [--socket NAME] [--keep] [connection options]
+
+Put every active thread (running, or waiting for an answer) in its own window of a tmux session,
+each running \`tercet attach THREAD\`, then exit. Windows already there are left alone.
+
+  --watch           Stay running: open a window when a thread starts working and, unless --keep,
+                    close it once the thread has been idle for 30 seconds and nobody is looking at it
+  --session NAME    The tmux session (default tercet); it is created when the first window opens
+  --socket NAME     Use \`tmux -L NAME\` instead of the default server
+  --keep            Never close windows
+
+Attach with \`tmux attach -t tercet\` (or \`tmux switch-client -t tercet\` from inside tmux).
+A window you close while its thread still works stays closed until the thread settles.`;
+function tmuxRunner(socket) {
+  return (...args2) => {
+    const result3 = Bun.spawnSync(["tmux", ...socket ? ["-L", socket] : [], ...args2], {
+      stdout: "pipe",
+      stderr: "pipe"
+    });
+    return {
+      code: result3.exitCode,
+      out: result3.stdout.toString(),
+      err: result3.stderr.toString()
+    };
+  };
+}
+function listWindows(tmux, session) {
+  if (tmux("has-session", "-t", `=${session}`).code !== 0)
+    return null;
+  const listed = tmux("list-windows", "-t", `=${session}`, "-F", "#{window_id}\t#{@tercet-thread}\t#{window_active}\t#{session_attached}");
+  if (listed.code !== 0)
+    return null;
+  return listed.out.split(`
+`).filter(Boolean).map((line) => {
+    const [id3 = "", threadId = "", active2 = "0", attached = "0"] = line.split("\t");
+    return { id: id3, threadId, viewed: active2 === "1" && Number(attached) > 0 };
+  });
+}
+function openWindow(tmux, session, row, connArgs, existing) {
+  const command2 = [...selfCommand(), "attach", row.id, ...connArgs].map(shellQuote2).join(" ");
+  const name = row.title.replace(/\s+/g, " ").slice(0, 24) || row.shortId;
+  const made = existing ? tmux("new-window", "-d", "-P", "-F", "#{window_id}", "-t", `=${session}:`, "-n", name, command2) : tmux("new-session", "-d", "-P", "-F", "#{window_id}", "-s", session, "-n", name, command2);
+  if (made.code !== 0) {
+    console.error(`tercet: tmux: ${made.err.trim() || "could not open a window"}`);
+    return null;
+  }
+  const id3 = made.out.trim();
+  tmux("set-option", "-w", "-t", id3, "@tercet-thread", row.id);
+  return id3;
+}
+async function runTmux(args2) {
+  if (args2.includes("--help") || args2.includes("-h")) {
+    console.log(TMUX_USAGE);
+    return 0;
+  }
+  const { found, values: values2, rest } = takeFlags(args2, ["--watch", "--keep"], ["--session", "--socket"]);
+  const connArgs = rest;
+  const session = values2.get("--session") ?? "tercet";
+  const socket = values2.get("--socket");
+  const watch = found.has("--watch");
+  const prune = !found.has("--keep");
+  const tmux = tmuxRunner(socket);
+  if (tmux("-V").code !== 0) {
+    console.error("tercet: tmux is not on PATH, so there is nothing to put the windows in");
+    return 1;
+  }
+  return withClient(connArgs, async (client) => {
+    const idleSince = new Map;
+    const known = new Map;
+    const dismissed = new Set;
+    const sync5 = () => {
+      const snapshot2 = client.registry.get(client.snapshot);
+      if (!snapshot2)
+        return 0;
+      const rows = threadRows(snapshot2, { all: true });
+      const now2 = Date.now();
+      for (const row of rows) {
+        if (isActive(row.state))
+          idleSince.delete(row.id);
+        else if (!idleSince.has(row.id))
+          idleSince.set(row.id, now2);
+      }
+      const windows = listWindows(tmux, session);
+      const present3 = new Set((windows ?? []).map((w) => w.id));
+      for (const [threadId, windowId] of known) {
+        if (present3.has(windowId))
+          continue;
+        known.delete(threadId);
+        const row = rows.find((r) => r.id === threadId);
+        if (row && isActive(row.state) && !row.archived)
+          dismissed.add(threadId);
+      }
+      for (const row of rows)
+        if (!isActive(row.state))
+          dismissed.delete(row.id);
+      const plan = planWindows(rows, windows ?? [], {
+        idleMs: new Map([...idleSince].map(([id3, at]) => [id3, now2 - at])),
+        dismissed,
+        graceMs: 30000,
+        prune: prune && watch
+      });
+      let opened = 0;
+      let exists2 = windows !== null;
+      for (const row of plan.open) {
+        const id3 = openWindow(tmux, session, row, connArgs, exists2);
+        if (!id3)
+          continue;
+        exists2 = true;
+        known.set(row.id, id3);
+        opened++;
+      }
+      for (const window2 of windows ?? [])
+        if (window2.threadId)
+          known.set(window2.threadId, window2.id);
+      for (const window2 of plan.close) {
+        tmux("kill-window", "-t", window2.id);
+        known.delete(window2.threadId);
+      }
+      return opened;
+    };
+    const first = sync5();
+    const active2 = threadRows(client.registry.get(client.snapshot)).filter((row) => isActive(row.state));
+    console.log(active2.length ? `tercet: ${first} new window${first === 1 ? "" : "s"} for ${active2.length} active thread${active2.length === 1 ? "" : "s"} in tmux session "${session}"` : `tercet: no active threads right now`);
+    if (!watch) {
+      if (active2.length)
+        console.log(`Attach with: tmux ${socket ? `-L ${socket} ` : ""}attach -t ${session}`);
+      return 0;
+    }
+    console.log(`Watching. Windows open as threads start working; Ctrl+C stops (windows stay).`);
+    const unsubscribe2 = client.registry.subscribe(client.snapshot, () => sync5());
+    const timer = setInterval(sync5, 5000);
+    await new Promise((resolve9) => {
+      for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
+        process.once(signal, resolve9);
+    });
+    clearInterval(timer);
+    unsubscribe2();
+    return 0;
+  });
+}
+function attachWhenReady(client, query2, fail16) {
+  let done4 = false;
+  const unsubscribe2 = client.registry.subscribe(client.snapshot, (snapshot2) => {
+    if (done4 || !snapshot2)
+      return;
+    done4 = true;
+    queueMicrotask(() => unsubscribe2());
+    const rows = threadRows(snapshot2, { all: true });
+    const found = resolveThread(rows, query2);
+    if (found.kind === "found")
+      client.openThread(found.row.id);
+    else if (found.kind === "none")
+      fail16(`no thread matches "${query2}"; \`tercet list\` shows them`);
+    else
+      fail16(`"${query2}" matches ${found.rows.length} threads:
+${found.rows.slice(0, 8).map((row) => `  ${row.shortId}  ${row.title}`).join(`
+`)}`);
+  }, { immediate: true });
+}
+
+// src/upgrade.ts
+import { chmodSync, existsSync, renameSync as renameSync2, rmSync, writeFileSync } from "fs";
+import { dirname as dirname4, join as join6 } from "path";
+var REPO = "Steven-ODell/tercet";
+function assetName(platform2 = process.platform, arch = process.arch) {
+  const os = { linux: "linux", darwin: "darwin", win32: "windows" }[platform2];
+  const cpu = { x64: "x64", arm64: "arm64" }[arch];
+  return os && cpu ? `tercet-${os}-${cpu}${os === "windows" ? ".exe" : ""}` : null;
+}
+function checksumFor(sums, file2) {
+  for (const line of sums.split(`
+`)) {
+    const match10 = /^([0-9a-fA-F]{64})\s+\*?(.+?)\s*$/.exec(line);
+    if (match10 && match10[2] === file2)
+      return match10[1].toLowerCase();
+  }
+  return null;
+}
+function isNewer(latest, current2) {
+  try {
+    return Bun.semver.order(latest.replace(/^v/, ""), current2.replace(/^v/, "")) === 1;
+  } catch {
+    return false;
+  }
+}
+var isCompiled = () => Bun.main.startsWith("/$bunfs/") || Bun.main.startsWith("B:/~BUN");
+var sha2563 = (bytes2) => new Bun.CryptoHasher("sha256").update(bytes2).digest("hex");
+var UPGRADE_USAGE = `Usage: tercet upgrade [--check]
+
+Replace this tercet binary with the newest release from GitHub, after checking its SHA-256
+against the release's SHA256SUMS. --check only says whether a newer release exists.
+A tercet installed with Bun (or run from a checkout) updates the way it was installed:
+see docs/install.md.`;
+async function runUpgrade(args2, fetcher = fetch, self2 = process.execPath) {
+  if (args2.includes("--help") || args2.includes("-h")) {
+    console.log(UPGRADE_USAGE);
+    return 0;
+  }
+  const checkOnly = args2.includes("--check");
+  const unknown2 = args2.filter((arg) => arg !== "--check");
+  if (unknown2.length) {
+    console.error(`tercet upgrade: unknown option ${unknown2[0]}; see tercet upgrade --help`);
+    return 2;
+  }
+  if (!isCompiled()) {
+    console.error(`tercet upgrade: this tercet runs from Bun or a checkout, not from a release binary.
+` + "Update it the way you installed it: `bun install -g github:" + REPO + "` or `git pull && bun run build` (docs/install.md).");
+    return 1;
+  }
+  const wanted = assetName();
+  if (!wanted) {
+    console.error(`tercet upgrade: no release binary for ${process.platform}/${process.arch}`);
+    return 1;
+  }
+  try {
+    const headers = { "User-Agent": "tercet-upgrade", Accept: "application/vnd.github+json" };
+    const response = await fetcher(`https://api.github.com/repos/${REPO}/releases/latest`, {
+      headers,
+      signal: AbortSignal.timeout(15000)
+    });
+    if (!response.ok)
+      throw new Error(`GitHub answered ${response.status} for the latest release`);
+    const release2 = await response.json();
+    if (!isNewer(release2.tag_name, TERCET_VERSION)) {
+      console.log(`tercet ${TERCET_VERSION} is the newest release (${release2.tag_name}).`);
+      return 0;
+    }
+    console.log(`tercet ${release2.tag_name} is available; you have ${TERCET_VERSION}.`);
+    if (checkOnly)
+      return 0;
+    const asset = release2.assets.find((item) => item.name === wanted);
+    const sums = release2.assets.find((item) => item.name === "SHA256SUMS");
+    if (!asset || !sums)
+      throw new Error(`release ${release2.tag_name} has no ${wanted} or no SHA256SUMS`);
+    const expected = checksumFor(await (await fetcher(sums.browser_download_url, { headers, signal: AbortSignal.timeout(30000) })).text(), wanted);
+    if (!expected)
+      throw new Error(`SHA256SUMS has no line for ${wanted}`);
+    const download = await fetcher(asset.browser_download_url, { headers, signal: AbortSignal.timeout(300000) });
+    if (!download.ok)
+      throw new Error(`download answered ${download.status}`);
+    const bytes2 = new Uint8Array(await download.arrayBuffer());
+    if (sha2563(bytes2) !== expected)
+      throw new Error("the download does not match SHA256SUMS; nothing was changed");
+    const next2 = join6(dirname4(self2), `.${wanted}.new`);
+    writeFileSync(next2, bytes2);
+    if (process.platform !== "win32")
+      chmodSync(next2, 493);
+    const old = `${self2}.old`;
+    if (process.platform === "win32") {
+      rmSync(old, { force: true });
+      renameSync2(self2, old);
+    }
+    renameSync2(next2, self2);
+    if (existsSync(old))
+      rmSync(old, { force: true });
+    console.log(`Updated ${self2} to ${release2.tag_name}.`);
+    console.log(`T3 server: ${supportedRange}, tested on ${PINNED_SERVER_VERSION} (for the old build; run tercet --version for the new).`);
+    return 0;
+  } catch (error2) {
+    console.error(`tercet upgrade: ${error2 instanceof Error ? error2.message : String(error2)}`);
+    return 1;
+  }
+}
+
 // src/main.tsx
 var args2 = process.argv.slice(2);
-if (args2.includes("--help") || args2.includes("-h")) {
+if ((args2.includes("--help") || args2.includes("-h")) && !["list", "tmux", "upgrade"].includes(args2[0] ?? "")) {
   console.log(USAGE);
   process.exit(0);
 }
@@ -160971,6 +161434,18 @@ if (process.argv[2] === "doctor")
   process.exit(await runDoctor(process.argv.slice(3)));
 if (process.argv[2] === "keys")
   process.exit(await runKeys());
+if (process.argv[2] === "upgrade")
+  process.exit(await runUpgrade(process.argv.slice(3)));
+if (process.argv[2] === "list")
+  process.exit(await runList(process.argv.slice(3)));
+if (process.argv[2] === "tmux")
+  process.exit(await runTmux(process.argv.slice(3)));
+var attachTo = process.argv[2] === "attach" ? process.argv[3] : undefined;
+if (process.argv[2] === "attach" && (!attachTo || attachTo.startsWith("-"))) {
+  console.error("usage: tercet attach THREAD [options]   (THREAD: id, short id or part of the title)");
+  process.exit(2);
+}
+var appArgs = process.argv.slice(attachTo ? 4 : 2);
 if (process.argv.includes("--version")) {
   const build3 = "";
   console.log(`tercet ${TERCET_VERSION}${build3}`);
@@ -160979,7 +161454,7 @@ if (process.argv.includes("--version")) {
 }
 var activeRenderer;
 try {
-  const config = await connectionConfig(process.argv.slice(2), readOptional);
+  const config = await connectionConfig(appArgs, readOptional);
   if (!config.settingsFound && !config.dumpStatus)
     process.stderr.write(`tercet: no settings file at ${config.settingsPath}; using defaults. Run \`tercet doctor\` to check your setup.
 `);
@@ -161077,7 +161552,7 @@ ${lines.join(`
       writeTerminal: (bytes2) => process.stdout.write(bytes2),
       sshHost: sshHostLookup(process.env, output, (path) => Bun.file(path).text()),
       loadImage,
-      personalDictionary: join6(settingsDir(process.env, homedir5()), "dictionary.txt")
+      personalDictionary: join7(settingsDir(process.env, homedir5()), "dictionary.txt")
     });
     const switchesSession = process.env.TMUX ? clearKittyBeforeSwitch(stdout, () => {
       const { columns, rows } = process.stdout;
@@ -161142,11 +161617,20 @@ ${lines.join(`
       check: check2,
       ignoreVersion: config.ignoreVersion,
       hideWarning: config.hideWarning,
-      onReady: () => client.start(),
+      onReady: () => {
+        client.start();
+        if (attachTo)
+          attachWhenReady(client, attachTo, (message) => {
+            renderer.destroy();
+            console.error(`tercet: ${message}`);
+            process.exitCode = 1;
+          });
+      },
       onQuit: () => renderer.destroy(),
       children: /* @__PURE__ */ import_jsx_runtime.jsx(AppFrame, {
         client,
-        effects
+        effects,
+        attached: !!attachTo
       })
     }) : /* @__PURE__ */ import_jsx_runtime.jsx(Hello, {
       actions: terminalActions((bytes2) => process.stdout.write(bytes2))
