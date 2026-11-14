@@ -30,7 +30,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $gitTests = @(Get-ChildItem src/client/git* -Filter '*test*' | ForEach-Object { $_.FullName })
           if ($gitTests.Count) { bun test @gitTests; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
-      - run: bun scripts/build --check
+      # Bun 1.4 emits different React CommonJS wrappers on Windows. Linux/macOS
+      # enforce committed bundle freshness; here test that shipped bundle first.
       - run: bun dist/tercet.js --version
       - name: PowerShell installer and global executable shim
         run: |
@@ -52,3 +53,9 @@ jobs:
           "TERCET_TEST_T3=$env:T3CODE_HOME/runtime/versions/0.1.8/t3.exe" >> $env:GITHUB_ENV
       - name: Authenticate and read a live snapshot from Windows T3
         run: bun scripts/windows-server-smoke.ts
+      - name: Windows source bundle builds and starts
+        run: |
+          bun scripts/build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun dist/tercet.js --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
