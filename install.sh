@@ -2,14 +2,25 @@
 # Installs tercet with Bun: checks that Bun is there (and says how to get it if not), runs
 # `bun install -g`, then checks that `tercet` is on PATH and prints its version.
 #
-#   sh install.sh                        install the latest tercet from GitHub
+#   sh install.sh                        install, or update to, the newest commit on main
 #   TERCET_SOURCE=<spec> sh install.sh   install another spec, e.g. a tag:
 #                                        github:Steven-ODell/tercet#v0.1.0
 #
 # It changes nothing outside Bun's global install (`bun pm bin -g` holds the tercet link).
 set -eu
 
-source=${TERCET_SOURCE:-github:Steven-ODell/tercet}
+repo=Steven-ODell/tercet
+source=${TERCET_SOURCE:-}
+if [ -z "$source" ]; then
+  # Bun keeps the commit a spec first resolved to, so installing github:$repo again leaves an old
+  # tercet in place. Naming main's current commit makes every run install the newest one.
+  sha=$(git ls-remote "https://github.com/$repo.git" refs/heads/main 2>/dev/null | cut -f1 || true)
+  if [ -z "$sha" ] && command -v curl >/dev/null 2>&1; then
+    sha=$(curl -fsSL "https://api.github.com/repos/$repo/commits/main" 2>/dev/null |
+      sed -n 's/^  "sha": "\([0-9a-f]\{40\}\)".*/\1/p' | head -n 1 || true)
+  fi
+  source=github:$repo${sha:+#$sha}
+fi
 
 if ! command -v bun >/dev/null 2>&1; then
   cat >&2 <<'EOF'

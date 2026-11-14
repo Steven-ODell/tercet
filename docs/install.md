@@ -10,9 +10,10 @@ curl -fsSL https://raw.githubusercontent.com/Steven-ODell/tercet/main/install.sh
 ```
 
 The script checks that `bun` is on PATH, and if it isn't it prints how to get it and stops. It
-then runs `bun install -g github:Steven-ODell/tercet`, prints `tercet --version` and tells you if
-Bun's global bin directory (`~/.bun/bin` by default) is missing from PATH. You can run that
-command yourself instead of the script:
+then looks up the newest commit on main and runs `bun install -g github:Steven-ODell/tercet#<that
+commit>`, prints `tercet --version` and tells you if Bun's global bin directory (`~/.bun/bin` by
+default) is missing from PATH. Running it again updates tercet. You can install with Bun yourself
+instead of the script:
 
 ```bash
 bun install -g github:Steven-ODell/tercet          # the latest commit on main
@@ -35,18 +36,19 @@ T3 server: >=0.1.8 <0.2.0, tested on 0.1.8
 
 ## Update and remove
 
-Bun remembers the commit a spec first resolved to, so running the same install again keeps the
-old version. To update, install the new release's tag:
+To update to the newest commit on main, run the install script again:
 
 ```bash
-bun install -g github:Steven-ODell/tercet#v0.2.0
+curl -fsSL https://raw.githubusercontent.com/Steven-ODell/tercet/main/install.sh | sh
 ```
 
-To move to the newest commit on main instead, clear Bun's cache in between (this clears the
-whole cache, which Bun refills as needed):
+Running `bun install -g github:Steven-ODell/tercet` again does not update: Bun remembers the
+commit that spec first resolved to and keeps the old version. Name a commit or a tag instead,
+which Bun always fetches:
 
 ```bash
-bun remove -g tercet && bun pm cache rm && bun install -g github:Steven-ODell/tercet
+bun install -g github:Steven-ODell/tercet#$(git ls-remote https://github.com/Steven-ODell/tercet.git refs/heads/main | cut -f1)
+bun install -g github:Steven-ODell/tercet#v0.1.0   # or a release tag
 ```
 
 `bun remove -g tercet` on its own uninstalls tercet. Your settings in `~/.config/tercet` stay.
