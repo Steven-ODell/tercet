@@ -106,6 +106,13 @@ Commands run without a shell, and thread text always stays one argument. Every k
 templates and their placeholders: [docs/settings.md](docs/settings.md). Images and video:
 [docs/media.md](docs/media.md).
 
+## Spell check
+
+Misspelled words in the composer are underlined in red. Right-click one (or press `Alt+s`) for a
+menu of corrections, `Add to dictionary` and `Ignore`. The English dictionary is built in; code,
+paths, URLs and mentions are skipped. Turn it off with `"spell": { "enabled": false }`; details
+in [docs/settings.md](docs/settings.md#spell-check).
+
 ## Dictation
 
 Press `Alt+v` or click `[mic]`, speak, then press again to transcribe into the editable draft.

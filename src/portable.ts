@@ -3,6 +3,7 @@
 // send, dictation, link mapping).
 // This is the only file in src/ that names desktop tools; anything personal lives in the user's
 // settings file as a template.
+import { createSpellChecker } from "./client/spell";
 import { spawn } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 import type { Actions } from "./actions";
@@ -443,6 +444,8 @@ export interface HostDeps {
   /** Image bytes for copy-image; set by the caller, which knows the server. */
   loadImage?(source: string, cwd?: string): Promise<Uint8Array>;
   graceMs?: number;
+  /** Where added words go when settings `spell.dictionary` is not set. */
+  personalDictionary?: string;
 }
 
 /** Every host effect, built from settings and what is installed. Absent actions are not drawn. */
@@ -494,6 +497,10 @@ export function hostActions(deps: HostDeps): Actions {
     await runArgs(host, opener.args(target, await vars(launchers.opener, own)), { graceMs: grace });
   };
   const actions: Actions = { copy };
+  if (settings.spell.enabled)
+    actions.spell = createSpellChecker({
+      personalFile: settings.spell.dictionary ?? deps.personalDictionary,
+    });
   if (targets.length) {
     actions.targets = targets.map(({ name, key }) => ({ name, key }));
     actions.copyTo = async (name, text) =>

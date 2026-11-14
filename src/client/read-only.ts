@@ -14,6 +14,8 @@ export const READ_ONLY_POLICY: { [K in keyof Required<Actions>]: "block" | "drop
   toggleDictation: "block",
   record: "block",
   editor: "block",
+  // Checks words locally; the personal dictionary is a file on this machine, not the server.
+  spell: "allow",
   copy: "allow",
   targets: "allow",
   copyTo: "block",

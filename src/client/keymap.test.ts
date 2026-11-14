@@ -31,7 +31,7 @@ for (const [name, overrides] of [
     const bindings = resolveKeymap(overrides, { D: "desk" });
     const sheet = cheatSheet(
       bindings,
-      { shell: true, dictation: true, notice: true, attach: true },
+      { shell: true, dictation: true, notice: true, attach: true, spell: true },
       { Y: "copy", D: "desk" },
     );
     const anywhere = sheet[0]!.rows;

@@ -25,6 +25,8 @@ export interface Actions {
   toggleDictation?(): Promise<{ recording: boolean }>;
   /** Built-in dictation: starts recording the microphone. Absent when no recorder is usable. */
   record?(input?: { onLimit?: () => void }): Promise<Recording>;
+  /** Spell checking for the composer; absent when settings `spell.enabled` is false. */
+  spell?: import("./client/spell").SpellChecker;
   editor?(input: { cwd: string; path: string }): Promise<unknown>;
   /** OSC 52, plus the local clipboard tool when there is one. */
   copy(text: string): void;

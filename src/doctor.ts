@@ -247,7 +247,7 @@ async function actionsReport(
   const rows: DoctorReport["actions"] = [];
   const add = (name: string, available: boolean | null, detail: string) =>
     rows.push(
-      readOnly && name !== "copy text"
+      readOnly && name !== "copy text" && name !== "spell check"
         ? { name, available: false, detail: "blocked by --read-only" }
         : { name, available, detail },
     );
@@ -302,6 +302,13 @@ async function actionsReport(
     add("dictation", recorder.ready, recorder.ready ? `${recorder.name}; T3 web app → Settings → Voice must have a model installed` : recorder.reason);
   }
   await command("link mapping", "commands.mapUrl", settings.commands.mapUrl);
+  add(
+    "spell check",
+    settings.spell.enabled ? true : null,
+    settings.spell.enabled
+      ? "built-in English (US); words you add go to the personal dictionary file"
+      : "off (spell.enabled is false)",
+  );
   return rows;
 }
 

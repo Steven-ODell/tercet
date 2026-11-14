@@ -27,6 +27,7 @@ export const COMMANDS = [
   { id: "diff", keys: "Alt+d", label: "Diff" },
   { id: "dictation", keys: "Alt+v", label: "Dictation", needs: "dictation" },
   { id: "attach", keys: "Alt+a", label: "Attach files", needs: "attach" },
+  { id: "spell", keys: "Alt+s", label: "Spelling suggestions", needs: "spell" },
   { id: "palette", keys: "Ctrl+p", label: "Palette" },
   { id: "newThread", keys: "Ctrl+n", label: "New thread" },
   { id: "search", keys: "Ctrl+/", label: "Search threads" },
@@ -59,7 +60,7 @@ export interface Binding {
   chord?: Chord;
   /** How the key is written in hints and help, e.g. "Alt+t" or "Ctrl+c ×2". */
   hint: string;
-  needs?: "shell" | "dictation" | "notice" | "attach";
+  needs?: "shell" | "dictation" | "notice" | "attach" | "spell";
 }
 
 /**
@@ -265,7 +266,13 @@ export interface CheatSheet {
  */
 export function cheatSheet(
   bindings: readonly Binding[],
-  available: { shell?: boolean; dictation?: boolean; notice?: boolean; attach?: boolean },
+  available: {
+    shell?: boolean;
+    dictation?: boolean;
+    notice?: boolean;
+    attach?: boolean;
+    spell?: boolean;
+  },
   targets: Readonly<Record<string, string>>,
 ): CheatSheet[] {
   return [

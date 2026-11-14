@@ -6,7 +6,8 @@ import { InlineImage } from "./image-preview";
 import { pendingCard, requestKey, RequestPanel } from "./requests";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useKeyboard, usePaste } from "@opentui/react";
-import { decodePasteBytes, type TextareaRenderable } from "@opentui/core";
+import { useSpellCheck } from "./spell-ui";
+import { decodePasteBytes, type BoxRenderable, type TextareaRenderable } from "@opentui/core";
 import type { RunId, ThreadId } from "@t3tools/contracts";
 import { createComposer, completionTrigger, requiresModifier } from "./composer-state";
 import { emojiChoices } from "./emoji";
@@ -188,6 +189,19 @@ function Editor({
   const [queuedIndex, setQueuedIndex] = useState(0);
   const [cursor, setCursor] = useState(0);
   const text = drafts[id] ?? "";
+  const root = useRef<BoxRenderable>(null);
+  const spell = useSpellCheck({
+    spell: effects?.spell,
+    editor,
+    root,
+    text,
+    caret: cursor,
+    replaceDraft: (next, caret) => {
+      editor.current?.replaceText(next);
+      if (editor.current) editor.current.cursorOffset = caret;
+      composer.setDraft(id, next);
+    },
+  });
   const thread = snapshot?.threads.find((thread) => thread.id === id);
   const project = snapshot?.projects.find((project) => project.id === thread?.projectId);
   const instanceId = thread?.modelSelection.instanceId;
@@ -283,6 +297,11 @@ function Editor({
       return;
     }
     if (!enabled) return;
+    if (spell.onKey(key)) return;
+    if (commandForKey(key) === "spell" && effects?.spell) {
+      if (spell.openAtCaret()) key.preventDefault();
+      return;
+    }
     if (key.name === "escape" && !effects?.toggleDictation && (recording || micState === "transcribing")) {
       key.preventDefault();
       dictation.cancel();
@@ -364,7 +383,7 @@ function Editor({
   });
   const queued = composer.queued(id);
   return (
-    <box flexDirection="column" width="100%" flexGrow={1} minHeight={0}>
+    <box ref={root} flexDirection="column" width="100%" flexGrow={1} minHeight={0}>
       {!collapsed && (
         <scrollbox height={queued.length ? 2 : 0} scrollY scrollX={false}>
           {queued.map((run, index) => (
@@ -529,7 +548,9 @@ function Editor({
           }
         }}
         onCursorChange={() => setCursor(editor.current?.cursorOffset ?? 0)}
+        onMouseUp={spell.onMouseUp}
       />
+      {spell.node}
       {choices.length > 0 && (
         <scrollbox height={2} scrollY>
           {choices.slice(Math.max(0, choice - 1), Math.max(0, choice - 1) + 2).map((value) => (

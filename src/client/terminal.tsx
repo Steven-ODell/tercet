@@ -21,6 +21,8 @@ export function TerminalPanel({
   cwd,
   worktreePath,
   enabled,
+  queuedRun,
+  onRunSent,
   width,
   height,
   close,
@@ -30,6 +32,9 @@ export function TerminalPanel({
   cwd: string | undefined;
   worktreePath: string | null;
   enabled: boolean;
+  /** A command from a code block's [run]: typed and entered once the shell is running. */
+  queuedRun?: { id: number; text: string };
+  onRunSent?: (id: number) => void;
   width: number;
   height: number;
   close: () => void;
@@ -135,6 +140,18 @@ export function TerminalPanel({
     for (let at = 0; at < data.length; at += 32_768)
       session.current?.send({ kind: "write", data: data.slice(at, at + 32_768) });
   };
+  const pasteText = (text: string) =>
+    write(
+      term.current?.modes.bracketedPasteMode
+        ? `\x1b[200~${text}\x1b[201~`
+        : text.replace(/\r?\n/g, "\r"),
+    );
+  useEffect(() => {
+    if (!queuedRun || state !== "running") return;
+    pasteText(queuedRun.text.trimEnd());
+    write("\r");
+    onRunSent?.(queuedRun.id);
+  }, [queuedRun, state]);
   useKeyboard((key) => {
     if (!enabled || key.defaultPrevented || key.meta || key.eventType === "release") return;
     key.preventDefault();
@@ -150,11 +167,7 @@ export function TerminalPanel({
     event.preventDefault();
     const text = decodePasteBytes(event.bytes);
     if (!text) return;
-    write(
-      term.current?.modes.bracketedPasteMode
-        ? `\x1b[200~${text}\x1b[201~`
-        : text.replace(/\r?\n/g, "\r"),
-    );
+    pasteText(text);
   });
   const screen = useMemo(
     () => (term.current ? screenText(term.current, enabled && state === "running") : undefined),

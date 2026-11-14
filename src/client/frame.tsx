@@ -59,7 +59,7 @@ export function AppFrame({
   client,
   onQuit,
   content = {},
-  effects,
+  effects: configured,
 }: {
   effects?: import("../actions").Actions;
   client: Client;
@@ -174,6 +174,23 @@ export function AppFrame({
   const [diffTarget, setDiffTarget] = useState<DiffTarget>();
   const [diffSerial, setDiffSerial] = useState(0);
   const [right, setRight] = useState<RightPanel | null>(null);
+  // [run] without a `commands.run` setting types the block into the side terminal and presses Enter.
+  const [queuedRun, setQueuedRun] = useState<{ id: number; text: string }>();
+  const effects = useMemo(
+    () =>
+      !configured || configured.run || !client.terminalAvailable
+        ? configured
+        : {
+            ...configured,
+            run: ({ command }: { cwd: string; command: string }) => {
+              setQueuedRun((last) => ({ id: (last?.id ?? 0) + 1, text: command }));
+              setRight("terminal");
+              setFocus("right");
+              return Promise.resolve();
+            },
+          },
+    [configured, client],
+  );
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const actions = useMemo(() => createThreadActions(client), [client]);
   useEffect(() => {
@@ -247,7 +264,7 @@ export function AppFrame({
       return;
     }
     // The composer runs attach itself (it owns the draft), from wherever a paste would land.
-    if (command === "attach") return;
+    if (command === "attach" || command === "spell") return;
     if (command === "hints") {
       setHintsShown(!hintsShown);
       return;
@@ -361,6 +378,7 @@ export function AppFrame({
       (found === "shell" && !effects?.shell) ||
       (found === "dictation" && !hasDictation(effects)) ||
       (found === "attach" && !effects?.pickFiles) ||
+      (found === "spell" && !effects?.spell) ||
       (found === "dismissNotice" && !notice)
         ? undefined
         : found;
@@ -413,6 +431,7 @@ export function AppFrame({
       dictation: hasDictation(effects),
       notice: !!notice,
       attach: !!effects?.pickFiles,
+      spell: !!effects?.spell,
     },
     targetKeys(effects),
   ).flatMap((part, i) => [
@@ -674,6 +693,8 @@ export function AppFrame({
                     }
                     worktreePath={selected?.worktreePath ?? null}
                     enabled={!overlay && focus === "right"}
+                    queuedRun={queuedRun}
+                    onRunSent={(id) => setQueuedRun((last) => (last?.id === id ? undefined : last))}
                     height={height - 6 - chromeRows}
                     width={
                       (width < 70

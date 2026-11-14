@@ -16,6 +16,7 @@ import {
   tmuxMedia,
 } from "./client/media";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import { terminalLifecycle } from "./terminal-lifecycle";
 import { createCliRenderer } from "@opentui/core";
 import * as Effect from "effect/Effect";
@@ -24,7 +25,7 @@ import { sshHostLookup, terminalActions } from "./actions";
 import { hostActions, systemHost } from "./portable";
 import { Hello } from "./hello";
 import { ConfigError, USAGE, connectionConfig, isLoopback } from "./client/config";
-import { SettingsError, migrateLegacyDir } from "./client/settings";
+import { SettingsError, migrateLegacyDir, settingsDir } from "./client/settings";
 import { TERCET_VERSION, runDoctor } from "./doctor";
 import { platform, readOptional } from "./client/platform";
 import {
@@ -177,6 +178,7 @@ try {
       writeTerminal: (bytes) => process.stdout.write(bytes),
       sshHost: sshHostLookup(process.env, output, (path) => Bun.file(path).text()),
       loadImage,
+      personalDictionary: join(settingsDir(process.env, homedir()), "dictionary.txt"),
     });
     // Shell, editor, tmux and run commands may switch tmux to another session (a launcher like
     // `tmux new-window` or a script around `switch-client`); see clearKittyBeforeSwitch.

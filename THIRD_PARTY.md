@@ -27,6 +27,11 @@ packages along with the vendored T3 code above. All are under the MIT License (p
 | `effect`              | 4.1.2   | Effectful Technologies Inc.         |
 | `@xterm/headless`     | 6.0.0   | the xterm.js authors                |
 | `@noble/hashes`       | 1.8.0   | Paul Miller                         |
+| `nspell`              | 2.1.5   | Titus Wormer                        |
+
+The bundle also inlines the English (US) spelling dictionary from `dictionary-en` 4.0.0, which is
+derived from SCOWL (Kevin Atkinson and others) and licensed MIT and BSD; the full text, with each
+contributor's notice, is in `node_modules/dictionary-en/license`.
 
 `@opentui/core` is not bundled; Bun installs it next to tercet as a normal dependency.
 

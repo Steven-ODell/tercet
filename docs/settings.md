@@ -88,6 +88,8 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
 | `launchers.terminal`, `.editor`, `.opener`, `.player`, `.picker` | command template                                                | see below                                  | now       |
 | `media.protocol`                                      | `auto`, `kitty`, `sixel`, `blocks`, `none`                      | `auto`                                     | now       |
 | `media.video`                                         | `player`, `terminal`                                            | `player`                                   | now       |
+| `spell.enabled`                                       | boolean                                                         | `true`                                     | now       |
+| `spell.dictionary`                                    | path                                                            | `<settings dir>/dictionary.txt`            | now       |
 | `commands.<name>`                                     | command template                                                | none                                       | now       |
 | `targets.<name>`                                      | `{ copy, key? }`                                                | none                                       | now       |
 
@@ -128,7 +130,7 @@ of `Esc`, `Enter`, `Tab`, `Space`, `Backspace`, `Delete`, `Insert`, `Up`, `Down`
 digit, Enter, Tab, Space or Backspace is refused, because it types. `"none"` unbinds.
 
 Commands: `shell`, `terminal`, `web`, `launchers`, `sidebar`, `model`, `effort`, `files`,
-`diff`, `dictation`, `attach` (the file picker), `palette`, `newThread`, `search`, `threadMenu`, `help`, `hints` (shows
+`diff`, `dictation`, `attach` (the file picker), `spell` (spelling suggestions), `palette`, `newThread`, `search`, `threadMenu`, `help`, `hints` (shows
 or hides the key hint rows at the bottom), `focusLeft`,
 `focusDown`, `focusUp`, `focusRight`, `leave`, `dismissNotice` (the server-version banner,
 listed only while it shows). `close` (Esc) and `quit` (Ctrl+c twice) are fixed.
@@ -246,7 +248,7 @@ one you typed on last), otherwise from tercet's own `SSH_CONNECTION`.
 | `shell`     | `{cwd}`           | opens a shell (`Alt+t`); `launchers.terminal` is used when absent   |
 | `editor`    | `{cwd}` `{path}`  | opens a file; else `launchers.editor`, inside `launchers.terminal`  |
 | `tmux`      | `{cwd}` `{text}`  | types a code block into a terminal without running it (`T`, [tmux]) |
-| `run`       | `{cwd}` `{text}`  | runs a closed shell code block (`X`, [run])                         |
+| `run`       | `{cwd}` `{text}`  | runs a closed shell code block (`X`, [run]); else the side terminal |
 | `send`      | `{text}` `{path}` | sends text or a file somewhere else (`F`, [send])                   |
 | `dictation` | built-in T3 speech | overrides built-in dictation (`Alt+v`, [mic]); may print `recording` or `idle` |
 | `mapUrl`    | `{url}`           | prints the link to open instead, for example a tunnel's address     |
@@ -323,6 +325,26 @@ server, its version and whether tercet supports it, the token file, and which op
 
 Each line starts with `ok`, `!!` (worth a look) or `-` (just information). The action rows
 follow the same chains tercet runs with, and a command that is not set up is `-`.
+
+## Spell check
+
+The composer underlines misspelled words in red as you type. The word under the caret is left
+alone until you move on, so nothing flashes while you are mid-word. Right-click an underlined
+word, or press `Alt+s` (the `spell` key) to jump to the word at the caret or the next flagged
+one, and a menu offers up to five corrections, `Add to dictionary` and `Ignore`. Click a choice,
+or use Up/Down with Enter, or press its number. Esc closes the menu.
+
+The English (US) dictionary is built in, so there is nothing to install, and it loads the first
+time the composer draws. Code spans and fences, URLs, paths, `@file` and `/skill` mentions,
+flags, `snake_case`, `camelCase` and ALL CAPS are never checked. `Add to dictionary` appends the
+word to `spell.dictionary` (one word per line, edit it by hand if you like); `Ignore` lasts until
+you quit.
+
+```jsonc
+"spell": { "enabled": true, "dictionary": "~/.config/tercet/dictionary.txt" }
+```
+
+Set `"enabled": false` to turn it all off. Other languages are not supported yet.
 
 ## Dictation
 

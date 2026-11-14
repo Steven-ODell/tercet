@@ -96,6 +96,12 @@ export interface Settings {
   commands: Partial<Record<CommandName, CommandSpec>>;
   /** Named clipboards (another machine, say) offered next to "copy", in file order. */
   targets: Record<string, { copy: CommandSpec; key?: string }>;
+  /** Misspelled words in the composer are underlined; right-click one for suggestions. */
+  spell: {
+    enabled: boolean;
+    /** Words you added, one per line. Defaults to `dictionary.txt` beside the settings file. */
+    dictionary?: string;
+  };
   /** Built-in dictation (used when `commands.dictation` is absent). */
   dictation: {
     /** Language hint sent with each recording: "auto" or a code such as "en". */
@@ -115,6 +121,7 @@ export const defaultSettings = (): Settings => ({
   media: { protocol: "auto", video: "player" },
   commands: {},
   targets: {},
+  spell: { enabled: true },
   dictation: { language: "auto" },
 });
 
@@ -495,6 +502,7 @@ const schema = struct({
     Object.fromEntries(Object.entries(COMMANDS).map(([name, vars]) => [name, withHost(vars)])),
   ),
   targets,
+  spell: struct({ enabled: bool, dictionary: text }),
   dictation: struct({ language: expect("a language code (2–16 characters)", (v) => typeof v === "string" && v.length >= 2 && v.length <= 16), recorder: template([]) }),
 });
 
@@ -534,6 +542,7 @@ export function parseSettings(
     media: { ...base.media, ...raw.media },
     commands: { ...base.commands, ...raw.commands },
     targets: { ...base.targets, ...raw.targets },
+    spell: { ...base.spell, ...raw.spell },
     dictation: { ...base.dictation, ...raw.dictation },
   };
   try {
@@ -546,5 +555,7 @@ export function parseSettings(
     settings.server.tokenFile = expandPath(settings.server.tokenFile, where.home, where.dir);
   if (settings.server.baseDir)
     settings.server.baseDir = expandPath(settings.server.baseDir, where.home, where.dir);
+  if (settings.spell.dictionary)
+    settings.spell.dictionary = expandPath(settings.spell.dictionary, where.home, where.dir);
   return settings;
 }

@@ -109,7 +109,7 @@ test("schema errors name the file, line and key", () => {
     `settings error in ${PATH}:3: theme.colour: unknown key; theme takes preset, accent`,
   );
   expect(failure('{\n  "sever": {}\n}')).toBe(
-    `settings error in ${PATH}:2: sever: unknown key; the top level takes server, theme, keys, icons, defaults, launchers, media, commands, targets, dictation`,
+    `settings error in ${PATH}:2: sever: unknown key; the top level takes server, theme, keys, icons, defaults, launchers, media, commands, targets, spell, dictation`,
   );
   expect(failure('{\n  "defaults": {\n\n    "mode": "yolo"\n  }\n}')).toBe(
     `settings error in ${PATH}:4: defaults.mode: expected one of "approval-required", "auto-accept-edits", "auto", "full-access", got "yolo"`,
@@ -314,4 +314,11 @@ test("dictation validates language and raw recorder command", () => {
   expect(parse('{"dictation":{"language":"en","recorder":["capture","--raw"]}}').dictation)
     .toEqual({ language: "en", recorder: ["capture", "--raw"] });
   expect(failure('{"dictation":{"language":12}}')).toContain("dictation.language");
+});
+
+test("spell defaults on, can be switched off, and takes a dictionary path", () => {
+  expect(parse("{}").spell).toEqual({ enabled: true });
+  expect(parse('{"spell":{"enabled":false}}').spell.enabled).toBe(false);
+  expect(parse('{"spell":{"dictionary":"~/words.txt"}}').spell.dictionary).toBe("/home/u/words.txt");
+  expect(failure('{"spell":{"enabled":"yes"}}')).toContain("spell.enabled");
 });

@@ -169,7 +169,8 @@ test("copy is OSC 52 plus the chosen tool; without a tool only OSC 52, and no pa
   expect(await wl.log()).toEqual(["wl-copy --type text/plain"]);
   const bare = build((await fakePath(["wl-copy"])).host).actions;
   bare.copy("x");
-  expect(Object.keys(bare).sort()).toEqual(["copy"]);
+  // Spell check is built in, so it is the one extra action a bare machine still has.
+  expect(Object.keys(bare).sort()).toEqual(["copy", "spell"]);
 });
 
 test("paste reads PNG before text where the tool lists types, and text only through xsel", async () => {
