@@ -759,7 +759,7 @@ test("while the composer is collapsed, the status line carries the mic's message
   }
 });
 
-test("a long dictation from another pane previews from its first words in the collapsed composer", async () => {
+test("a long dictation previews from its first words in the collapsed composer", async () => {
   const h = await composerFixture();
   const said = Array.from({ length: 30 }, (_, i) => `word${i + 1}`).join(" ");
   Object.assign(h.client, {
@@ -787,6 +787,9 @@ test("a long dictation from another pane previews from its first words in the co
     await view.waitForFrame((frame) => frame.includes("Mic recording"));
     await act(async () => view.mockInput.pressKey("v", { meta: true }));
     await view.waitForFrame((frame) => frame.includes("transcript added"));
+    // Alt+v opened the composer; leaving it collapses the composer with the transcript inside.
+    await act(async () => view.mockMouse.click(60, 5));
+    await view.waitForFrame((frame) => !frame.includes("send / queue]"));
     const collapsed = composerLines();
     expect(collapsed.lines[0]).toContain("word1 word2 word3");
     expect(collapsed.lines[0]).toContain("word30");
@@ -798,6 +801,40 @@ test("a long dictation from another pane previews from its first words in the co
     await act(async () => view.mockInput.pressKey("RETURN"));
     await view.flush();
     expect(h.commands[0]).toMatchObject({ type: "message.dispatch", text: `${said}!` });
+  } finally {
+    await act(async () => view.renderer.destroy());
+    await h.client.dispose();
+  }
+});
+
+test("Alt+v from another pane opens the composer, so typed dictation lands there whole", async () => {
+  const h = await composerFixture();
+  let recording = false;
+  // voxtype and other external tools type the transcript as keys, after the stop press.
+  const effects = {
+    copy() {},
+    toggleDictation: async () => ({ recording: (recording = !recording) }),
+  };
+  const view = await testRender(<AppFrame client={h.client} effects={effects} />, {
+    width: 120,
+    height: 40,
+    kittyKeyboard: true,
+    exitOnCtrlC: false,
+  });
+  try {
+    await view.waitForFrame((frame) => frame.includes("Focus: sidebar"));
+    await act(async () => view.mockMouse.click(60, 5));
+    await view.waitForFrame((frame) => frame.includes("Focus: transcript"));
+    await act(async () => view.mockInput.pressKey("v", { meta: true }));
+    await view.waitForFrame((frame) => frame.includes("Focus: composer"));
+    await act(async () => view.mockInput.pressKey("v", { meta: true }));
+    await view.flush();
+    // In the transcript these letters were commands until an "o" (Vim's open) reached the composer.
+    await act(async () => view.mockInput.typeText("hello there"));
+    await view.flush();
+    await act(async () => view.mockInput.pressKey("RETURN"));
+    await view.flush();
+    expect(h.commands[0]).toMatchObject({ type: "message.dispatch", text: "hello there" });
   } finally {
     await act(async () => view.renderer.destroy());
     await h.client.dispose();

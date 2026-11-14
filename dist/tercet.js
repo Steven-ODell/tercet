@@ -158437,6 +158437,8 @@ function AppFrame({
       return;
     }
     if (command2 === "dictation") {
+      if (!(focus === "right" && right === "terminal"))
+        setFocus("composer");
       dictation.toggle(selectedId ?? undefined);
       return;
     }

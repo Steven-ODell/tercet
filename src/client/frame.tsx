@@ -289,6 +289,10 @@ export function AppFrame({
       return;
     }
     if (command === "dictation") {
+      // As the [mic] button does, dictation writes in the composer: an external dictation tool
+      // (commands.dictation, e.g. voxtype) types its text as keys, and in another pane those keys
+      // are commands, so the first words were lost. A focused shell keeps them, to dictate there.
+      if (!(focus === "right" && right === "terminal")) setFocus("composer");
       void dictation.toggle(selectedId ?? undefined);
       return;
     }
