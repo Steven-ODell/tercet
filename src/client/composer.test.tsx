@@ -2,6 +2,7 @@ import { fileIcon } from "./icons";
 import { expect, test } from "bun:test";
 import { act } from "react";
 import { testRender } from "@opentui/react/test-utils";
+import { TextareaRenderable, type Renderable } from "@opentui/core";
 import * as Effect from "effect/Effect";
 import {
   ThreadId,
@@ -24,6 +25,48 @@ import { ThreadComposer } from "./composer";
 import { AppFrame } from "./frame";
 
 const id = ThreadId.make("composer");
+test("a long draft wraps inside the composer and keeps the caret beside the text", async () => {
+  const h = await composerFixture();
+  const view = await testRender(<AppFrame client={h.client} effects={{ copy() {} }} />, {
+    width: 100,
+    height: 40,
+    kittyKeyboard: true,
+    exitOnCtrlC: false,
+  });
+  const draft =
+    "I need to get back to how the workstation was because I am going to change how I use it in the future";
+  try {
+    await view.waitForFrame((frame) => frame.includes("Focus: sidebar"));
+    await act(async () => view.mockInput.pasteBracketedText(draft));
+    await view.flush();
+    const lines = view.captureCharFrame().split("\n");
+    const end = lines.findIndex((line) => line.includes("future"));
+    expect(end).toBeGreaterThan(lines.findIndex((line) => line.includes("I need")));
+    expect(view.renderer.getCursorState()).toMatchObject({
+      x: lines[end]!.indexOf("future") + "future".length + 1,
+      y: end + 1,
+      visible: true,
+    });
+    const findEditor = (node: Renderable): TextareaRenderable | undefined =>
+      node instanceof TextareaRenderable
+        ? node
+        : node.getChildren().map(findEditor).find(Boolean);
+    const editor = findEditor(view.renderer.root)!;
+    const rightBorder = lines[end]!.lastIndexOf("│");
+    for (const length of [editor.width - 1, editor.width, editor.width + 1, editor.width * 2]) {
+      await act(async () => {
+        editor.setText("x".repeat(length));
+        editor.cursorOffset = length;
+      });
+      await view.flush();
+      // Cursor coordinates are one-based; the border's string index is zero-based.
+      expect(view.renderer.getCursorState().x).toBeLessThanOrEqual(rightBorder);
+    }
+  } finally {
+    await act(async () => view.renderer.destroy());
+  }
+});
+
 test.each(["typing", "dictation", "clipboard"])(
   "%s opens the composer when it still has focus after a send",
   async (input) => {

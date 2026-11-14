@@ -2,7 +2,7 @@ import { theme } from "./theme";
 import { hintFor } from "./keymap";
 import { useEffect, useRef, useState } from "react";
 import { useKeyboard, usePaste } from "@opentui/react";
-import { decodePasteBytes } from "@opentui/core";
+import { decodePasteBytes, type ScrollBoxRenderable } from "@opentui/core";
 import { CommandId, type OrchestrationV2ThreadProjection, type ThreadId } from "@t3tools/contracts";
 import { derivePendingThreadRequests } from "@t3tools/client-runtime/state/thread-requests";
 import {
@@ -72,6 +72,9 @@ export function RequestPanel({
   const sending = useRef(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState("");
+  const scroll = useRef<ScrollBoxRenderable>(null);
+  // Arrow keys move the highlight, so keep the highlighted row inside the scrolled view.
+  useEffect(() => scroll.current?.scrollChildIntoView(`row-${index}`), [index]);
   useEffect(
     () => () => {
       value.current = "";
@@ -231,9 +234,26 @@ export function RequestPanel({
       if (n < labels.length) void submit(n);
     }
   });
+  const pinned = card.kind === "question" ? labels.length - 1 : -1;
+  const row = (label: string, n: number) => (
+    <text
+      key={label}
+      id={`row-${n}`}
+      flexShrink={0}
+      fg={index === n ? theme.accent : theme.muted}
+      onMouseUp={(event) => {
+        if (event.button === 0) {
+          setIndex(n);
+          void submit(n);
+        }
+      }}
+    >
+      {index === n ? "› " : "  "}[{n + 1} {label}]
+    </text>
+  );
   return (
-    <box height={10} flexShrink={0} border borderColor={theme.accent} flexDirection="column">
-      <scrollbox scrollY scrollX={false} flexGrow={1}>
+    <box height={12} flexShrink={0} border borderColor={theme.accent} flexDirection="column">
+      <scrollbox ref={scroll} scrollY scrollX={false} flexGrow={1}>
         <text fg={theme.accent}>
           {card.kind === "secret"
             ? card.item.label
@@ -259,23 +279,12 @@ export function RequestPanel({
                 {other ? `Other: ${customText}` : `Selected: ${selected.join(", ") || "none"}`}
               </text>
             )}
-            {labels.map((label, n) => (
-              <text
-                key={label}
-                fg={index === n ? theme.accent : theme.muted}
-                onMouseUp={(event) => {
-                  if (event.button === 0) {
-                    setIndex(n);
-                    void submit(n);
-                  }
-                }}
-              >
-                {index === n ? "› " : "  "}[{n + 1} {label}]
-              </text>
-            ))}
+            {labels.map((label, n) => (n === pinned ? null : row(label, n)))}
           </>
         )}
       </scrollbox>
+      {/* A four-option question overflows the panel; the submit row must never scroll away. */}
+      {!done && pinned >= 0 && row(labels[pinned]!, pinned)}
       <text fg={theme.plain} height={1} flexShrink={0}>
         {!available
           ? "Request cannot be resumed."

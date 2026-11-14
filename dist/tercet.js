@@ -149861,6 +149861,8 @@ function RequestPanel({
   const sending = import_react35.useRef(false);
   const [done4, setDone] = import_react35.useState(false);
   const [error2, setError] = import_react35.useState("");
+  const scroll = import_react35.useRef(null);
+  import_react35.useEffect(() => scroll.current?.scrollChildIntoView(`row-${index3}`), [index3]);
   import_react35.useEffect(() => () => {
     value4.current = "";
   }, []);
@@ -149997,14 +149999,35 @@ function RequestPanel({
         submit(n);
     }
   });
+  const pinned = card.kind === "question" ? labels2.length - 1 : -1;
+  const row = (label, n) => /* @__PURE__ */ import_jsx_runtime.jsxs("text", {
+    id: `row-${n}`,
+    flexShrink: 0,
+    fg: index3 === n ? theme.accent : theme.muted,
+    onMouseUp: (event) => {
+      if (event.button === 0) {
+        setIndex(n);
+        submit(n);
+      }
+    },
+    children: [
+      index3 === n ? "\u203A " : "  ",
+      "[",
+      n + 1,
+      " ",
+      label,
+      "]"
+    ]
+  }, label);
   return /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
-    height: 10,
+    height: 12,
     flexShrink: 0,
     border: true,
     borderColor: theme.accent,
     flexDirection: "column",
     children: [
       /* @__PURE__ */ import_jsx_runtime.jsxs("scrollbox", {
+        ref: scroll,
         scrollY: true,
         scrollX: false,
         flexGrow: 1,
@@ -150038,27 +150061,12 @@ function RequestPanel({
                 fg: theme.plain,
                 children: other ? `Other: ${customText}` : `Selected: ${selected.join(", ") || "none"}`
               }),
-              labels2.map((label, n) => /* @__PURE__ */ import_jsx_runtime.jsxs("text", {
-                fg: index3 === n ? theme.accent : theme.muted,
-                onMouseUp: (event) => {
-                  if (event.button === 0) {
-                    setIndex(n);
-                    submit(n);
-                  }
-                },
-                children: [
-                  index3 === n ? "\u203A " : "  ",
-                  "[",
-                  n + 1,
-                  " ",
-                  label,
-                  "]"
-                ]
-              }, label))
+              labels2.map((label, n) => n === pinned ? null : row(label, n))
             ]
           })
         ]
       }),
+      !done4 && pinned >= 0 && row(labels2[pinned], pinned),
       /* @__PURE__ */ import_jsx_runtime.jsx("text", {
         fg: theme.plain,
         height: 1,
@@ -154136,6 +154144,7 @@ function Editor({
         ref: editor2,
         flexGrow: 1,
         minHeight: 1,
+        marginRight: 1,
         focused: enabled,
         selectable: !collapsed,
         initialValue: text5,
@@ -158248,7 +158257,7 @@ function AppFrame({
   };
   const hasQueued = !agentId && !!selectedId && !!client.getThread(selectedId).projection?.runs.some((run3) => run3.status === "queued");
   const composerCollapsed = !hasCard && !hasQueued && (!!agentId || focus !== "composer" || sent);
-  const composerHeight = hasCard ? Math.min(17, Math.max(13, height - 5 - chromeRows)) : composerCollapsed ? 3 : 9;
+  const composerHeight = hasCard ? Math.min(19, Math.max(15, height - 5 - chromeRows)) : composerCollapsed ? 3 : 9;
   const [filePath, setFilePath] = import_react54.useState();
   const [diffTarget, setDiffTarget] = import_react54.useState();
   const [diffSerial, setDiffSerial] = import_react54.useState(0);

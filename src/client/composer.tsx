@@ -530,6 +530,8 @@ function Editor({
         ref={editor}
         flexGrow={1}
         minHeight={1}
+        // OpenTUI places the caret one cell past a full wrapped row. Keep it off the border.
+        marginRight={1}
         focused={enabled}
         // The collapsed line opens the editor; it must not reposition its caret.
         selectable={!collapsed}

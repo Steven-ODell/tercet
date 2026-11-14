@@ -162,7 +162,7 @@ export function AppFrame({
     !!client.getThread(selectedId).projection?.runs.some((run) => run.status === "queued");
   const composerCollapsed = !hasCard && !hasQueued && (!!agentId || focus !== "composer" || sent);
   const composerHeight = hasCard
-    ? Math.min(17, Math.max(13, height - 5 - chromeRows))
+    ? Math.min(19, Math.max(15, height - 5 - chromeRows))
     : composerCollapsed
       ? 3
       : 9;

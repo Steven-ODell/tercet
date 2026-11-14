@@ -49,10 +49,19 @@ function projection(
                   { label: "Purple", description: "Accent" },
                 ],
               },
-              { id: "q2", question: "Anything else?", header: "Notes", options: [] },
+              {
+                id: "q2",
+                question: "Anything else?",
+                header: "Notes",
+                options: [],
+              },
             ],
           }
-        : { type: "approval_request", requestId: "request", prompt: "Run command?" };
+        : {
+            type: "approval_request",
+            requestId: "request",
+            prompt: "Run command?",
+          };
   return {
     turnItems: [item],
     visibleTurnItems: [{ item, visibility }],
@@ -115,7 +124,10 @@ async function fixture(
     integrated ? (
       <AppFrame
         client={client}
-        content={{ transcript: <text>Transcript</text>, sidebar: <text>Threads</text> }}
+        content={{
+          transcript: <text>Transcript</text>,
+          sidebar: <text>Threads</text>,
+        }}
       />
     ) : (
       <box height="100%" flexDirection="column">
@@ -193,7 +205,11 @@ test("approval and denial work by key and pointer, duplicate submission prevente
       else await h.key("RETURN");
       await h.key("RETURN");
       expect(h.commands).toMatchObject([
-        { threadId: id, requestId: "request", decision: deny ? "decline" : "accept" },
+        {
+          threadId: id,
+          requestId: "request",
+          decision: deny ? "decline" : "accept",
+        },
       ]);
       expect(h.commands.length).toBe(1);
     } finally {
@@ -285,6 +301,51 @@ test("switching threads clears secret input instead of restoring it as a draft",
     expect(h.secrets).toEqual([]);
     expect(h.view.captureCharFrame()).toContain("Type or paste secret");
     expect(JSON.stringify(h.drafts)).not.toContain("discard-on-switch");
+  } finally {
+    await h.close();
+  }
+});
+
+test("four options with an unsent draft: Submit answer stays visible and sends the pick", async () => {
+  const h = await fixture("question");
+  try {
+    const base = h.client.registry.get(h.client.transcripts).get(id)!;
+    const p = base.projection as any;
+    const item = {
+      type: "user_input_request",
+      requestId: "request",
+      questions: [
+        {
+          id: "q",
+          question:
+            "Which of these four approaches should I take for the fix, given the tradeoffs?",
+          header: "Approach",
+          options: ["One", "Two", "Three", "Four"].map((label) => ({
+            label,
+            description: "-",
+          })),
+        },
+      ],
+    };
+    const set = (patch: object) =>
+      h.client.registry.set(
+        h.client.transcripts,
+        new Map([[id, { ...base, projection: { ...p, ...patch } }]]),
+      );
+    set({ turnItems: [], visibleTurnItems: [], runtimeRequests: [] });
+    await h.view.flush();
+    await h.type("half typed reply");
+    set({
+      turnItems: [item],
+      visibleTurnItems: [{ item, visibility: "local" }],
+    });
+    await h.view.flush();
+    const frame = h.view.captureCharFrame();
+    for (const label of ["5 Other", "6 Submit answer"]) expect(frame).toContain(label);
+    await h.click("Two");
+    expect(h.view.captureCharFrame()).toContain("Selected: Two");
+    await h.click("Submit answer");
+    expect(h.commands).toMatchObject([{ requestId: "request", answers: { q: ["Two"] } }]);
   } finally {
     await h.close();
   }
