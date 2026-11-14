@@ -1,5 +1,5 @@
-import { GitWorkflowError, gitWorkflowError } from "./git-workflows";
-import type { GitBoundary, GitRequest } from "./git-workflows";
+import { GitWorkflowError, gitWorkflowError } from "./git-workflows.ts";
+import type { GitBoundary, GitRequest } from "./git-workflows.ts";
 import type {
   OrchestrationV2ThreadStreamItem,
   OrchestrationV2ThreadHistoryPage,

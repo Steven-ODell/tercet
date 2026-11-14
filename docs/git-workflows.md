@@ -104,3 +104,21 @@ No live GitHub writes are tested.
 Next: create `src/client/git-workflows.tsx` branch dialog using `client.git`,
 `workspaceCwd`/`workspaceKey`, `createWorkflowResource`, `GitWorkflowError.kind`, and
 `GIT_READ_ONLY_POLICY`; integrate frame/keymap without replacing editor changes.
+
+## Branches
+
+Alt+g or clicking the branch header opens Branches (also in Help). Select a row with arrows/j/k and Enter or click it.
+`n` / Create branch asks for a name; Enter creates and switches. `r` / Refresh reloads
+local status and all paginated refs. Esc / Back leaves the view. Status includes dirty/clean
+and ahead/behind. Branches held in another worktree show their path and refuse switching.
+Dirty trees and active/queued runs in the same workspace refuse mutations. No force or retry.
+A successful write updates thread metadata with expected branch/path preconditions and reloads.
+Closing a view invalidates its UI result, but cannot undo Git or cancel its bookkeeping.
+The frame owns the controller across view lifetimes. Paths are passed verbatim to the server.
+
+`bun test src/client/git-workflows.test.ts src/client/git-workflows.test.tsx` runs portable
+boundary/controller/renderer tests. `bash scripts/test-git-workflows.sh` is the opt-in POSIX
+actual pinned-server rig on 3776, with disposable data and an explicitly scoped test token.
+It proves create-and-switch, switching back, conflicting dirty checkout refusal and edit
+preservation through both raw RPC and the workflow controller. Never uses daily data or
+live GitHub writes. Windows CI runs the portable tests; this process rig skips Windows.

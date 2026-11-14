@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { ProjectId, VcsListRefsResult, PullRequestSubmitReviewInput, type OrchestrationV2ShellSnapshot } from "@t3tools/contracts";
-import { createWorkflowResource, workspaceCwd, workspaceKey, gitWorkflowError, GIT_READ_ONLY_POLICY, type WorkflowState, type GitOperation, type GitInput } from "./git-workflows";
+import { createWorkflowResource, workspaceCwd, workspaceKey, gitWorkflowError, GIT_READ_ONLY_POLICY, type WorkflowState, type GitOperation, type GitInput } from "./git-workflows.ts";
 import { createClient, waitForLive, type Boundary } from "./runtime";
 import { platform } from "./platform";
 import { connectionConfig } from "./config";
