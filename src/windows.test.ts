@@ -102,7 +102,8 @@ test.skipIf(process.platform !== "win32" && !process.env.TERCET_PWSH)("PowerShel
   const clipboard = clipboardChain(settings, host).write!;
   const scripts = [windowsOpen(hostile), windowsPicker(hostile), windowsTerminal(hostile, ["nvim.exe", hostile]), windowsTerminal(hostile), clipboard.write("text/plain", {}), clipboard.write("image/png", {}), clipboard.read("text/plain", {}), clipboard.read("image/png", {}), clipboard.types!].map(scriptOf);
   scripts.push(await readFile(new URL("../install.ps1", import.meta.url), "utf8"));
-  const argv = powershell("foreach ($source in $value) { $tokens = $null; $errors = $null; [void][Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$errors); if ($errors.Count) { throw ($errors | Out-String) } }; [Console]::Write('parsed')", scripts);
+  // The scripts go over stdin: together with install.ps1 they exceed the 32,767-character command line limit.
+  const argv = powershell("$reader = [IO.StreamReader]::new([Console]::OpenStandardInput(), [Text.Encoding]::UTF8); $sources = ConvertFrom-Json $reader.ReadToEnd(); foreach ($source in $sources) { $tokens = $null; $errors = $null; [void][Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$errors); if ($errors.Count) { throw ($errors | Out-String) } }; [Console]::Write('parsed ' + $sources.Count)");
   if (process.env.TERCET_PWSH) { argv[0] = process.env.TERCET_PWSH; argv.splice(argv.indexOf("-Sta"), 1); }
-  expect(Buffer.from(await runArgs(systemHost(), argv, { capture: true })).toString("utf8")).toBe("parsed");
+  expect(Buffer.from(await runArgs(systemHost(), argv, { stdin: JSON.stringify(scripts), capture: true })).toString("utf8")).toBe(`parsed ${scripts.length}`);
 });
