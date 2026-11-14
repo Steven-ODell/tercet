@@ -45,9 +45,11 @@ import { applyLook } from "./client/look";
 import { asciiFrame, iconMode } from "./client/icons";
 import { theme } from "./client/theme";
 import { runKeys } from "./keys";
+import { attachWhenReady, runList, runTmux } from "./cli";
+import { runUpgrade } from "./upgrade";
 
 const args = process.argv.slice(2);
-if (args.includes("--help") || args.includes("-h")) {
+if ((args.includes("--help") || args.includes("-h")) && !["list", "tmux", "upgrade"].includes(args[0] ?? "")) {
   console.log(USAGE);
   process.exit(0);
 }
@@ -57,6 +59,16 @@ if (migrated) process.stderr.write(`${migrated}\n`);
 
 if (process.argv[2] === "doctor") process.exit(await runDoctor(process.argv.slice(3)));
 if (process.argv[2] === "keys") process.exit(await runKeys());
+if (process.argv[2] === "upgrade") process.exit(await runUpgrade(process.argv.slice(3)));
+if (process.argv[2] === "list") process.exit(await runList(process.argv.slice(3)));
+if (process.argv[2] === "tmux") process.exit(await runTmux(process.argv.slice(3)));
+// `tercet attach THREAD [options]`: the app on one thread, without the thread list.
+const attachTo = process.argv[2] === "attach" ? process.argv[3] : undefined;
+if (process.argv[2] === "attach" && (!attachTo || attachTo.startsWith("-"))) {
+  console.error("usage: tercet attach THREAD [options]   (THREAD: id, short id or part of the title)");
+  process.exit(2);
+}
+const appArgs = process.argv.slice(attachTo ? 4 : 2);
 if (process.argv.includes("--version")) {
   // Bun fixes NODE_ENV when it transpiles: dist/tercet.js is built as production, a checkout is not.
   const build = process.env.NODE_ENV === "production" ? "" : " (development build)";
@@ -67,7 +79,7 @@ if (process.argv.includes("--version")) {
 
 let activeRenderer: Awaited<ReturnType<typeof createCliRenderer>> | undefined;
 try {
-  const config = await connectionConfig(process.argv.slice(2), readOptional);
+  const config = await connectionConfig(appArgs, readOptional);
   // Printed before the TUI takes the screen, so it is there in scrollback after quitting.
   if (!config.settingsFound && !config.dumpStatus)
     process.stderr.write(
@@ -268,10 +280,18 @@ try {
           check={check}
           ignoreVersion={config.ignoreVersion}
           hideWarning={config.hideWarning}
-          onReady={() => client.start()}
+          onReady={() => {
+            client.start();
+            if (attachTo)
+              attachWhenReady(client, attachTo, (message) => {
+                renderer.destroy();
+                console.error(`tercet: ${message}`);
+                process.exitCode = 1;
+              });
+          }}
           onQuit={() => renderer.destroy()}
         >
-          <AppFrame client={client} effects={effects} />
+          <AppFrame client={client} effects={effects} attached={!!attachTo} />
         </ServerGate>
       ) : (
         <Hello actions={terminalActions((bytes) => process.stdout.write(bytes))} />

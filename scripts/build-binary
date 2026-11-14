@@ -1,0 +1,60 @@
+#!/usr/bin/env bun
+// Compiles src/main.tsx into one standalone executable for THIS machine's OS and CPU: the Bun
+// runtime, the bundle and OpenTUI's native library in a single file, so the person running it
+// needs no Bun. CI runs it on a native runner per platform (.github/workflows/release.yml).
+//
+//   scripts/build-binary              writes dist/bin/tercet-<os>-<arch>[.exe]
+//   scripts/build-binary --out DIR    writes it into DIR instead
+//
+// The executable ignores .env and bunfig.toml in the directory it is run from: tercet runs in
+// people's project folders, and their files must not change how it behaves.
+import { mkdirSync, rmSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { version } from "../package.json";
+
+const root = resolve(import.meta.dir, "..");
+const argv = process.argv.slice(2);
+const outAt = argv.indexOf("--out");
+const unknown = argv.filter((arg, i) => arg !== "--out" && i !== outAt + 1);
+if (unknown.length > 0 || (outAt >= 0 && !argv[outAt + 1])) {
+  console.error("build-binary: usage: scripts/build-binary [--out DIR]");
+  process.exit(2);
+}
+const outDir = resolve(outAt >= 0 ? argv[outAt + 1]! : join(root, "dist/bin"));
+
+const os = { linux: "linux", darwin: "darwin", win32: "windows" }[process.platform];
+const arch = { x64: "x64", arm64: "arm64" }[process.arch];
+if (!os || !arch) {
+  console.error(`build-binary: no release name for ${process.platform}/${process.arch}`);
+  process.exit(1);
+}
+const name = `tercet-${os}-${arch}${os === "windows" ? ".exe" : ""}`;
+const outfile = join(outDir, name);
+mkdirSync(outDir, { recursive: true });
+rmSync(outfile, { force: true });
+
+const build = Bun.spawnSync(
+  [
+    process.execPath,
+    "build",
+    "--compile",
+    "--no-compile-autoload-dotenv",
+    "--no-compile-autoload-bunfig",
+    "--define",
+    'process.env.NODE_ENV="production"',
+    join(root, "src/main.tsx"),
+    "--outfile",
+    outfile,
+  ],
+  { cwd: root, stdout: "inherit", stderr: "inherit" },
+);
+if (build.exitCode !== 0) process.exit(build.exitCode ?? 1);
+
+// A binary that cannot report its own version is not worth shipping.
+const probe = Bun.spawnSync([outfile, "--version"], { stdout: "pipe", stderr: "pipe" });
+const first = probe.stdout.toString().split("\n")[0];
+if (probe.exitCode !== 0 || first !== `tercet ${version}`) {
+  console.error(`build-binary: ${name} printed ${JSON.stringify(first)}, expected "tercet ${version}"`);
+  process.exit(1);
+}
+console.log(`build-binary: wrote ${outfile} (${(Bun.file(outfile).size / 1e6).toFixed(0)} MB, ${first})`);

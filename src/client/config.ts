@@ -31,6 +31,10 @@ export const isLoopback = (hostname: string) =>
 export const USAGE = `Usage: tercet [options]
        tercet doctor [--json] [options]
        tercet keys
+       tercet list [--json] [--all] [options]
+       tercet attach THREAD [options]
+       tercet tmux [--watch] [--session NAME] [options]
+       tercet upgrade [--check]
 
 Options:
   --url ORIGIN        The T3 server, e.g. http://127.0.0.1:3773
