@@ -69,7 +69,7 @@ mutations. Only the user's eventual trial connects this new UI to their daily se
 
 ## Steps
 
-- [ ] 1. Establish baseline and implement the typed Git/PR RPC boundary.
+- [x] 1. Establish baseline and implement the typed Git/PR RPC boundary.
   Read first: src/client/connection.ts (fileMethods, diffMethods, workspaceRefs), runtime.ts
   (Boundary/createClient), platform.ts (platform), read-only.ts (READ_ONLY_POLICY), and pinned
   vendor/t3/packages/contracts/src/{rpc,git,pullRequest}.ts. Inspect corresponding v0.1.8 web
@@ -120,6 +120,17 @@ mutations. Only the user's eventual trial connects this new UI to their daily se
   starting real provider turns. Document exact tests and limitations, action locations and
   the single absolute bun command above. Notify Sao, leave the final thread open for his test,
   and STOP. No launch of another step or advancement of P10.
+
+## Windows coordination (2026-11-14)
+
+Sao also authorized Windows support, being implemented independently in
+`/home/sao/Projects/Side/t3t-windows-support`. Keep Git paths opaque, including drive letters,
+spaces and UNC paths; all Git/worktree actions remain pinned server RPCs. Step 1 adds these
+fixtures in `src/client/git-workflows.test.ts` for Windows CI. Windows work owns windows.ts,
+portable/settings/doctor adapters, build/installer/CI/docs; coordinate before overlapping edits.
+Do not commit the Windows thread's changes or bundle. Carry coordination into every packet
+and verify convergence in step 5 before the final trial. Step 1 finished files are
+src/client/{connection,runtime,platform,git-workflows,git-workflows.test}.ts and docs/git-workflows.md.
 
 ## Handoff mechanics
 

@@ -1,3 +1,5 @@
+import { assertGitPolicy } from "./git-workflows";
+import type { GitBoundary, GitOperation, GitInput, GitOutput } from "./git-workflows";
 import {
   ModelFavorites,
   OrchestrationV2ThreadHistoryPage,
@@ -20,6 +22,7 @@ import {
   type UploadMeta,
   fileMethods,
   diffMethods,
+  gitMethods,
   pageUrl,
   mediaUrl,
   answerSecret,
@@ -75,7 +78,16 @@ export function tokenIssueArgs(config: Config) {
 
 export function platform(config: Config) {
   const draftPath = `${config.tokenFile}.drafts-${Bun.hash(config.url).toString(16)}.json`;
+  const git: GitBoundary = <K extends GitOperation>(token: string, operation: K, input: GitInput<K>) =>
+    Effect.suspend(() => {
+      try { assertGitPolicy(operation, config.readOnly); }
+      catch (error) { return Effect.fail(error); }
+      // The mapped operation keeps each input and output paired at the public boundary.
+      const method = gitMethods[operation] as (url: string, token: string, input: GitInput<K>) => Effect.Effect<GitOutput<K>, unknown>;
+      return method(config.url, token, input);
+    });
   const boundary = {
+    git,
     workspaceRefs: (token: string, cwd: string) => workspaceRefs(config.url, token, cwd),
     uploadImage: (token: string, bytes: Uint8Array, meta?: UploadMeta) =>
       uploadImage(config.url, token, bytes, meta),
