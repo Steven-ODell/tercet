@@ -31,6 +31,7 @@ export const COMMANDS = {
   /** Clipboard read; prints the clipboard in `{mime}`. */
   paste: ["mime"],
   shell: ["cwd"],
+  embeddedEditor: ["cwd", "path"],
   editor: ["cwd", "path"],
   /** Types `{text}` into a terminal without running it. */
   tmux: ["cwd", "text"],
@@ -58,7 +59,7 @@ export const LAUNCHER_PLACEHOLDERS = {
 /** Transcript keys a target may not take: the built-in target actions and vim's G and V. */
 export const RESERVED_TARGET_KEYS = ["Y", "T", "X", "F", "O", "G", "V"];
 /** Button labels already used by built-in actions, so a target cannot be named like one. */
-export const RESERVED_TARGET_NAMES = ["copy", "open", "tmux", "run", "send", "path"];
+export const RESERVED_TARGET_NAMES = ["copy", "open", "tmux", "run", "send", "path", "read", "stop reading", "__readback"];
 
 /** Each target's capital, as `{ D: "desk" }`. */
 export const settingsTargetKeys = (settings: Pick<Settings, "targets">) =>
@@ -67,6 +68,7 @@ export const settingsTargetKeys = (settings: Pick<Settings, "targets">) =>
   );
 
 export interface Settings {
+  readback: { enabled: boolean; engine: "local" | "http"; endpoint: string; voice: string; speed: number };
   server: {
     url?: string;
     tokenFile?: string;
@@ -91,6 +93,8 @@ export interface Settings {
     hints: boolean;
   };
   launchers: {
+    /** External editor destination; explicit commands.editor still wins. */
+    editorMode?: "terminal" | "tmux" | "direct";
     terminal?: CommandSpec;
     editor?: CommandSpec;
     opener?: CommandSpec;
@@ -119,6 +123,7 @@ export interface Settings {
 }
 
 export const defaultSettings = (): Settings => ({
+  readback: { enabled: true, engine: "local", endpoint: "http://127.0.0.1:8880/v1/audio/speech", voice: "af_heart", speed: 1 },
   server: {},
   theme: {},
   keys: {},
@@ -357,7 +362,7 @@ export const PLACEHOLDER = /\{\{|\{([a-z][A-Za-z]*)\}/g;
  */
 /** Programs whose `-c` takes code; tmux's `-c` is a start directory and stays allowed. */
 const interpreter = (arg: string) =>
-  /^((ba|z|da|k|a|fi)?sh|python[\d.]*|perl|ruby|node|bun|deno)$/.test(arg.split("/").pop()!);
+  /^((ba|z|da|k|a|fi)?sh|python[\d.]*|perl|ruby|node|bun|deno)$/.test(arg.split(/[\\/]/).pop()!.replace(/\.exe$/i, ""));
 const template =
   (allowed: readonly string[]): Check =>
   (value, path, problem) => {
@@ -375,8 +380,10 @@ const template =
           );
         if (
           index > 1 &&
-          /^-[A-Za-z]*c$/.test(args[index - 1]!) &&
-          args.slice(0, index - 1).some(interpreter)
+          ((/^-[A-Za-z]*[ce]$/.test(args[index - 1]!) &&
+            args.slice(0, index - 1).some(interpreter)) ||
+            (args.slice(0, index).some((a) => /^(powershell|pwsh|cmd)(\.exe)?$/i.test(a.split(/[\\/]/).at(-1)!)) &&
+              args.slice(1, index).some((a) => /^(?:-(?:c(?:o.*)?|e(?:n.*|c)?)|\/[ck])$/i.test(a))))
         )
           problem(
             at,
@@ -505,17 +512,27 @@ const schema = struct({
     sidebarWorkingShelf: bool,
     hints: bool,
   }),
-  launchers: struct(
-    Object.fromEntries(
+  launchers: struct({
+    ...Object.fromEntries(
       Object.entries(LAUNCHER_PLACEHOLDERS).map(([name, vars]) => [name, withHost(vars)]),
     ),
-  ),
+    editorMode: oneOf(["terminal", "tmux", "direct"]),
+  }),
   media: struct({ protocol: oneOf(MEDIA_PROTOCOLS), video: oneOf(VIDEO_MODES) }),
   commands: struct(
     Object.fromEntries(Object.entries(COMMANDS).map(([name, vars]) => [name, withHost(vars)])),
   ),
   targets,
   spell: struct({ enabled: bool, dictionary: text }),
+  readback: struct({
+    enabled: bool,
+    engine: oneOf(["local", "http"]),
+    endpoint: expect("an HTTP(S) URL without credentials", (v) => {
+      try { const url = new URL(String(v)); return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password; } catch { return false; }
+    }),
+    voice: text,
+    speed: expect("a number from 0.25 to 4", (v) => typeof v === "number" && Number.isFinite(v) && v >= 0.25 && v <= 4),
+  }),
   dictation: struct({
     language: expect(
       "a language code (2–16 characters)",
@@ -552,6 +569,7 @@ export function parseSettings(
   const raw = schema(parsed.value, "", problem) as Partial<Record<keyof Settings, any>>;
   const base = defaultSettings();
   const settings: Settings = {
+    readback: { ...base.readback, ...raw.readback },
     server: { ...base.server, ...raw.server },
     theme: { ...base.theme, ...raw.theme },
     keys: { ...base.keys, ...raw.keys },

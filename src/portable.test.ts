@@ -169,8 +169,8 @@ test("copy is OSC 52 plus the chosen tool; without a tool only OSC 52, and no pa
   expect(await wl.log()).toEqual(["wl-copy --type text/plain"]);
   const bare = build((await fakePath(["wl-copy"])).host).actions;
   bare.copy("x");
-  // Spell check is built in, so it is the one extra action a bare machine still has.
-  expect(Object.keys(bare).sort()).toEqual(["copy", "spell"]);
+  // Built-in spell checking and readback remain available with actionable setup errors.
+  expect(Object.keys(bare).sort()).toEqual(["copy", "readback", "spell", "stopReadback"]);
 });
 
 test("paste reads PNG before text where the tool lists types, and text only through xsel", async () => {
@@ -488,7 +488,93 @@ esac
   expect((await fake.log()).filter((line) => line.startsWith("zenity"))).toHaveLength(1);
   // A machine without a desktop still offers attach when ssh can reach the client.
   const headless = await fakePath(["ssh"]);
-  expect(build(headless.host, defaultSettings(), { sshHost: async () => "x" }).actions.pickFiles)
-    .toBeDefined();
+  expect(
+    build(headless.host, defaultSettings(), { sshHost: async () => "x" }).actions.pickFiles,
+  ).toBeDefined();
   expect(REMOTE_PICKER).toContain("wayland-");
+});
+
+test("external editor uses VISUAL before EDITOR, opens terminal editors in a window, and keeps argv boundaries", async () => {
+  const fake = await fakePath(["ghostty", "nvim", "vi"], {
+    VISUAL: "nvim --clean",
+    EDITOR: "vi",
+    WAYLAND_DISPLAY: "test",
+  });
+  await writeFile(
+    fake.dir + "/ghostty",
+    "#!" +
+      process.execPath +
+      "\nawait Bun.write(" +
+      JSON.stringify(fake.dir + "/argv.json") +
+      ", JSON.stringify(process.argv.slice(2)));",
+  );
+  const { actions } = build(fake.host);
+  const path = "a ' $(not-a-command).txt";
+  await actions.editor!({ cwd: fake.dir, path });
+  expect(JSON.parse(await readFile(fake.dir + "/argv.json", "utf8"))).toEqual([
+    "--working-directory=" + fake.dir,
+    "-e",
+    "nvim",
+    "--clean",
+    fake.dir + "/" + path,
+  ]);
+});
+
+test("external GUI editors use argv directly, including executable paths outside PATH", async () => {
+  const fake = await fakePath(["code"], { VISUAL: "code --wait", WAYLAND_DISPLAY: "test" });
+  await build(fake.host).actions.editor!({ cwd: fake.dir, path: "a.txt" });
+  expect(await fake.log()).toEqual(["code --wait " + fake.dir + "/a.txt"]);
+  const settings = settingsWith(
+    JSON.stringify({ launchers: { editor: [fake.dir + "/code", "{path}"], editorMode: "direct" } }),
+  );
+  const withoutPath = systemHost({ PATH: "/not-here" }, "linux");
+  await build(withoutPath, settings).actions.editor!({ cwd: fake.dir, path: "b.txt" });
+  expect((await fake.log()).at(-1)).toBe("code b.txt");
+});
+
+test("no configured editor stays unset; missing editor gives linking guidance; custom commands win", async () => {
+  const fake = await fakePath(["ghostty", "nvim"], { WAYLAND_DISPLAY: "test" });
+  expect(build(fake.host).actions.editor).toBeUndefined();
+  const missing = settingsWith('{"launchers":{"editor":"missing-editor","editorMode":"tmux"}}');
+  await expect(
+    build(fake.host, missing).actions.editor!({ cwd: fake.dir, path: "a" }),
+  ).rejects.toThrow("full executable path");
+  const custom = settingsWith(
+    '{"commands":{"editor":["nvim","{path}"]},"launchers":{"editor":"missing-editor","editorMode":"tmux"}}',
+  );
+  await build(fake.host, custom).actions.editor!({ cwd: fake.dir, path: "custom" });
+  expect((await fake.log()).at(-1)).toBe("nvim custom");
+});
+
+test("automatic external editing rejects direct remote paths and tmux mode explains missing attachment", async () => {
+  const fake = await fakePath(["nvim", "tmux"], { EDITOR: "nvim" });
+  const settings = settingsWith('{"launchers":{"editorMode":"tmux"}}');
+  await expect(
+    build(fake.host, settings, { localWorkspace: false }).actions.editor!({
+      cwd: fake.dir,
+      path: "a",
+    }),
+  ).rejects.toThrow("SSH");
+  await expect(
+    build(fake.host, settings).actions.editor!({ cwd: fake.dir, path: "a" }),
+  ).rejects.toThrow("attached tmux");
+});
+
+test("quoted VISUAL paths and flags are parsed without expanding shell syntax", async () => {
+  const fake = await fakePath(["code"], { VISUAL: "code --wait", EDITOR: "ignored" });
+  fake.host.env.VISUAL = '"' + fake.dir + '/code" --reuse-window "$(literal)"';
+  await build(fake.host).actions.editor!({ cwd: fake.dir, path: "file" });
+  expect((await fake.log()).at(-1)).toBe("code --reuse-window $(literal) " + fake.dir + "/file");
+  fake.host.env.VISUAL = '"unclosed';
+  await expect(build(fake.host).actions.editor!({ cwd: fake.dir, path: "file" })).rejects.toThrow(
+    "unclosed quote",
+  );
+});
+
+test("missing custom editor commands also explain how to link an executable", async () => {
+  const fake = await fakePath([]);
+  const settings = settingsWith('{"commands":{"editor":"not-installed"}}');
+  await expect(
+    build(fake.host, settings).actions.editor!({ cwd: fake.dir, path: "file" }),
+  ).rejects.toThrow("full executable path");
 });

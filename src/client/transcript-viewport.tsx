@@ -1,7 +1,7 @@
 import { theme } from "./theme";
 import { ImagePreview } from "./image-preview";
 import { mediaKind } from "./media";
-import { memo, useContext, useMemo, useRef, useState } from "react";
+import { memo, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { HintsShown } from "./keymap";
 import {
   failureText,
@@ -166,6 +166,25 @@ export function TranscriptViewport({
   const [target, setTarget] = useState<Target>();
   const [hoveredImage, setHoveredImage] = useState<Target>();
   const [feedback, setFeedback] = useState("");
+  const [reading, setReading] = useState(false);
+  const readGeneration = useRef(0);
+  useEffect(() => () => { readGeneration.current++; effects?.stopReadback?.(); }, [effects]);
+  const stopReading = () => {
+    readGeneration.current++;
+    effects?.stopReadback?.();
+    setReading(false);
+    setFeedback("Readback stopped");
+  };
+  const read = (text: string) => {
+    if (!effects?.readback) return;
+    const generation = ++readGeneration.current;
+    setReading(true);
+    setFeedback("Preparing / reading response…");
+    void effects.readback(text).then(
+      () => { if (generation === readGeneration.current) setFeedback("Readback finished"); },
+      (error) => { if (generation === readGeneration.current) setFeedback(`X ${error instanceof Error ? error.message : "Readback failed"}`); },
+    ).finally(() => { if (generation === readGeneration.current) setReading(false); });
+  };
   const busy = useRef(false);
   const nativeSelection = useRef(false);
   const run = (label: string, task: () => unknown) => {
@@ -188,6 +207,7 @@ export function TranscriptViewport({
   const targets = targetNames(effects);
   const perform = (action: string, value = target) => {
     if (!effects || !value) return;
+    if (action === "read" && value.kind === "message") { read(value.text); return; }
     if (
       value.kind === "code" ? !value.actions?.includes(action as BlockAction) : action === "run"
     ) {
@@ -281,7 +301,7 @@ export function TranscriptViewport({
   const setAnchor = anchorState?.set ?? setLocalAnchor;
   const rows = useMemo(
     () =>
-      cache.rows(items, width, Math.max(1, height - (effects ? 3 : 1)), offeredActions(effects)),
+      cache.rows(items, width, Math.max(1, height - (effects ? 3 : 1)), [...offeredActions(effects), ...(effects?.readback ? ["__readback"] : [])]),
     [cache, items, width, height, effects],
   );
   const [focus, setFocus] = useState<string | null>(null);
@@ -341,6 +361,14 @@ export function TranscriptViewport({
       : /^[\x21-\x7e]$/.test(key.sequence)
         ? key.sequence
         : key.name;
+    if (ch === "R" && effects?.readback) {
+      const row = v.cursor ? rows[posOf(v.cursor)!.row] : rows.slice(start, start + viewport).findLast((row) => !!row.target);
+      const item = items.find((item) => String(item.id) === (row ? rowMessage(row) : ""));
+      if (item?.kind === "assistant") read(item.text);
+      key.preventDefault();
+      return;
+    }
+    if (ch === "escape" && reading) { stopReading(); return; }
     const imageTarget = hoveredImage ?? target;
     if ((ch === "l" || ch === "return") && imageTarget?.kind === "image") {
       key.preventDefault();
@@ -648,6 +676,9 @@ export function TranscriptViewport({
       {effects && (
         <box height={hints ? 2 : 1} flexShrink={0} flexDirection="column">
           <box height={1} flexDirection="row">
+            {reading && <box onMouseUp={(e) => { if (enabled && e.button === 0) stopReading(); }}>
+              <text selectable={false} fg={theme.accent}>[stop reading] </text>
+            </box>}
             {target ? (
               [
                 ...(target.kind === "image"

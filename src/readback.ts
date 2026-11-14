@@ -1,0 +1,238 @@
+// Kokoro synthesis is independent of T3's dictation service. Never send T3 credentials here.
+import { spawn } from "node:child_process";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { join, win32 } from "node:path";
+import { shellQuote } from "./actions";
+import type { Host } from "./portable";
+import type { Settings } from "./client/settings";
+
+/** Preserve spoken content while removing common Markdown decoration and link destinations. */
+export function spokenText(text: string) {
+  return text
+    .replace(/```[^\n]*\n([\s\S]*?)(?:```|$)/g, "$1")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/^\s{0,3}(?:#{1,6}\s+|>\s?)/gm, "")
+    .replace(/[*_`~]/g, "")
+    .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "")
+    .trim();
+}
+
+// Same local model/venv and voice-language mapping as Phone Assist's tts_worker.py.
+// One cancellable process per Read; no hub credentials, HTTP service or resident worker.
+const LOCAL_SYNTHESIS = String.raw`
+import io, json, sys, wave
+from pathlib import Path
+import numpy as np
+from kokoro_onnx import Kokoro
+home = Path(sys.argv[1])
+req = json.load(sys.stdin)
+model = Kokoro(str(home / "kokoro-v1.0.onnx"), str(home / "voices-v1.0.bin"))
+samples, rate = model.create(req["text"], voice=req["voice"], speed=float(req["speed"]), lang={"a":"en-us", "b":"en-gb"}.get(req["voice"][:1], "en-us"))
+pcm = (np.clip(samples, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+audio = io.BytesIO()
+with wave.open(audio, "wb") as wav:
+    wav.setnchannels(1)
+    wav.setsampwidth(2)
+    wav.setframerate(int(rate))
+    wav.writeframes(pcm)
+sys.stdout.buffer.write(audio.getvalue())
+`;
+export function localReadbackCommand(env: NodeJS.ProcessEnv = process.env, home = homedir(), windows = process.platform === "win32") {
+  const pathJoin = windows ? win32.join : join;
+  const modelHome = env.KOKORO_HOME || pathJoin(home, "Projects", "Side", "kokoro");
+  const python = env.KOKORO_PYTHON || pathJoin(modelHome, ".venv", ...(windows ? ["Scripts", "python.exe"] : ["bin", "python"]));
+  return { python, args: ["-c", LOCAL_SYNTHESIS, modelHome] };
+}
+export async function synthesizeLocalReadback(text: string, settings: Settings["readback"], signal: AbortSignal) {
+  const input = spokenText(text);
+  if (!input) throw new Error("No text to read.");
+  if (input.length > 30_000) throw new Error("Response is too long to read (30,000 character limit).");
+  signal.throwIfAborted();
+  const command = localReadbackCommand();
+  return new Promise<Uint8Array>((resolve, reject) => {
+    const child = spawn(command.python, command.args, { stdio: ["pipe", "pipe", "ignore"], windowsHide: true, signal });
+    const abort = () => { child.kill(); reject(signal.reason); };
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+    const parts: Buffer[] = [];
+    let size = 0;
+    let failure: Error | undefined;
+    child.once("error", (error) => {
+      failure = error;
+      reject(signal.aborted ? signal.reason : new Error("Cannot start local Kokoro Python. Check KOKORO_HOME and its .venv, or KOKORO_PYTHON."));
+    });
+    child.stdin.on("error", () => {}); // Early worker exit is reported through close below.
+    child.stdout.on("data", (part: Buffer) => {
+      size += part.length;
+      if (size > MAX_AUDIO) { failure = new Error("Kokoro audio exceeds the 64 MB limit."); child.kill(); }
+      else parts.push(part);
+    });
+    child.once("close", (code) => {
+      signal.removeEventListener("abort", abort);
+      if (signal.aborted) { reject(signal.reason); return; }
+      if (failure || code !== 0) { reject(new Error("Local Kokoro generation failed. Check KOKORO_HOME, its .venv, model/voice files and selected voice (same setup as Phone Assist hub).")); return; }
+      const audio = Buffer.concat(parts);
+      if (audio.toString("ascii", 0, 4) !== "RIFF" || audio.toString("ascii", 8, 12) !== "WAVE") { reject(new Error("Local Kokoro returned invalid WAV audio.")); return; }
+      resolve(audio);
+    });
+    child.stdin.end(JSON.stringify({ text: input, voice: settings.voice, speed: settings.speed }));
+  });
+}
+
+const MAX_AUDIO = 64 * 1024 * 1024;
+export async function synthesizeReadback(
+  text: string,
+  settings: Settings["readback"],
+  signal: AbortSignal,
+  request: (url: string, init: RequestInit) => Promise<Response> = fetch,
+) {
+  const input = spokenText(text);
+  if (!input) throw new Error("No text to read.");
+  if (input.length > 30_000) throw new Error("Response is too long to read (30,000 character limit).");
+  let response: Response;
+  try {
+    response = await request(settings.endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "kokoro", input, voice: settings.voice,
+        speed: settings.speed, response_format: "wav", stream: false }),
+      redirect: "error",
+      signal,
+    });
+  } catch (error) {
+    if (signal.aborted) throw error;
+    throw new Error("Cannot reach Kokoro. Start Kokoro-FastAPI or check readback.endpoint in settings.");
+  }
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error(`Kokoro returned HTTP ${response.status}; check the service and readback.voice.`);
+  }
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("Kokoro returned no audio.");
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > MAX_AUDIO) throw new Error("Kokoro audio exceeds the 64 MB limit.");
+      parts.push(value);
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  const audio = Buffer.concat(parts);
+  if (audio.toString("ascii", 0, 4) !== "RIFF" || audio.toString("ascii", 8, 12) !== "WAVE")
+    throw new Error("Kokoro returned invalid WAV audio.");
+  return audio;
+}
+
+/** Spawn an audio-only player; never use an opener that could launch a window. */
+export async function playReadback(audio: Uint8Array, signal: AbortSignal, host: Host) {
+  const choice = [
+    ["mpv", "--no-video", "--no-terminal", "--really-quiet"],
+    ["ffplay", "-nodisp", "-autoexit", "-loglevel", "error"],
+    ["afplay"],
+  ].find(([name]) => host.which(name!));
+  if (!choice) throw new Error("Readback needs mpv, ffplay or afplay installed on this device.");
+  const dir = await mkdtemp(join(tmpdir(), "tercet-readback-"));
+  try {
+    const path = join(dir, "speech.wav");
+    await writeFile(path, audio, { mode: 0o600 });
+    signal.throwIfAborted();
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(host.which(choice[0]!)!, [...choice.slice(1), path], {
+        stdio: "ignore", env: host.env, windowsHide: true, signal,
+      });
+      let failure: Error | undefined;
+      child.once("error", (error) => { failure = error; });
+      child.once("close", (code) => failure ? reject(failure) : code === 0 ? resolve() : reject(new Error("Audio playback failed.")));
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Plays the WAV on the machine you type from, for a tercet running over SSH. It runs on that machine
+ * (non-interactive ssh has no XDG_RUNTIME_DIR, which PipeWire and PulseAudio sockets live under):
+ * the first `head -c N` bytes of stdin are the audio, and the rest of stdin is a leash. Tercet keeps
+ * it open while playing, so closing it (Stop, Esc, a dropped connection) EOFs the watcher, which
+ * kills the player.
+ */
+export const REMOTE_PLAYER = `export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+d=$(mktemp -d) || exit 1
+trap 'rm -rf "$d"' EXIT
+head -c "$1" > "$d/speech.wav" || exit 1
+if command -v mpv >/dev/null 2>&1; then set -- mpv --no-video --no-terminal --really-quiet
+elif command -v ffplay >/dev/null 2>&1; then set -- ffplay -nodisp -autoexit -loglevel error
+elif command -v afplay >/dev/null 2>&1; then set -- afplay
+elif command -v paplay >/dev/null 2>&1; then set -- paplay
+else echo "no audio player (mpv, ffplay, afplay or paplay) on $(uname -n)" >&2; exit 127; fi
+"$@" "$d/speech.wav" </dev/null >/dev/null 2>&1 &
+p=$!
+exec 3<&0 # background jobs in a non-interactive sh get /dev/null for stdin
+{ cat <&3 >/dev/null 2>&1; kill "$p" 2>/dev/null; } &
+w=$!
+wait "$p"; rc=$?
+kill "$w" 2>/dev/null
+exit "$rc"`;
+
+/** Plays through the speakers of `via`, the machine the user types from, over ssh. */
+export async function playReadbackVia(audio: Uint8Array, signal: AbortSignal, host: Host, via: string) {
+  const ssh = host.which("ssh");
+  if (!ssh) throw new Error("Playing on the machine you type from needs ssh installed here.");
+  signal.throwIfAborted();
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(
+      ssh,
+      ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", via, `sh -c ${shellQuote(REMOTE_PLAYER)} sh ${audio.length}`],
+      { stdio: ["pipe", "ignore", "pipe"], env: host.env, windowsHide: true, signal },
+    );
+    let failure: Error | undefined;
+    let said = "";
+    child.once("error", (error) => { failure = error; });
+    child.stderr.on("data", (part: Buffer) => { said = (said + part).slice(-300); });
+    child.stdin.on("error", () => {}); // The remote end can exit first; close reports why.
+    child.stdin.write(audio); // Left open on purpose: see REMOTE_PLAYER.
+    child.once("close", (code) => {
+      if (signal.aborted) reject(signal.reason);
+      else if (failure) reject(failure);
+      else if (code === 0) resolve();
+      else reject(new Error(said.trim() ? `Playback on ${via} failed: ${said.trim()}` : `Playback on ${via} failed (ssh exited ${code}).`));
+    });
+  });
+}
+
+/** One active response at a time, including synthesis. A new Read cancels the old one. */
+export function createReadback(
+  settings: Settings["readback"],
+  synthesize: (text: string, settings: Settings["readback"], signal: AbortSignal) => Promise<Uint8Array> = (text, settings, signal) => settings.engine === "http" ? synthesizeReadback(text, settings, signal) : synthesizeLocalReadback(text, settings, signal),
+  play: (audio: Uint8Array, signal: AbortSignal) => Promise<void>,
+) {
+  let active: AbortController | undefined;
+  return {
+    stopReadback() { active?.abort(); active = undefined; },
+    async readback(text: string) {
+      active?.abort();
+      const controller = new AbortController();
+      active = controller;
+      const timeout = setTimeout(() => controller.abort(new Error("Readback timed out; retry.")), 5 * 60_000);
+      try {
+        const audio = await synthesize(text, settings, controller.signal);
+        controller.signal.throwIfAborted();
+        await play(audio, controller.signal);
+      } catch (error) {
+        if (!controller.signal.aborted) throw error;
+        if (controller.signal.reason instanceof Error && controller.signal.reason.message.startsWith("Readback timed out"))
+          throw controller.signal.reason;
+      } finally {
+        clearTimeout(timeout);
+        if (active === controller) active = undefined;
+      }
+    },
+  };
+}

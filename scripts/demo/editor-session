@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# VHS-only private tmux host: disposable file, no server, no daily settings.
+set -euo pipefail
+root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
+dir=${TERCET_DEMO_DIR:?Use scripts/demo/record-extended}
+socket="tercet-demo-editor-$$"
+cleanup() { tmux -L "$socket" kill-server >/dev/null 2>&1 || true; }
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
+mkdir -p "$dir/workspace" "$dir/config"
+cat > "$dir/workspace/forecast.ts" <<'TS'
+// Forecast display preferences
+export const forecast = {
+  city: "Phoenix",
+  units: "metric",
+};
+TS
+printf 'set -g status off\nset -g focus-events on\nset -g default-terminal xterm-256color\n' > "$dir/tmux.conf"
+tmux -L "$socket" -f "$dir/tmux.conf" new-session -d -s tercet -c "$root" \
+  env COLORTERM=truecolor XDG_CONFIG_HOME="$dir/config" TERCET_DEMO_WORKSPACE="$dir/workspace" \
+  bun scripts/demo/app.tsx
+tmux -L "$socket" attach-session -t tercet

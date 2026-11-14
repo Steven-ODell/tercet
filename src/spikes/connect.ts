@@ -14,7 +14,10 @@ import * as Stream from "effect/Stream";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as Socket from "effect/socket/Socket";
 
-export const sandboxUrl = "http://127.0.0.1:3775";
+const sandboxPort = process.env.TERCET_SANDBOX_PORT ?? "3775";
+if (sandboxPort !== "3775" && sandboxPort !== "3776")
+  throw new Error("Sandbox port must be 3775 or 3776 (never the daily server).");
+export const sandboxUrl = `http://127.0.0.1:${sandboxPort}`;
 // scripts/sandbox.sh writes the token into its sandbox dir and exports TERCET_SANDBOX_DIR.
 export const tokenPath = process.env.TERCET_SANDBOX_DIR
   ? join(process.env.TERCET_SANDBOX_DIR, "token")

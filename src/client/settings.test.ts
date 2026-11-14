@@ -109,7 +109,7 @@ test("schema errors name the file, line and key", () => {
     `settings error in ${PATH}:3: theme.colour: unknown key; theme takes preset, accent`,
   );
   expect(failure('{\n  "sever": {}\n}')).toBe(
-    `settings error in ${PATH}:2: sever: unknown key; the top level takes server, theme, keys, icons, defaults, launchers, media, commands, targets, spell, dictation`,
+    `settings error in ${PATH}:2: sever: unknown key; the top level takes server, theme, keys, icons, defaults, launchers, media, commands, targets, spell, readback, dictation`,
   );
   expect(failure('{\n  "defaults": {\n\n    "mode": "yolo"\n  }\n}')).toBe(
     `settings error in ${PATH}:4: defaults.mode: expected one of "approval-required", "auto-accept-edits", "auto", "full-access", got "yolo"`,
@@ -127,7 +127,7 @@ test("schema errors name the file, line and key", () => {
     ":2: commands.run: expected a program name or a non-empty list of arguments, got a list",
   );
   expect(failure('{"commands": {\n  "my cmd": "x"\n}}')).toContain(
-    ':2: commands["my cmd"]: unknown key; commands takes copy, paste, shell, editor, tmux, run, send, dictation, mapUrl',
+    ':2: commands["my cmd"]: unknown key; commands takes copy, paste, shell, embeddedEditor, editor, tmux, run, send, dictation, mapUrl',
   );
   expect(failure('{"server": {"url": "http://box:3773/path"}}')).toContain(
     ":1: server.url: expected an http(s) server origin",
@@ -275,7 +275,7 @@ test("keys rebind commands, and a conflict names both actions on one line", () =
     "Ctrl+/ is bound to both palette and search",
   );
   expect(failure('{"keys": {"newthread": "Ctrl+t"}}')).toContain(
-    "keys.newthread: unknown action; actions are shell, terminal,",
+    "keys.newthread: unknown action; actions are shell, editor, terminal,",
   );
   expect(failure('{"keys": {"help": "h"}}')).toContain("a bare h types text; add Ctrl or Alt");
   expect(failure('{"keys": {"help": "Cmd+k"}}')).toContain("Cmd is not sent to terminal programs");
@@ -311,15 +311,18 @@ test("a pre-rename t3t config dir moves to tercet and leaves a symlink", async (
 });
 
 test("dictation validates language and raw recorder command", () => {
-  expect(parse('{"dictation":{"language":"en","recorder":["capture","--raw"]}}').dictation)
-    .toEqual({ language: "en", recorder: ["capture", "--raw"] });
+  expect(parse('{"dictation":{"language":"en","recorder":["capture","--raw"]}}').dictation).toEqual(
+    { language: "en", recorder: ["capture", "--raw"] },
+  );
   expect(failure('{"dictation":{"language":12}}')).toContain("dictation.language");
 });
 
 test("spell defaults on, can be switched off, and takes a dictionary path", () => {
   expect(parse("{}").spell).toEqual({ enabled: true });
   expect(parse('{"spell":{"enabled":false}}').spell.enabled).toBe(false);
-  expect(parse('{"spell":{"dictionary":"~/words.txt"}}').spell.dictionary).toBe("/home/u/words.txt");
+  expect(parse('{"spell":{"dictionary":"~/words.txt"}}').spell.dictionary).toBe(
+    "/home/u/words.txt",
+  );
   expect(failure('{"spell":{"enabled":"yes"}}')).toContain("spell.enabled");
 });
 
@@ -338,4 +341,17 @@ test("server.hideWarning is off unless the settings file turns it on", async () 
   await expect(
     connectionConfig([], withFile('{ "server": { "hideWarning": 1 } }'), "/home/u", env),
   ).rejects.toThrow("server.hideWarning: expected true or false");
+});
+
+test("external editor destinations and executable argv are configurable", () => {
+  for (const editorMode of ["terminal", "tmux", "direct"] as const) {
+    const settings = parseSettings(
+      JSON.stringify({ launchers: { editorMode, editor: ["/opt/VS Code/code", "{path}"] } }),
+      PATH,
+      { home: "/home/u", dir: "/x" },
+    );
+    expect(settings.launchers.editorMode).toBe(editorMode);
+    expect(settings.launchers.editor).toEqual(["/opt/VS Code/code", "{path}"]);
+  }
+  expect(failure('{"launchers":{"editorMode":"unknown"}}')).toContain("launchers.editorMode");
 });

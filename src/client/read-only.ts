@@ -6,6 +6,8 @@ import type { Actions } from "../actions";
  * fails; `drop` removes it; `allow` keeps it working (local, changes nothing).
  */
 export const READ_ONLY_POLICY: { [K in keyof Required<Actions>]: "block" | "drop" | "allow" } = {
+  readback: "block",
+  stopReadback: "allow",
   shell: "block",
   openThread: "block",
   pasteClipboard: "block",
@@ -14,6 +16,7 @@ export const READ_ONLY_POLICY: { [K in keyof Required<Actions>]: "block" | "drop
   toggleDictation: "block",
   record: "block",
   editor: "block",
+  embeddedEditor: "block",
   // Checks words locally; the personal dictionary is a file on this machine, not the server.
   spell: "allow",
   copy: "allow",

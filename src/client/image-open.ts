@@ -25,7 +25,7 @@ export async function resolveMediaTarget(
     return { target: await url(attachment.id, attachment.mime), size };
   }
   if (/^https?:\/\//i.test(source)) return { target: source };
-  if (!source.startsWith("file:") && /^[a-z][a-z0-9+.-]*:/i.test(source))
+  if (!/^[a-z]:[\\/]/i.test(source) && !source.startsWith("file:") && /^[a-z][a-z0-9+.-]*:/i.test(source))
     throw Error("Unsupported media source");
   const path = source.startsWith("file:")
     ? fileURLToPath(source)
@@ -53,7 +53,7 @@ export function imageOpenAction(
       const name = files.find((name) => name.startsWith(`${attachment.id}.`));
       if (name) path = join(attachmentsDir, name);
     } else if (!attachment && !/^https?:/i.test(source)) {
-      if (!source.startsWith("file:") && /^[a-z][a-z0-9+.-]*:/i.test(source))
+      if (!/^[a-z]:[\\/]/i.test(source) && !source.startsWith("file:") && /^[a-z][a-z0-9+.-]*:/i.test(source))
         throw Error("Unsupported image source");
       path = source.startsWith("file:")
         ? fileURLToPath(source)

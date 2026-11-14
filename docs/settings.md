@@ -132,7 +132,7 @@ of `Esc`, `Enter`, `Tab`, `Space`, `Backspace`, `Delete`, `Insert`, `Up`, `Down`
 (`"Y"` is `Shift+y`); for other shifted characters write the character (`"?"`). A bare letter,
 digit, Enter, Tab, Space or Backspace is refused, because it types. `"none"` unbinds.
 
-Commands: `shell`, `terminal`, `web`, `launchers`, `sidebar`, `model`, `effort`, `files`,
+Commands: `shell`, `terminal`, `editor`, `web`, `launchers`, `sidebar`, `model`, `effort`, `files`,
 `diff`, `dictation`, `attach` (the file picker), `spell` (spelling suggestions), `palette`, `newThread`, `search`, `threadMenu`, `help`, `hints` (shows
 or hides the key hint rows at the bottom), `focusLeft`,
 `focusDown`, `focusUp`, `focusRight`, `leave`, `dismissNotice` (the server-version banner,
@@ -273,6 +273,7 @@ Without `commands.copy` and `commands.paste` tercet uses the first tool it finds
 1. `wl-copy`/`wl-paste` when `WAYLAND_DISPLAY` is set (text and images)
 2. `xclip` when `DISPLAY` is set (text and images), then `xsel` (text only)
 3. `pbcopy`/`pbpaste` on macOS (text only)
+4. Windows PowerShell with the native Windows clipboard (text and images)
 
 Copying text always writes OSC 52 too, so it reaches your local clipboard over SSH when the
 terminal allows it. Image copy and image paste appear only when the tool handles images.
@@ -373,3 +374,132 @@ Only the server's local speech model is supported: no cloud providers, post-proc
 streaming or SSH audio forwarding. In SSH sessions automatic capture is disabled; an explicit
 `dictation.recorder` opts into capture on that host. `commands.dictation` takes precedence,
 keeps the external recording/idle protocol, and its output is never inserted as a transcript.
+
+### Embedded terminal editor
+
+The Files panel's `e` / **Edit here** uses a separate local PTY. Default:
+`nvim --clean -- {path}`, or `vi -- {path}` if Neovim is absent. Neovim's clean configuration
+avoids loading plugins; to use your own configuration, set:
+
+```jsonc
+{ "commands": { "embeddedEditor": ["nvim", "--", "{path}"] } }
+```
+
+This argv template accepts `{cwd}` and `{path}`; paths with spaces remain one argument.
+A bare program name gets the absolute file path appended. This command must stay in the
+foreground and use a terminal UI. `commands.editor` and `launchers.editor` still control
+only the external launcher (`o`). Settings apply on the next Tercet start.
+
+One editor session stays pinned to its launch workspace until its process exits. Hiding it,
+changing panels or switching threads preserves its buffers. `Alt+r` resumes it; `Alt+h` leaves
+focus and `Alt+c` hides it. App quit is blocked until the editor exits. Forced termination,
+crash or machine shutdown can still interrupt it; use the editor's own swap/recovery support.
+There is no persistent editor session after Tercet exits. Local loopback connections only:
+run Tercet through SSH on the server host. A forwarded loopback port is not supported.
+Read-only mode blocks launch before any PTY or file access.
+
+### External editor: system default, windows and tmux
+
+The Files panel's **o External editor** selects `commands.editor` first, then
+`launchers.editor`, then the environment's `VISUAL`, then `EDITOR`. There is no automatic
+Neovim fallback for external editing. With no editor set, Tercet asks you to set VISUAL/EDITOR
+in your shell profile or set launchers.editor in this file. Restart Tercet after changing it.
+
+Terminal editors normally open in a separate terminal window. On Linux, Tercet detects
+Ghostty, foot, kitty, WezTerm, Alacritty, GNOME Terminal, Konsole or xterm, in that order;
+a display must be available. On macOS it uses Terminal through osascript (not yet tested
+on hardware). Set launchers.terminal to override the terminal argv.
+
+Known GUI commands such as code, codium, zed and subl launch directly. An explicit
+launchers.editor for another GUI program also launches directly unless editorMode says
+otherwise. To link VS Code without putting it on PATH, set its executable's full path:
+
+```jsonc
+{
+  "launchers": {
+    "editor": ["/full/path/to/code", "{path}"],
+    "editorMode": "direct"
+  }
+}
+```
+
+For a macOS app bundle, the executable is typically
+`/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code`.
+Command arrays preserve spaces in executable names and selected file paths.
+VISUAL/EDITOR accept quoted program paths and flags; they are split into argv without shell
+evaluation. Shell substitutions and environment expansion inside those values are not run.
+A missing executable produces an error with instructions to link its full path.
+
+To opt into tmux sessions (Sao's preference):
+
+```jsonc
+{
+  "launchers": {
+    "editor": "nvim",
+    "editorMode": "tmux"
+  }
+}
+```
+
+Run Tercet inside an attached tmux session. Each external edit opens a separate session in the
+selected file's workspace. Quitting the editor returns the same client to its original session.
+There are no new tmux windows. This mode works over SSH; it reports a clear error outside tmux.
+The editor uses its normal user configuration. External sessions belong to tmux and are not
+killed when Tercet exits. Tercet refreshes file previews on return/focus; r also refreshes.
+
+editorMode accepts terminal, tmux or direct. With terminal explicitly selected, even an editor
+command in launchers.editor gets wrapped in a terminal window. commands.editor remains a
+complete custom launch command and overrides these defaults. Read-only mode blocks external
+launches. Automatic launching rejects direct remote-server paths; run Tercet on the server host.
+
+## Windows
+
+Native Windows uses the same settings location, `%USERPROFILE%\.config\tercet\settings.json`,
+or `$XDG_CONFIG_HOME/tercet/settings.json` when set to an absolute path. Use forward slashes
+in JSON paths, such as `C:/Program Files/Neovim/bin/nvim.exe`, or double each backslash.
+Windows clipboard (text and images), file dialogs and opening links/files use built-in Windows
+PowerShell. An unconfigured shell action opens PowerShell in a separate console.
+Terminal editors open in a separate console; GUI executables launch directly. Point at the
+actual `.exe` for a GUI editor, rather than its `.cmd` wrapper. `tmux` mode is for Unix hosts.
+
+Placeholders in PowerShell `-Command`/`-EncodedCommand` or cmd `/c`/`/k` source are rejected.
+Use an executable argv template or a fixed script that reads data from stdin.
+More details: [Windows setup](windows.md).
+
+
+## Response readback (Kokoro)
+
+Click **[read]** below an assistant response to generate and play speech locally. Stop reading
+or Esc cancels. Nothing is read automatically. Voice and speed are configurable:
+
+```jsonc
+"readback": {
+  "enabled": true,
+  "engine": "local",
+  "voice": "af_heart",
+  "speed": 1.0
+}
+```
+
+Local generation uses the same setup as Phone Assist hub: `KOKORO_HOME`, defaulting to
+`~/Projects/Side/kokoro`, containing `kokoro-v1.0.onnx`, `voices-v1.0.bin` and `.venv` with
+`kokoro_onnx` and numpy. `KOKORO_PYTHON` overrides its Python interpreter. British voices use
+en-gb phonemes, American voices en-us. A cancellable worker loads the model per Read and
+exits after generation; no hub request, hub token, additional service or Docker is needed.
+Voice IDs include af_heart, am_michael and bf_emma. Speed accepts 0.25–4. Restart after settings
+changes. Existing normal settings need no changes to use the local defaults.
+
+Optional `engine: "http"` uses `endpoint` (default
+`http://127.0.0.1:8880/v1/audio/speech`) for OpenAI-compatible Kokoro-FastAPI WAV synthesis.
+Only explicitly requested response text is sent there, never T3 credentials; redirects are
+refused. Local generation makes no HTTP requests.
+
+Speech is generated on the machine running tercet but plays where you click. Run locally, it
+plays there with mpv, ffplay or afplay and no window. Over SSH it plays on the machine you type
+from (the same `{sshHost}` lookup as the opener and clipboard commands, so inside tmux it
+follows the most recently active client): the WAV is sent through `ssh` to that machine and
+played with mpv, ffplay, afplay or paplay, with `XDG_RUNTIME_DIR` set so PipeWire/PulseAudio
+is found. That needs passwordless ssh back to the client, which the opener already requires.
+Stop or Esc ends the remote player too. Read-only sessions block Read; Stop stays available. Temporary audio is removed after play
+or cancellation. Limits: 30,000 characters, 64 MB audio and five minutes total. Tercet does
+not install models or change the hub. Generation errors appear beneath the transcript.

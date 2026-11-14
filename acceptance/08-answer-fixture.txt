@@ -2,13 +2,13 @@ tercet · live · threads=1 · Supervised                                   Cont
 › opencode/flint-40b-free · effort high
 ↱ branch unknown · /tmp/tercet-sandbox.XXXXXX/work/demo-app
 ╭─≡ Threads──────────────────╮╭─¶ Transcript───────────────────────────────────────────────────────────────────────────╮
-│[h] All threads             ││user                                                                                    │
-│                            ││Reply exactly acceptance-stream-ok. Do not use tools or change files.                   │
-│  tercet acceptance sandbox ││                                                                                        │
-│  › ? waiting · ■ demo-… now││────────────────────────────────────────────────────────────────────────────────────────│
-│  ▸ Settled (0)             ││[+] Thought · 1 work items                                                              │
-│                            ││assistant                                                                               │
+│[h] All threads             ││Reply exactly acceptance-stream-ok. Do not use tools or change files.                   │
+│                            ││                                                                                        │
+│  tercet acceptance sandbox ││────────────────────────────────────────────────────────────────────────────────────────│
+│  › ? waiting · ■ demo-… now││[+] Thought · 1 work items                                                              │
+│  ▸ Settled (0)             ││assistant                                                                               │
 │                            ││acceptance-stream-ok                                                                    │
+│                            ││[read]                                                                                  │
 │                            ││[+] checkpoint · completed · checkpoint                                                 │
 │                            ││[+] user input request · undefined · user input request                                 │
 │                            ││[copy]                                                                                  │

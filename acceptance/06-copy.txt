@@ -9,8 +9,8 @@ tercet · live · threads=1 · Supervised                                   Cont
 │  ▸ Settled (0)             ││[+] Thought · 1 work items                                                              │
 │                            ││assistant                                                                               │
 │                            ││acceptance-stream-ok                                                                    │
+│                            ││[read]                                                                                  │
 │                            ││[+] checkpoint · completed · checkpoint                                                 │
-│                            ││                                                                                        │
 │                            ││                                                                                        │
 │                            ││                                                                                        │
 │                            ││                                                                                        │

@@ -115,7 +115,9 @@ test("doctor reports a tmux machine with passthrough off and a supported server"
     available: null,
     detail: "not set up (add commands.shell to settings)",
   });
-  for (const name of ["editor", "type into a terminal", "run code block", "send"])
+  expect(action("editor")).toMatchObject({ available: false });
+  expect(action("editor")?.detail).toContain("No editor set");
+  for (const name of ["type into a terminal", "run code block", "send"])
     expect(action(name)?.available).toBeNull();
   expect(action("dictation")?.available).toBe(true);
   expect(action("dictation")?.detail).toContain("ffmpeg");

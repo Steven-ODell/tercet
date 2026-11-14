@@ -15,6 +15,9 @@ import {
 } from "./client/settings";
 import {
   clipboardChain,
+  externalEditorChoice,
+  externalEditorCommand,
+  NO_EDITOR,
   expand,
   openerChain,
   playerChain,
@@ -125,6 +128,7 @@ const commandName = (spec: string | readonly string[] | undefined) =>
   spec === undefined ? null : typeof spec === "string" ? spec : spec.join(" ");
 
 async function osName(probes: DoctorProbes) {
+  if (probes.platform === "win32") return "Windows";
   if (probes.platform === "darwin") {
     const result = await probes.run(["sw_vers", "-productVersion"]);
     return result.code === 0 ? `macOS ${result.stdout.trim()}` : "macOS";
@@ -231,7 +235,7 @@ async function serverReport(config: Config, probes: DoctorProbes): Promise<Docto
 /** A command's program: found on PATH, or an existing absolute path. */
 async function programOf(spec: CommandSpec, probes: DoctorProbes) {
   const program = typeof spec === "string" ? spec : spec[0]!;
-  const ok = program.includes("/") ? await probes.exists(program) : !!probes.which(program);
+  const ok = /[\\/]/.test(program) ? await probes.exists(program) : !!probes.which(program);
   return { program, ok };
 }
 
@@ -287,12 +291,47 @@ async function actionsReport(
   add("open links and files", !!opener, opener?.name ?? "no opener found");
   for (const [name, target] of Object.entries(settings.targets))
     await command(`copy to ${name}`, `targets.${name}.copy`, target.copy);
-  if (settings.commands.shell || !settings.launchers.terminal)
+  if (!settings.commands.shell && !settings.launchers.terminal && host.platform === "win32" && host.which("powershell.exe"))
+    add("shell", true, "Windows PowerShell");
+  else if (settings.commands.shell || !settings.launchers.terminal)
     await command("shell", "commands.shell", settings.commands.shell);
   else await command("shell", "launchers.terminal", settings.launchers.terminal);
-  if (settings.commands.editor || !settings.launchers.editor)
+  if (settings.commands.editor)
     await command("editor", "commands.editor", settings.commands.editor);
-  else await command("editor", "launchers.editor", settings.launchers.editor);
+  else {
+    const choice = externalEditorChoice(settings, host);
+    if (
+      settings.launchers.editor &&
+      !host.which(
+        typeof settings.launchers.editor === "string"
+          ? settings.launchers.editor
+          : settings.launchers.editor[0]!,
+      )
+    )
+      await command("editor", "launchers.editor", settings.launchers.editor);
+    else {
+      let editor: CommandSpec | undefined;
+      try {
+        editor = externalEditorCommand(settings, host);
+      } catch {}
+      const name = typeof editor === "string" ? editor : editor?.[0];
+      add(
+        "editor",
+        !!choice &&
+          !!name &&
+          !!host.which(name) &&
+          (choice.mode !== "tmux" ||
+            (!!host.which("tmux") && !!host.env.TMUX && !!host.env.TMUX_PANE)),
+        !name
+          ? NO_EDITOR
+          : !host.which(name)
+            ? `Editor "${name}" not found on PATH; set launchers.editor to its full executable path.`
+            : choice
+              ? `${choice.mode}: ${name}${choice.mode === "tmux" && !host.env.TMUX ? " (run Tercet inside tmux)" : ""}`
+              : "No terminal launcher found; configure launchers.terminal or editorMode.",
+      );
+    }
+  }
   await command("type into a terminal", "commands.tmux", settings.commands.tmux);
   await command("run code block", "commands.run", settings.commands.run);
   await command("send", "commands.send", settings.commands.send);
