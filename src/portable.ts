@@ -410,6 +410,9 @@ export function runArgs(host: Host, args: readonly string[], options: RunOptions
     // for the pipes to close.
     child.once("exit", (code, signal) => {
       exit = code;
+      // Captured commands settle on close, after stdout/stderr have drained. On macOS
+      // exit can arrive before the final error text, even for a short-lived command.
+      if (options.capture) return;
       if (!options.capture && code === 0) return finish();
       if (!options.capture && !child.stderr?.destroyed && !child.stderr?.readableEnded) {
         // A failed run's message is on stderr, which may not be read yet; wait for the pipe to
