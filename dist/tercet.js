@@ -153502,6 +153502,7 @@ function ThreadSidebar({
   const [settledVisible, setSettledVisible] = import_react46.useState(SETTLED_TAIL_INITIAL_COUNT);
   const [workingShelf, setWorkingShelf] = import_react46.useState(false);
   const [wakeTick, setWakeTick] = import_react46.useState(0);
+  const [limitsOpen, setLimitsOpen] = import_react46.useState(true);
   const [cursor, setCursor] = import_react46.useState();
   const [offset, setOffset] = import_react46.useState(0);
   const [shownSelected, setShownSelected] = import_react46.useState(selected);
@@ -153553,8 +153554,9 @@ function ThreadSidebar({
     ...limits.length > 1 ? wrapName(`${modelIcon(provider2.driver, "").glyph} ${provider2.instanceId}`, width2).map((text5) => [{ text: text5 }]) : [],
     ...provider2.windows.flatMap((limit) => Bun.stringWidth(limitLine(limit, width2)) <= width2 ? [limitParts(limit, width2)] : wrapName(limitLine(limit, width2), width2).map((text5) => [{ text: text5 }]))
   ]);
-  const footerHeight = Math.min(footer.length, Math.max(0, height - 4));
-  const viewport = Math.max(1, height - 3 - footerHeight);
+  const footerHeader = footer.length > 0 && height >= 6 ? 1 : 0;
+  const footerHeight = limitsOpen ? Math.min(footer.length, Math.max(0, height - 4 - footerHeader)) : 0;
+  const viewport = Math.max(1, height - 3 - footerHeight - footerHeader);
   const top = Math.max(0, Math.min(offset, rows.length - viewport));
   const activate = (entry) => {
     setCursor(entry.key);
@@ -153602,6 +153604,8 @@ function ThreadSidebar({
     }
     if (key5.name === "h")
       toggle();
+    if (key5.name === "u" && footerHeader)
+      setLimitsOpen((open2) => !open2);
     if (key5.name === "return" || key5.name === "l" || key5.name === "right") {
       const entry = current2 ?? entries3[0];
       if (entry)
@@ -153681,6 +153685,19 @@ function ThreadSidebar({
             children: "No threads"
           })
         ]
+      }),
+      footerHeader > 0 && /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+        height: 1,
+        flexShrink: 0,
+        onMouseUp: (event) => {
+          if (enabled && event.button === 0)
+            setLimitsOpen((open2) => !open2);
+        },
+        children: /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+          fg: theme.muted,
+          selectable: false,
+          children: `${limitsOpen ? "\u25BE" : "\u25B8"} [u] Usage`
+        })
       }),
       footerHeight > 0 && /* @__PURE__ */ import_jsx_runtime.jsx("scrollbox", {
         height: footerHeight,

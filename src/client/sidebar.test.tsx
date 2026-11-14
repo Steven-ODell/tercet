@@ -912,6 +912,19 @@ test.each([
     expect(frame).toContain("Context <1%");
     expect(frame).not.toContain("Context 43%");
     expect(frame.split("\n")[footerY]).toContain("5h [");
+    // The usage box folds to its header on a click or "u", and unfolds the same way.
+    const headerY = footerY - 1;
+    expect(frame.split("\n")[headerY]).toContain("▾ [u] Usage");
+    await act(async () => view.mockMouse.click(3, headerY));
+    await view.flush();
+    frame = view.captureCharFrame();
+    expect(frame).toContain("▸ [u] Usage");
+    expect(frame).not.toContain("5h [");
+    await act(async () => view.mockInput.pressKey("u"));
+    await view.flush();
+    frame = view.captureCharFrame();
+    expect(frame).toContain("5h [");
+    expect(frame.split("\n")[footerY]).toContain("5h [");
     const count = (node: {
       getChildren(): ReturnType<typeof view.renderer.root.getChildren>;
     }): number => 1 + node.getChildren().reduce((n, child) => n + count(child), 0);

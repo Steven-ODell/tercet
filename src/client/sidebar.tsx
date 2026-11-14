@@ -382,6 +382,7 @@ export function ThreadSidebar({
   const [settledVisible, setSettledVisible] = useState(SETTLED_TAIL_INITIAL_COUNT);
   const [workingShelf, setWorkingShelf] = useState(false);
   const [wakeTick, setWakeTick] = useState(0);
+  const [limitsOpen, setLimitsOpen] = useState(true);
   const [cursor, setCursor] = useState<string>();
   const [offset, setOffset] = useState(0);
   const [shownSelected, setShownSelected] = useState(selected);
@@ -448,8 +449,12 @@ export function ThreadSidebar({
         : wrapName(limitLine(limit, width), width).map((text) => [{ text }]),
     ),
   ]);
-  const footerHeight = Math.min(footer.length, Math.max(0, height - 4));
-  const viewport = Math.max(1, height - 3 - footerHeight);
+  // One header row stays so the box can be reopened; the usage rows below it fold away.
+  const footerHeader = footer.length > 0 && height >= 6 ? 1 : 0;
+  const footerHeight = limitsOpen
+    ? Math.min(footer.length, Math.max(0, height - 4 - footerHeader))
+    : 0;
+  const viewport = Math.max(1, height - 3 - footerHeight - footerHeader);
   const top = Math.max(0, Math.min(offset, rows.length - viewport));
   const activate = (entry: SidebarEntry) => {
     setCursor(entry.key);
@@ -500,6 +505,7 @@ export function ThreadSidebar({
       }
     }
     if (key.name === "h") toggle();
+    if (key.name === "u" && footerHeader) setLimitsOpen((open) => !open);
     if (key.name === "return" || key.name === "l" || key.name === "right") {
       const entry = current ?? entries[0];
       if (entry) activate(entry);
@@ -586,6 +592,17 @@ export function ThreadSidebar({
         ))}
         {!rows.length && <text fg={theme.muted}>No threads</text>}
       </box>
+      {footerHeader > 0 && (
+        <box
+          height={1}
+          flexShrink={0}
+          onMouseUp={(event) => {
+            if (enabled && event.button === 0) setLimitsOpen((open) => !open);
+          }}
+        >
+          <text fg={theme.muted} selectable={false}>{`${limitsOpen ? "▾" : "▸"} [u] Usage`}</text>
+        </box>
+      )}
       {footerHeight > 0 && (
         <scrollbox height={footerHeight} flexShrink={0} scrollY scrollX={false}>
           {footer.map((parts, i) => (
