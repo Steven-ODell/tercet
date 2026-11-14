@@ -78,7 +78,8 @@ terminals are welcome.
 ## Read responses aloud
 
 Click **[read]** below an assistant response to hear it through Kokoro. It plays on the machine you
-click from, including over SSH. **[stop reading]** cancels it. Voice and speed are configurable in settings. Requires
+click from, including over SSH. A spinner beside it means the speech is being made, a play icon
+means it is playing. **[stop reading]** (or clicking **[read]** again) cancels it. Voice and speed are configurable in settings. Requires
 the same local Kokoro model/venv as Phone Assist hub and an audio player; see [readback setup](docs/settings.md#response-readback-kokoro).
 
 ## Settings

@@ -36,3 +36,27 @@ test("click Read then Stop cancels playback; unmount also stops", async () => {
     expect(calls).toEqual(["Hello world", "stop"]);
   } finally { await act(async () => view.renderer.destroy()); }
 });
+
+test("the Read button shows a spinner while speech is made and a play icon while it plays", async () => {
+  let phase!: (value: "preparing" | "speaking") => void;
+  let finish!: () => void;
+  const effects = { copy() {}, readback: async (_text: string, onPhase?: (value: "preparing" | "speaking") => void) => {
+    phase = onPhase!; await new Promise<void>(resolve => { finish = resolve; });
+  }, stopReadback() { finish?.(); } };
+  const view = await testRender(<TranscriptViewport items={[{ id: "a", kind: "assistant", text: "Hello world" }]} width={60} height={12} effects={effects} />, {width:60, height:12});
+  const readRow = () => view.captureCharFrame().split("\n").find(l => l.includes("[read]")) ?? "";
+  try {
+    await view.renderOnce();
+    expect(readRow()).not.toMatch(/preparing|reading/);
+    const row = view.captureCharFrame().split("\n").findIndex(l => l.includes("[read]"));
+    await act(async () => { await view.mockMouse.click(2, row); });
+    await view.renderOnce();
+    expect(readRow()).toMatch(/\[read\] [⠋-⠏] preparing/);
+    await act(async () => { phase("speaking"); });
+    await view.renderOnce();
+    expect(readRow()).toContain("[read] ▶ reading");
+    await act(async () => { await view.mockMouse.click(2, row); }); // Read again stops it
+    await view.renderOnce();
+    expect(readRow()).not.toMatch(/preparing|reading/);
+  } finally { await act(async () => view.renderer.destroy()); }
+});
