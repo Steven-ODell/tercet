@@ -83132,6 +83132,8 @@ function runArgs(host, args, options = {}) {
     child.once("error", (error) => finish(error));
     child.once("exit", (code, signal) => {
       exit = code;
+      if (options.capture)
+        return;
       if (!options.capture && code === 0)
         return finish();
       if (!options.capture && !child.stderr?.destroyed && !child.stderr?.readableEnded) {
