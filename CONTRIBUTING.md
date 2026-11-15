@@ -45,8 +45,8 @@ a new `@t3tools/*` file means running it again.
 
 ## Demo
 
-`vhs scripts/demo/demo.tape`, run from the repo root, re-records `docs/media/demo.gif` from
-`scripts/demo/app.tsx`, which shows made-up threads with no server. It needs `vhs`, `ttyd`,
-chromium and bun, takes about a minute, and shows nothing on screen. VHS's terminal has no Kitty or
+`scripts/demo/record-extended` records the README GIF (`docs/media/demo-extended.gif`) from
+`scripts/demo/app.tsx`, which shows made-up threads with no server; `scripts/demo/README.md` has the
+steps. It needs `vhs`, `ttyd`, chromium and bun, and shows nothing on screen. VHS's terminal has no Kitty or
 Sixel, so images render as blocks. `scripts/demo/record` is the older tmux pipeline (needs tmux and
 `uv`). Look at every frame before committing a new GIF.

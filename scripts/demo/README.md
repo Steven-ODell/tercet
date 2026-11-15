@@ -1,6 +1,8 @@
 # README demo recordings
 
-`docs/media/demo.gif` and `demo.tape` are the original demo. Preserve them.
+`docs/media/demo.gif` (the original demo) has been removed from the tree; `demo.tape` remains.
+To run `record-extended`, first restore the original opening GIF from git history, e.g.
+`git show 7df0c26:docs/media/demo.gif > docs/media/demo.gif`, and delete it again afterwards.
 The README uses `docs/media/demo-extended.gif`: the original animation followed by
 real integrated-terminal, embedded-Neovim and external-tmux-editor operations.
 
@@ -27,5 +29,5 @@ old GIF. Copy the verified candidate to docs/media/demo-extended.gif. Neither
 recording command publishes or uploads anything.
 
 The older demo.tape and tmux/pyte record + render.py workflow are retained for the
-original demo; running the old VHS tape overwrites demo.gif, so do not use it to
+original demo; running the old VHS tape writes docs/media/demo.gif, so do not use it to
 regenerate this extended recording.

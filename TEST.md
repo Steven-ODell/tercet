@@ -115,7 +115,7 @@ is never a sandbox target. This leaves the interactive sandbox and its editor se
 
 ## README recording
 
-The README now uses docs/media/demo-extended.gif; docs/media/demo.gif is preserved unchanged.
+The README now uses docs/media/demo-extended.gif; docs/media/demo.gif was preserved unchanged then (it has since been removed).
 See scripts/demo/README.md for the off-screen VHS workflow. The new segment demonstrates real
 shell output, an embedded Neovim save, an external tmux Neovim save and return to chat, using
 only a disposable file. The original animation is appended without decoding or re-encoding it.

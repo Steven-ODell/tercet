@@ -315,7 +315,8 @@ sandboxes use port 3775 and up.
   card is the block rung, and the alt text says so. It needs `vhs`, `ttyd`, chromium and bun.
   Output is not byte-identical between runs (two runs matched within 0.5% RMSE, 4% at one key
   transition), so look at the frames before committing. The result is 1250x840, about 19 s,
-  under 1 MB. The previous tmux-rendered GIF is in git history.
+  under 1 MB. The previous tmux-rendered GIF is in git history. `docs/media/demo.gif` itself has
+  since been removed from the tree (it is in git history too); the README uses `demo-extended.gif`.
 - `bun run check` skips the acceptance step when `bgrun` (the maintainer's background-job
   wrapper) is not installed, and says so in the summary, so a contributor's check can still pass.
   Replacing `bgrun` with an in-repo runner is post-v1 work.
