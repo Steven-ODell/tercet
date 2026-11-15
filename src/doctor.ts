@@ -27,7 +27,9 @@ import {
 } from "./portable";
 import { ORCHESTRATION_PROTOCOL_VERSION } from "@t3tools/contracts";
 import { PINNED_SERVER_VERSION, checkDescriptor, supportedRange } from "./client/compat";
+import { detectAppearance, type Appearance } from "./client/appearance";
 import { decideMedia, queryTerminal, type Replies, type Rung } from "./client/media";
+import { resolvePreset } from "./client/theme";
 
 import { version } from "../package.json";
 
@@ -52,6 +54,8 @@ export interface DoctorProbes {
   environment(origin: string): Promise<unknown>;
   /** The terminal's replies to the Kitty query and DA1; null outside a terminal or in tmux. */
   terminal(): Promise<Replies | null>;
+  /** Light or dark, for `theme.preset: "auto"`; absent in probes that cannot ask. */
+  appearance?(): Promise<{ appearance: Appearance | null; source: string }>;
 }
 
 type Found = string | null;
@@ -105,7 +109,13 @@ async function glyphsReport(
   probes: DoctorProbes,
   fcList: Found,
 ): Promise<DoctorReport["look"]> {
-  const theme = `${settings.theme.preset ?? "cyberdream"}${settings.theme.accent ? `, accent ${settings.theme.accent}` : ""}`;
+  const preset = settings.theme.preset ?? "cyberdream";
+  const detected = preset === "auto" ? await probes.appearance?.() : undefined;
+  const name =
+    preset === "auto"
+      ? `auto (${detected?.appearance ?? "dark"}, ${detected?.source ?? "not asked"}: ${resolvePreset(preset, detected?.appearance)})`
+      : preset;
+  const theme = `${name}${settings.theme.accent ? `, accent ${settings.theme.accent}` : ""}`;
   const icons = settings.icons;
   if (icons !== "nerd") return { theme, icons, glyphs: null };
   const unicode = 'set "icons": "unicode" if you see boxes';
@@ -604,6 +614,7 @@ export function systemProbes(): DoctorProbes {
       return response.json();
     },
     terminal: () => queryTerminal(process.stdin, process.stdout),
+    appearance: () => detectAppearance(process.stdin, process.stdout, process.env),
   };
 }
 

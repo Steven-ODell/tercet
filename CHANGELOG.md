@@ -6,6 +6,13 @@
   every scroll that cropped its top), and inside tmux the image is cleared when you switch to
   another session or window and redrawn when you come back, instead of staying on top of the
   other pane.
+- themes: 12 new presets (`dark`, `dusk`, `lagoon`, `sand`, `catppuccin-mocha`, `catppuccin-latte`,
+  `tokyo-night`, `gruvbox`, `nord`, `rose-pine`, `dracula`, `one-dark`) and `"preset": "auto"`,
+  which picks `light` or `cyberdream` from the terminal's background color. Input placeholders now
+  use the muted color instead of a fixed gray.
+- rendered pages: with `TERCET_PAGE_SHOTS=1` and a terminal that can draw images, a page the
+  agent rendered (T3's `html_render`) shows as a screenshot taken with headless chromium instead
+  of only an `[open]` link. Off by default; Enter still opens the page itself in the browser.
 - settings: a key tercet does not know no longer stops startup. It is ignored and `tercet doctor`
   lists it with its line, so a settings file from a newer build still opens in an older one.
   Wrong types and values still stop startup.

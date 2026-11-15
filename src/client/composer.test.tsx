@@ -23,6 +23,7 @@ import {
 } from "./composer-state";
 import { ThreadComposer } from "./composer";
 import { AppFrame } from "./frame";
+import { setTheme } from "./theme";
 
 const id = ThreadId.make("composer");
 test("a long draft wraps inside the composer and keeps the caret beside the text", async () => {
@@ -838,5 +839,32 @@ test("Alt+v from another pane opens the composer, so typed dictation lands there
   } finally {
     await act(async () => view.renderer.destroy());
     await h.client.dispose();
+  }
+});
+
+test.each([
+  ["cyberdream", true],
+  ["light", false],
+  ["sand", false],
+])("the caret is visible on %s", async (preset, dark) => {
+  setTheme({ preset });
+  const h = await composerFixture();
+  const view = await testRender(<AppFrame client={h.client} effects={{ copy() {} }} />, {
+    width: 100,
+    height: 40,
+    kittyKeyboard: true,
+    exitOnCtrlC: false,
+  });
+  try {
+    await view.waitForFrame((frame) => frame.includes("Focus: sidebar"));
+    await act(async () => view.mockInput.pasteBracketedText("hello"));
+    await view.flush();
+    // White on the dark preset, as before; near black on the light ones, where white vanished.
+    const red = view.renderer.getCursorState().color.buffer[0]!;
+    if (dark) expect(red).toBe(255);
+    else expect(red).toBeLessThan(60);
+  } finally {
+    await act(async () => view.renderer.destroy());
+    setTheme({});
   }
 });

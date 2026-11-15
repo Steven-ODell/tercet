@@ -11,6 +11,14 @@ import {
 import { loadPreviewImage, attachmentSource, isRemoteSource } from "./client/image-preview-source";
 import { imageOpenAction, resolveMediaTarget } from "./client/image-open";
 import {
+  cachedShots,
+  isPageSource,
+  pageId,
+  pageShotsFromEnv,
+  setPageShots,
+  shootPage,
+} from "./client/page-shot";
+import {
   decideMedia,
   media,
   mediaKind,
@@ -45,6 +53,7 @@ import { ServerGate } from "./client/screen";
 import { blockWrites } from "./client/read-only";
 import { createClient, waitForLive } from "./client/runtime";
 import { AppFrame } from "./client/frame";
+import { detectAppearance } from "./client/appearance";
 import { applyLook } from "./client/look";
 import { asciiFrame, iconMode } from "./client/icons";
 import { theme } from "./client/theme";
@@ -91,7 +100,12 @@ try {
     process.stderr.write(
       `tercet: no settings file at ${config.settingsPath}; using defaults. Run \`tercet doctor\` to check your setup.\n`,
     );
-  applyLook(config.settings);
+  // `auto` asks the terminal whether its background is light or dark; nothing else does.
+  const appearance =
+    config.settings.theme.preset === "auto" && !config.dumpStatus
+      ? (await detectAppearance(process.stdin, process.stdout, process.env)).appearance
+      : null;
+  applyLook(config.settings, appearance);
   const boundary = config.hello ? undefined : platform(config);
   const client = boundary && createClient(boundary, config.managedToken);
   // The version gate (client/compat.ts). A local autostart holder gets the document load that
@@ -157,6 +171,7 @@ try {
       }),
       config.settings.media.video,
     );
+    setPageShots(pageShotsFromEnv(process.env) && media().rung !== "none");
     const kittyImages = new Set<string>();
     const stdout = process.env.TMUX ? kittyStdout(kittyImages) : process.stdout;
     const renderer = await createCliRenderer({
@@ -198,8 +213,16 @@ try {
       if ((await child.exited) !== 0) throw new Error(`${args[0]} failed`);
       return text;
     };
+    const shootPageId = cachedShots(async (id) =>
+      shootPage(await client!.pageUrl(id), async (args, timeoutMs) => {
+        const child = Bun.spawn(args, { stdout: "ignore", stderr: "ignore", timeout: timeoutMs });
+        return child.exited;
+      }),
+    );
     const loadImage = (source: string, cwd?: string) =>
-      loadPreviewImage(source, cwd, (id, mime) => client!.pageUrl(id, mime));
+      isPageSource(source)
+        ? shootPageId(pageId(source))
+        : loadPreviewImage(source, cwd, (id, mime) => client!.pageUrl(id, mime));
     const effects = hostActions({
       settings: config.settings,
       host: systemHost(),
@@ -248,8 +271,14 @@ try {
     const attachmentsDir = isLoopback(new URL(config.url).hostname)
       ? `${config.baseDir}/userdata/attachments`
       : undefined;
-    if (effects.openPath)
-      effects.openImage = imageOpenAction(loadImage, attachmentsDir, effects.openPath);
+    if (effects.openPath) {
+      const openImage = imageOpenAction(loadImage, attachmentsDir, effects.openPath);
+      // A rendered page's card opens the page itself in the browser, not its screenshot.
+      effects.openImage = async (source, cwd) =>
+        isPageSource(source) && effects.openPage
+          ? effects.openPage(pageId(source))
+          : openImage(source, cwd);
+    }
     const mediaTarget = (source: string, cwd?: string) =>
       resolveMediaTarget(source, cwd, attachmentsDir, (id, mime) => client!.pageUrl(id, mime));
     const playable = (source: string) => ["video", "audio"].includes(mediaKind(source));

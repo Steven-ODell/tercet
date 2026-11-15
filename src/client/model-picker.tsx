@@ -300,6 +300,7 @@ export function ModelPicker({
         <input
           focused={filtering}
           value={query}
+          placeholderColor={theme.muted}
           placeholder="Press / or type to filter all providers…"
           onInput={(value) => {
             setQuery(value);
