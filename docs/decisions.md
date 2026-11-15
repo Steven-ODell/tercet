@@ -141,6 +141,20 @@ sandboxes use port 3775 and up.
   variables stripped, so recorded screens show the stranger's defaults and tests never touch
   the real clipboard.
 
+## More themes and `auto` (2026-11-14)
+
+- 15 presets, built by `fromPalette` (`src/client/theme.ts`) from about 12 colors a palette
+  author picks; borders, the selected row, selection and the terminal's 16 colors are derived.
+  Cyberdream, `light` and `ansi` stay hand-written, so they did not change. Any text color under
+  3.6:1 on its canvas is nudged toward the text color, and `muted` also has to clear the selected
+  row's background; the preset fixture in `look.test.tsx` still fails under 3:1.
+- The fixture caught three hardcoded `#666` placeholders (composer, palette, model picker) that
+  failed on every new dark canvas; they use `theme.muted` now.
+- `auto` is `light` on a light terminal and `cyberdream` otherwise, decided once at startup by
+  an OSC 11 query (`client/appearance.ts`), with DA1 as the end marker, then `COLORFGBG`. It runs
+  inside tmux too (tmux answers OSC 11), unlike the Kitty query. No live reload: that needs a
+  theme that can change while components hold colors, which nothing asked for yet.
+
 ## Themes, keybinds, cheat sheet (P5, 2026-11-10)
 
 - Colors are roles on one `theme` object (`src/client/theme.ts`) that components read while

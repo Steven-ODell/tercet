@@ -406,7 +406,8 @@ export function measureMarkdown(
       const source = image[2] ?? image[3]!;
       const alt = image[1] || "image";
       const target: Target = { kind: "image", text: source };
-      const height = Math.max(1, Math.min(12, imageHeight));
+      // A rendered page gets a bigger card than a photo thumbnail.
+      const height = Math.max(1, Math.min(source.startsWith("tercet-page:") ? 24 : 12, imageHeight * (source.startsWith("tercet-page:") ? 2 : 1)));
       for (let offset = 0; offset < height; offset++)
         rows.push({
           id: `${item.id}:${lineIndex}:${offset}`,

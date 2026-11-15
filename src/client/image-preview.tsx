@@ -77,7 +77,9 @@ export function ImagePreview({
       active = false;
     };
   }, [image.source, load, inspect, cwd]);
-  const cells = Math.min(width, Math.max(34, image.height * 4));
+  const cells = image.source.startsWith("tercet-page:")
+    ? width
+    : Math.min(width, Math.max(34, image.height * 4));
   const left = image.right ? width - cells : 0;
   const inner = { width: Math.max(1, cells - 4), height: Math.max(1, image.height - 2) };
   const size = info?.size ?? fileSource(image.source)?.size;

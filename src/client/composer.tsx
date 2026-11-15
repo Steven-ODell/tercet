@@ -557,6 +557,9 @@ function Editor({
         initialValue={text}
         backgroundColor={theme.canvas}
         textColor={theme.input}
+        // The default caret is white: invisible on the light presets.
+        cursorColor={theme.strong}
+        placeholderColor={theme.muted}
         placeholder="Message · @file · /skill · :emoji"
         keyBindings={[{ name: "return", shift: true, action: "newline" }]}
         onContentChange={() => {

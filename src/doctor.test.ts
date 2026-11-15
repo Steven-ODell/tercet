@@ -313,3 +313,21 @@ test("doctor's read aloud line: local ready, local not set up, off, and http wit
   const off = await row({ "/home/u/.config/tercet/settings.json": '{"readback":{"enabled":false}}' });
   expect(off.action).toEqual({ name: "read aloud", available: null, detail: "off (readback.enabled is false)" });
 });
+
+test("doctor says which preset theme auto picked and why", async () => {
+  const files = { "/home/u/.config/tercet/settings.json": '{"theme": {"preset": "auto"}}' };
+  const light = machine({
+    files,
+    appearance: async () => ({ appearance: "light", source: "terminal background" }),
+  });
+  expect((await doctorReport([], light.probes)).look.theme).toBe(
+    "auto (light, terminal background: light)",
+  );
+  const silent = machine({
+    files,
+    appearance: async () => ({ appearance: null, source: "no answer from the terminal" }),
+  });
+  expect((await doctorReport([], silent.probes)).look.theme).toBe(
+    "auto (dark, no answer from the terminal: cyberdream)",
+  );
+});

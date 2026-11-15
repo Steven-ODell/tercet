@@ -95,7 +95,7 @@ export function PullRequestPanel({ workflow, target, effects, close }: { workflo
       {button("[Enter Confirm submission]", execute)}
     </box> : editing ? <box minHeight={0} flexGrow={1} flexDirection="column">
       <text flexShrink={0} fg={theme.muted}>Draft · Esc saves · Ctrl+s post · Ctrl+e review · Ctrl+a approve · Ctrl+r changes</text>
-      <textarea key={key} ref={editor} focused flexGrow={1} minHeight={2} initialValue={key ? workflow.draft(key) : ""} onContentChange={() => { if (key && editor.current) workflow.setDraft(key, editor.current.plainText); }} />
+      <textarea key={key} ref={editor} focused cursorColor={theme.strong} flexGrow={1} minHeight={2} initialValue={key ? workflow.draft(key) : ""} onContentChange={() => { if (key && editor.current) workflow.setDraft(key, editor.current.plainText); }} />
       {button("[Post discussion comment]", () => { setEditing(false); setConfirm("discussion"); })}
       {button("[Comment review]", () => { setEditing(false); setConfirm("comment"); })}
       {button("[Approve]", () => { setEditing(false); setConfirm("approve"); })}

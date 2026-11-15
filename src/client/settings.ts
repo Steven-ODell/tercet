@@ -2,7 +2,7 @@ import { lstatSync, renameSync, symlinkSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { ICON_MODES, type IconMode } from "./icons";
 import { KeyConflict, resolveKeymap } from "./keymap";
-import { PRESET_NAMES, type PresetName } from "./theme";
+import { THEME_CHOICES, type ThemeChoice } from "./theme";
 import { MEDIA_PROTOCOLS, VIDEO_MODES, type MediaProtocol, type VideoMode } from "./media";
 
 /** A launcher or command: one shell-free argv array, or a single program name/path. */
@@ -85,7 +85,7 @@ export interface Settings {
     /** Never draw the server warning banner (version outside the tested range, no version, other protocol). */
     hideWarning?: boolean;
   };
-  theme: { preset?: PresetName; accent?: string };
+  theme: { preset?: ThemeChoice; accent?: string };
   /** Command name to key, e.g. `"palette": "Ctrl+k"`; `"none"` unbinds. */
   keys: Record<string, string>;
   icons: IconMode;
@@ -518,7 +518,7 @@ const schema = struct({
     ignoreVersion: bool,
     hideWarning: bool,
   }),
-  theme: struct({ preset: oneOf(PRESET_NAMES), accent: color }),
+  theme: struct({ preset: oneOf(THEME_CHOICES), accent: color }),
   keys: record(/^[A-Za-z][\w.-]*$/, "action names use letters, digits, ., _ and -", text),
   icons: oneOf(ICON_MODES),
   defaults: struct({

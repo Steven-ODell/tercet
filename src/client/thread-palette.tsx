@@ -203,6 +203,7 @@ export function ThreadPalette({
         <input
           focused
           value={query}
+          placeholderColor={theme.muted}
           placeholder={
             prompt === "delete"
               ? "Type DELETE"

@@ -87,7 +87,7 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
 | `defaults.favorites`                                  | list of `{ provider, model }`                                   | `[]`                                       | now       |
 | `defaults.sidebarWorkingShelf`                        | boolean                                                         | `false`                                    | now       |
 | `defaults.hints`                                      | boolean                                                         | `true`                                     | now       |
-| `theme.preset`, `theme.accent`                        | `cyberdream`, `light`, `ansi`; `#rrggbb`                        | `cyberdream`, its own accent               | now       |
+| `theme.preset`, `theme.accent`                        | a preset name or `auto` (see Theme); `#rrggbb`                  | `cyberdream`, its own accent               | now       |
 | `keys`                                                | command name to key                                             | built-in keys                              | now       |
 | `icons`                                               | `nerd`, `unicode`, `ascii`                                      | `unicode`                                  | now       |
 | `launchers.terminal`, `.editor`, `.opener`, `.player`, `.picker` | command template                                                | see below                                  | now       |
@@ -110,11 +110,33 @@ used for loopback addresses (`localhost`, `127.x.x.x`, `[::1]`). A server anywhe
 
 ## Theme
 
-| Preset       | What it is                                                                          |
-| ------------ | ----------------------------------------------------------------------------------- |
-| `cyberdream` | the default: dark, 24-bit color, purple `#b07cf5` accent                            |
-| `light`      | the same roles on white, darkened until text reads                                  |
-| `ansi`       | the terminal's own 16 colors and default text and background; for a dark background |
+| Preset             | What it is                                                                          |
+| ------------------ | ----------------------------------------------------------------------------------- |
+| `cyberdream`       | the default: dark, 24-bit color, purple `#b07cf5` accent                            |
+| `light`            | the same roles on white, darkened until text reads                                  |
+| `ansi`             | the terminal's own 16 colors and default text and background; for a dark background |
+| `dark`             | neutral grays with one muted steel-blue accent; color only where a status needs it  |
+| `dusk`             | dark plum with a peach accent; solid, slightly pastel colors                        |
+| `lagoon`           | dark teal with a mint-teal accent                                                   |
+| `sand`             | light, warm paper with a burnt-orange accent                                        |
+| `catppuccin-mocha` | [Catppuccin](https://catppuccin.com) Mocha, dark, mauve accent                      |
+| `catppuccin-latte` | Catppuccin Latte, light, mauve accent                                               |
+| `tokyo-night`      | Tokyo Night, dark, blue accent                                                      |
+| `gruvbox`          | Gruvbox dark, orange accent                                                         |
+| `nord`             | Nord, dark, frost-blue accent                                                       |
+| `rose-pine`        | Rosé Pine, dark, iris accent                                                        |
+| `dracula`          | Dracula, dark, purple accent                                                        |
+| `one-dark`         | Atom's One Dark, blue accent                                                        |
+| `auto`             | asks the terminal for its background color: `light` on a light one, else `cyberdream` |
+
+The named palettes use their published colors. Where one would put text under 3.6:1 contrast on
+its own background (Catppuccin Latte's yellow, for example), tercet darkens or lightens just that
+color until it reads.
+
+`auto` sends the terminal an OSC 11 background query at startup. Most terminals answer, and so
+does tmux. When nothing answers, tercet reads `COLORFGBG`, and when that is missing too it picks
+`cyberdream`. `tercet doctor` shows what `auto` chose and why. The choice is made once at startup;
+it does not follow a terminal that switches between light and dark while tercet runs.
 
 `theme.accent` replaces the preset's accent (focus, titles, buttons). Presets and the accent
 apply at startup.

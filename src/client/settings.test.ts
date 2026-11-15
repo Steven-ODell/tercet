@@ -304,8 +304,8 @@ test("keys rebind commands, and a conflict names both actions on one line", () =
   expect(failure('{"keys": {"help": "Cmd+k"}}')).toContain("Cmd is not sent to terminal programs");
   expect(failure('{"keys": {"quit": "Ctrl+q"}}')).toContain("keys.quit: Ctrl+c is fixed for quit");
   expect(parse('{"keys": {"palette": "none", "search": "Ctrl+p"}}').keys.palette).toBe("none");
-  expect(failure('{"theme": {"preset": "dracula"}}')).toContain(
-    'theme.preset: expected one of "cyberdream", "light", "ansi"',
+  expect(failure('{"theme": {"preset": "neon"}}')).toContain(
+    'theme.preset: expected one of "cyberdream", "light", "ansi", "dark", "dusk"',
   );
   expect(failure('{"icons": "emoji"}')).toContain(
     'icons: expected one of "nerd", "unicode", "ascii"',
@@ -390,4 +390,18 @@ test("external editor destinations and executable argv are configurable", () => 
     expect(settings.launchers.editor).toEqual(["/opt/VS Code/code", "{path}"]);
   }
   expect(failure('{"launchers":{"editorMode":"unknown"}}')).toContain("launchers.editorMode");
+});
+
+test("theme.preset takes every preset and auto, and names them when it is wrong", async () => {
+  for (const preset of ["nord", "catppuccin-latte", "one-dark", "auto"] as const) {
+    const loaded = await loadSettings(
+      "/home/u/.config/tercet",
+      async () => `{"theme": {"preset": "${preset}"}}`,
+      "/home/u",
+    );
+    expect(loaded.settings.theme.preset).toBe(preset);
+  }
+  await expect(
+    loadSettings("/home/u/.config/tercet", async () => '{"theme": {"preset": "neon"}}', "/home/u"),
+  ).rejects.toThrow("theme.preset: expected one of");
 });

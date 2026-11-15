@@ -79720,7 +79720,7 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
               return hook.off(event, fn3);
             };
           }
-          function on(event, fn3) {
+          function on2(event, fn3) {
             if (!listeners[event]) {
               listeners[event] = [];
             }
@@ -79977,7 +79977,7 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
             emit,
             getFiberRoots,
             inject,
-            on,
+            on: on2,
             off,
             sub,
             supportsFiber: true,
@@ -81663,7 +81663,7 @@ function fileSource(source) {
 }
 var kindOfMime = (mime) => mime.startsWith("image/") ? "image" : mime.startsWith("video/") ? "video" : mime.startsWith("audio/") ? "audio" : null;
 function mediaKind(source) {
-  if (source.startsWith("tercet-image:"))
+  if (source.startsWith("tercet-image:") || source.startsWith("tercet-page:"))
     return "image";
   const file = fileSource(source);
   if (file)
@@ -81918,12 +81918,294 @@ var ansi = {
     rose: index(9)
   }
 };
-var PRESETS = { cyberdream, light, ansi };
+var toRgb = (hex) => {
+  const n = parseInt(hex.slice(1), 16);
+  return [n >> 16 & 255, n >> 8 & 255, n & 255];
+};
+var toHex = ([r, g, b]) => `#${[r, g, b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("")}`;
+var mix = (a, b, amount) => {
+  const [x, y] = [toRgb(a), toRgb(b)];
+  return toHex(x.map((v, i) => v + (y[i] - v) * amount));
+};
+var relativeLuminance = (hex) => {
+  const [r, g, b] = toRgb(hex).map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+var contrastOf = (a, b) => {
+  const [hi, lo] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+};
+var legible = (color, bg, toward, minimum = 3.6) => {
+  for (let amount = 0;amount <= 1; amount += 0.04) {
+    const candidate = mix(color, toward, amount);
+    if (contrastOf(candidate, bg) >= minimum)
+      return candidate;
+  }
+  return toward;
+};
+function fromPalette(p) {
+  const extreme = p.dark ? "#ffffff" : "#000000";
+  const ink = (color) => legible(color, p.bg, p.fg);
+  const [red, green, yellow, blue, cyan, pink] = [p.red, p.green, p.yellow, p.blue, p.cyan, p.pink].map(ink);
+  const purple = ink(p.purple ?? p.pink);
+  const accent = ink(p.accent);
+  const highlight = mix(p.bg, p.accent, p.dark ? 0.2 : 0.16);
+  const muted = legible(ink(p.muted), highlight, p.fg, 3.1);
+  const bright = mix(p.fg, extreme, 0.3);
+  const dark = p.dark;
+  return {
+    canvas: p.bg,
+    surface: p.surface ?? mix(p.bg, p.fg, dark ? 0.05 : 0.04),
+    text: p.fg,
+    bright,
+    strong: mix(p.fg, extreme, 0.75),
+    plain: bright,
+    muted,
+    accent,
+    border: mix(p.bg, p.fg, 0.2),
+    highlight,
+    rule: mix(p.bg, p.fg, 0.3),
+    selection: mix(p.bg, p.accent, 0.34),
+    cursorText: p.bg,
+    red,
+    green,
+    yellow,
+    blue,
+    cyan,
+    pink,
+    assistant: cyan,
+    user: green,
+    input: green,
+    ansi: [
+      dark ? mix(p.bg, p.fg, 0.08) : p.fg,
+      red,
+      green,
+      yellow,
+      blue,
+      purple,
+      cyan,
+      dark ? p.fg : muted,
+      dark ? muted : mix(p.bg, p.fg, 0.55),
+      red,
+      green,
+      yellow,
+      blue,
+      purple,
+      cyan,
+      dark ? extreme : p.fg
+    ],
+    terminalText: p.fg,
+    project: dark ? webDark : webLight,
+    ...p.roles
+  };
+}
+var dark = fromPalette({
+  dark: true,
+  bg: "#141414",
+  surface: "#1b1b1b",
+  fg: "#bdbdbd",
+  muted: "#858585",
+  accent: "#8fa8c4",
+  red: "#d18585",
+  green: "#8fb59a",
+  yellow: "#c9b87a",
+  blue: "#7f9bbd",
+  cyan: "#7fb0b5",
+  pink: "#b88fa8",
+  purple: "#a597bd",
+  roles: { assistant: "#d6d6d6", user: "#8fb59a", input: "#d6d6d6", text: "#bdbdbd" }
+});
+var dusk = fromPalette({
+  dark: true,
+  bg: "#1b1721",
+  fg: "#e4d8ea",
+  muted: "#9a8aa8",
+  accent: "#f2a07b",
+  red: "#ef7d8a",
+  green: "#a8d28f",
+  yellow: "#f3cf7e",
+  blue: "#82b2ea",
+  cyan: "#7fd3d0",
+  pink: "#f08fba",
+  purple: "#bb9cea"
+});
+var lagoon = fromPalette({
+  dark: true,
+  bg: "#0c1a1f",
+  fg: "#cfe6e4",
+  muted: "#78a0a0",
+  accent: "#52d4c4",
+  red: "#f0786f",
+  green: "#80dc9c",
+  yellow: "#e9d06c",
+  blue: "#70b6f2",
+  cyan: "#62d6ea",
+  pink: "#e68cb7",
+  purple: "#a98ff2"
+});
+var sand = fromPalette({
+  dark: false,
+  bg: "#faf4e8",
+  surface: "#f1e9d8",
+  fg: "#3b3228",
+  muted: "#7d6f5e",
+  accent: "#b5541c",
+  red: "#b3261e",
+  green: "#4a7a24",
+  yellow: "#8a6200",
+  blue: "#2b5fa8",
+  cyan: "#0f7a7a",
+  pink: "#b0356f",
+  purple: "#6f42b0"
+});
+var catppuccinMocha = fromPalette({
+  dark: true,
+  bg: "#1e1e2e",
+  surface: "#181825",
+  fg: "#cdd6f4",
+  muted: "#8087a2",
+  accent: "#cba6f7",
+  red: "#f38ba8",
+  green: "#a6e3a1",
+  yellow: "#f9e2af",
+  blue: "#89b4fa",
+  cyan: "#94e2d5",
+  pink: "#f5c2e7",
+  purple: "#cba6f7"
+});
+var catppuccinLatte = fromPalette({
+  dark: false,
+  bg: "#eff1f5",
+  surface: "#e6e9ef",
+  fg: "#4c4f69",
+  muted: "#6c6f85",
+  accent: "#8839ef",
+  red: "#d20f39",
+  green: "#40a02b",
+  yellow: "#df8e1d",
+  blue: "#1e66f5",
+  cyan: "#179299",
+  pink: "#ea76cb",
+  purple: "#8839ef"
+});
+var tokyoNight = fromPalette({
+  dark: true,
+  bg: "#1a1b26",
+  surface: "#16161e",
+  fg: "#c0caf5",
+  muted: "#737aa2",
+  accent: "#7aa2f7",
+  red: "#f7768e",
+  green: "#9ece6a",
+  yellow: "#e0af68",
+  blue: "#7aa2f7",
+  cyan: "#7dcfff",
+  pink: "#ff8fb1",
+  purple: "#bb9af7"
+});
+var gruvbox = fromPalette({
+  dark: true,
+  bg: "#282828",
+  surface: "#1d2021",
+  fg: "#ebdbb2",
+  muted: "#a89984",
+  accent: "#fe8019",
+  red: "#fb4934",
+  green: "#b8bb26",
+  yellow: "#fabd2f",
+  blue: "#83a598",
+  cyan: "#8ec07c",
+  pink: "#d3869b"
+});
+var nord = fromPalette({
+  dark: true,
+  bg: "#2e3440",
+  surface: "#3b4252",
+  fg: "#d8dee9",
+  muted: "#8892a6",
+  accent: "#88c0d0",
+  red: "#bf616a",
+  green: "#a3be8c",
+  yellow: "#ebcb8b",
+  blue: "#81a1c1",
+  cyan: "#8fbcbb",
+  pink: "#b48ead"
+});
+var rosePine = fromPalette({
+  dark: true,
+  bg: "#191724",
+  surface: "#1f1d2e",
+  fg: "#e0def4",
+  muted: "#908caa",
+  accent: "#c4a7e7",
+  red: "#eb6f92",
+  green: "#7fbfa5",
+  yellow: "#f6c177",
+  blue: "#3e8fb0",
+  cyan: "#9ccfd8",
+  pink: "#ebbcba",
+  purple: "#c4a7e7"
+});
+var dracula = fromPalette({
+  dark: true,
+  bg: "#282a36",
+  surface: "#21222c",
+  fg: "#f8f8f2",
+  muted: "#8d98c4",
+  accent: "#bd93f9",
+  red: "#ff5555",
+  green: "#50fa7b",
+  yellow: "#f1fa8c",
+  blue: "#8ba4ff",
+  cyan: "#8be9fd",
+  pink: "#ff79c6",
+  purple: "#bd93f9"
+});
+var oneDark = fromPalette({
+  dark: true,
+  bg: "#282c34",
+  surface: "#21252b",
+  fg: "#abb2bf",
+  muted: "#7f8798",
+  accent: "#61afef",
+  red: "#e06c75",
+  green: "#98c379",
+  yellow: "#e5c07b",
+  blue: "#61afef",
+  cyan: "#56b6c2",
+  pink: "#c678dd"
+});
+var PRESETS = {
+  cyberdream,
+  light,
+  ansi,
+  dark,
+  dusk,
+  lagoon,
+  sand,
+  "catppuccin-mocha": catppuccinMocha,
+  "catppuccin-latte": catppuccinLatte,
+  "tokyo-night": tokyoNight,
+  gruvbox,
+  nord,
+  "rose-pine": rosePine,
+  dracula,
+  "one-dark": oneDark
+};
 var PRESET_NAMES = Object.keys(PRESETS);
+var THEME_CHOICES = [...PRESET_NAMES, "auto"];
+var AUTO_PRESETS = { dark: "cyberdream", light: "light" };
+function resolvePreset(choice, appearance) {
+  if (choice === "auto")
+    return AUTO_PRESETS[appearance ?? "dark"];
+  return choice && choice in PRESETS ? choice : "cyberdream";
+}
 var theme = { ...cyberdream };
-function setTheme(settings = {}) {
-  const preset = PRESETS[settings.preset ?? "cyberdream"] ?? cyberdream;
-  Object.assign(theme, preset);
+function setTheme(settings = {}, appearance) {
+  Object.assign(theme, PRESETS[resolvePreset(settings.preset, appearance)]);
   if (settings.accent)
     theme.accent = settings.accent;
 }
@@ -82808,7 +83090,7 @@ var schema = struct({
     ignoreVersion: bool,
     hideWarning: bool
   }),
-  theme: struct({ preset: oneOf(PRESET_NAMES), accent: color }),
+  theme: struct({ preset: oneOf(THEME_CHOICES), accent: color }),
   keys: record(/^[A-Za-z][\w.-]*$/, "action names use letters, digits, ., _ and -", text2),
   icons: oneOf(ICON_MODES),
   defaults: struct({
@@ -83725,8 +84007,12 @@ function editorAction(url, spec) {
 import { Writable } from "stream";
 
 class KittyPlacementOutput {
+  images;
   pending = "";
   cup = "";
+  constructor(images = new Set) {
+    this.images = images;
+  }
   push(bytes) {
     this.pending += Buffer.from(bytes).toString("latin1");
     let output = "";
@@ -83787,11 +84073,42 @@ class KittyPlacementOutput {
       output += this.cup + token;
       this.cup = "";
     }
+    output = withoutReplacedDeletes(output);
+    for (const m of output.matchAll(PASSTHROUGH_GRAPHICS)) {
+      const { a, d, i } = graphicsKeys(m[1]);
+      if (!i)
+        continue;
+      if (a === "t" || a === "T" || a === "p")
+        this.images.add(i);
+      else if (a === "d" && d === "I")
+        this.images.delete(i);
+    }
     return Buffer.from(output, "latin1");
   }
 }
-function kittyStdout() {
-  const placement = new KittyPlacementOutput;
+var PASSTHROUGH_GRAPHICS = /\x1bPtmux;(?:\x1b\x1b\[\d+;\d+H)?\x1b\x1b_G([^;\x1b]*)(?:;[^\x1b]*)?\x1b\x1b\\\x1b\\/g;
+var graphicsKeys = (params) => Object.fromEntries(params.split(",").map((kv) => kv.split("=")));
+function withoutReplacedDeletes(output) {
+  if (!output.includes("a=d,d=i,"))
+    return output;
+  const keys = graphicsKeys;
+  const graphics = [...output.matchAll(PASSTHROUGH_GRAPHICS)].map((m) => ({
+    index: m.index,
+    length: m[0].length,
+    keys: keys(m[1])
+  }));
+  let result = output;
+  for (const [n, g] of [...graphics.entries()].reverse()) {
+    if (g.keys.a !== "d" || g.keys.d !== "i" || !g.keys.i)
+      continue;
+    const replaced = graphics.slice(n + 1).some((later) => later.keys.a === "p" && later.keys.i === g.keys.i && (later.keys.p ?? "") === (g.keys.p ?? ""));
+    if (replaced)
+      result = result.slice(0, g.index) + result.slice(g.index + g.length);
+  }
+  return result;
+}
+function kittyStdout(images) {
+  const placement = new KittyPlacementOutput(images);
   const write = process.stdout.write.bind(process.stdout);
   const stream = new Writable({
     write(bytes, _encoding, done) {
@@ -83830,6 +84147,53 @@ function clearKittyBeforeSwitch(out, repaint, onFocus) {
       throw error;
     }
   };
+}
+var kittyDeletePlacements = (images) => [...images].map((i) => `\x1B_Ga=d,d=i,i=${i},q=2\x1B\\`).join("");
+function clearKittyWhenHidden(options) {
+  let shown = new Set;
+  let cleared = false;
+  let queue = Promise.resolve();
+  const check = (step) => {
+    queue = queue.then(async () => {
+      const now = new Set(await options.showing().catch(() => [...shown]));
+      await step(now);
+      shown = now;
+    });
+    return queue;
+  };
+  options.onBlur(() => check(async (now) => {
+    for (const tty of shown)
+      if (!now.has(tty)) {
+        await options.clear(tty).catch(() => {});
+        cleared = true;
+      }
+  }));
+  options.onFocus(() => check(() => {
+    if (!cleared)
+      return;
+    cleared = false;
+    options.repaint();
+  }));
+  return check(() => {});
+}
+async function tmuxClientsShowing(pane, output) {
+  const [window2, ...clients] = (await output([
+    "tmux",
+    "display-message",
+    "-p",
+    "-t",
+    pane,
+    "#{window_id}",
+    ";",
+    "list-clients",
+    "-F",
+    "#{window_id} #{client_tty}"
+  ])).trim().split(`
+`);
+  return clients.flatMap((line) => {
+    const [id, tty] = line.split(" ");
+    return id === window2 && tty ? [tty] : [];
+  });
 }
 
 // src/client/image-preview-source.ts
@@ -83995,9 +84359,64 @@ function imageOpenAction(load, attachmentsDir, openPath, tmp = "/tmp/tercet-imag
   };
 }
 
+// src/client/page-shot.ts
+import { mkdir as mkdir3, mkdtemp as mkdtemp3, readFile as readFile3, rm as rm2 } from "fs/promises";
+import { join as join4 } from "path";
+var PAGE_SCHEME = "tercet-page:";
+var on = { value: false };
+var setPageShots = (value) => void (on.value = value);
+var pageShotsOn = () => on.value;
+var pageShotsFromEnv = (env) => env.TERCET_PAGE_SHOTS === "1";
+var pageSource = (id) => `${PAGE_SCHEME}${encodeURIComponent(id)}`;
+var isPageSource = (source) => source.startsWith(PAGE_SCHEME);
+var pageId = (source) => decodeURIComponent(source.slice(PAGE_SCHEME.length));
+var PAGE_SHOT_SIZE = { width: 1280, height: 720 };
+function chromiumArgs(url, out, profile) {
+  return [
+    "chromium",
+    "--headless=new",
+    "--disable-gpu",
+    "--hide-scrollbars",
+    "--mute-audio",
+    "--no-first-run",
+    "--disable-extensions",
+    `--user-data-dir=${profile}`,
+    "--virtual-time-budget=4000",
+    `--window-size=${PAGE_SHOT_SIZE.width},${PAGE_SHOT_SIZE.height}`,
+    `--screenshot=${out}`,
+    url
+  ];
+}
+async function shootPage(url, run, tmp = "/tmp/tercet-pages", read = readFile3) {
+  await mkdir3(tmp, { recursive: true, mode: 448 });
+  const dir = await mkdtemp3(join4(tmp, "shot-"));
+  try {
+    const out = join4(dir, "page.png");
+    const code = await run(chromiumArgs(url, out, join4(dir, "profile")), 20000);
+    if (code !== 0)
+      throw new Error("Page render failed");
+    return await read(out);
+  } finally {
+    await rm2(dir, { recursive: true, force: true });
+  }
+}
+function cachedShots(shoot) {
+  const shots = new Map;
+  return (id) => {
+    let shot = shots.get(id);
+    if (!shot) {
+      shot = shoot(id);
+      shots.set(id, shot);
+      shot.catch(() => shots.delete(id));
+    }
+    return shot;
+  };
+}
+
 // src/main.tsx
+import { appendFile as appendFile2 } from "fs/promises";
 import { homedir as homedir6 } from "os";
-import { join as join8 } from "path";
+import { join as join9 } from "path";
 
 // src/terminal-lifecycle.ts
 var TERMINAL_RESET = "\x1B[?1000l\x1B[?1002l\x1B[?1003l\x1B[?1006l\x1B[?2004l\x1B[<u\x1B[?25h\x1B[?1049l";
@@ -84367,7 +84786,7 @@ var hash = (self2) => {
       }
     }
   }
-  return optimize(mix(string(String(self2))));
+  return optimize(mix2(string(String(self2))));
 };
 var random = (self2) => {
   if (!randomHashCache.has(self2)) {
@@ -84375,14 +84794,14 @@ var random = (self2) => {
   }
   return randomHashCache.get(self2);
 };
-var mix = (h) => {
+var mix2 = (h) => {
   h ^= h >>> 16;
   h = Math.imul(h, 2246822507);
   h ^= h >>> 13;
   h = Math.imul(h, 3266489909);
   return h ^ h >>> 16;
 };
-var combine = /* @__PURE__ */ dual(2, (self2, b) => mix(Math.imul(self2, 2654435761) + Math.imul(b, 2246822507)));
+var combine = /* @__PURE__ */ dual(2, (self2, b) => mix2(Math.imul(self2, 2654435761) + Math.imul(b, 2246822507)));
 var optimize = (n) => n & 3221225471 | n >>> 1 & 1073741824;
 var isHash = (u) => hasProperty(u, symbol) && typeof u[symbol] === "function";
 var float64 = /* @__PURE__ */ new DataView(/* @__PURE__ */ new ArrayBuffer(8));
@@ -88449,7 +88868,7 @@ var makeCachedUnsafe = (self2, ttlMillis) => {
   let expiresAt = 0;
   let exit2;
   let current2;
-  const join4 = (fiber, run) => {
+  const join5 = (fiber, run) => {
     run.awaiters++;
     onExitUnsafe(fiber, () => {
       if (--run.awaiters > 0 || run.done)
@@ -88462,7 +88881,7 @@ var makeCachedUnsafe = (self2, ttlMillis) => {
   };
   return [withFiber((fiber) => {
     if (current2 !== undefined) {
-      return fiber === current2.fiber ? fiberJoin(current2.fiber) : join4(fiber, current2);
+      return fiber === current2.fiber ? fiberJoin(current2.fiber) : join5(fiber, current2);
     }
     if (exit2 !== undefined && (expiresAt === Infinity || fiber.getRef(ClockRef).currentTimeMillisUnsafe() < expiresAt)) {
       return exit2;
@@ -88475,7 +88894,7 @@ var makeCachedUnsafe = (self2, ttlMillis) => {
       done: false
     };
     current2 = run;
-    const joined = join4(fiber, run);
+    const joined = join5(fiber, run);
     run.fiber.evaluate(onExitPrimitive(self2, (exit_) => {
       run.done = true;
       if (current2 !== run)
@@ -91445,7 +91864,7 @@ function Hello({ actions }) {
 
 // src/client/config.ts
 import { homedir as homedir2 } from "os";
-import { join as join4, resolve as resolve6 } from "path";
+import { join as join5, resolve as resolve6 } from "path";
 class ConfigError extends Error {
 }
 var isLoopback = (hostname) => hostname === "localhost" || hostname === "[::1]" || /^127(\.\d{1,3}){3}$/.test(hostname);
@@ -91493,11 +91912,11 @@ async function connectionConfig(args2, read, home = homedir2(), env = process.en
       throw new ConfigError(`unknown option ${flag}; see tercet --help`);
   }
   const { settings, dir, path, found } = loaded ?? await loadSettings(settingsDir(env, home), read, home);
-  const baseDir = resolve6(flags.get("--base-dir") ?? settings.server.baseDir ?? join4(home, ".t3"));
+  const baseDir = resolve6(flags.get("--base-dir") ?? settings.server.baseDir ?? join5(home, ".t3"));
   let origin2 = settings.server.url ?? "http://127.0.0.1:3773";
   let source = flags.has("--url") ? "--url" : settings.server.url ? "server.url" : "default";
   if (!flags.has("--url") && !settings.server.url) {
-    const runtimePath = join4(baseDir, "userdata/server-runtime.json");
+    const runtimePath = join5(baseDir, "userdata/server-runtime.json");
     const persisted = await read(runtimePath);
     if (persisted) {
       let state;
@@ -91530,7 +91949,7 @@ async function connectionConfig(args2, read, home = homedir2(), env = process.en
   return {
     url: url.origin,
     baseDir,
-    tokenFile: resolve6(flags.get("--token-file") ?? settings.server.tokenFile ?? join4(dir, "token")),
+    tokenFile: resolve6(flags.get("--token-file") ?? settings.server.tokenFile ?? join5(dir, "token")),
     managedToken: !readOnly && !explicitToken,
     autostart: !readOnly && url.origin === "http://127.0.0.1:3773",
     dumpStatus,
@@ -101086,7 +101505,7 @@ function compileJsonSchema(representations, rootPaths, references, options) {
     const local = [];
     dependencies.push(local);
     let output = {
-      ...on(representation, path, local),
+      ...on2(representation, path, local),
       ...collectJsonSchemaAnnotations(representation.annotations, options)
     };
     if (representation._tag === "String" && representation.content !== undefined) {
@@ -101109,7 +101528,7 @@ function compileJsonSchema(representations, rootPaths, references, options) {
     });
     return registerPendingOneOf(output);
   }
-  function on(representation, path, dependencies) {
+  function on2(representation, path, dependencies) {
     switch (representation._tag) {
       case "Any":
       case "Unknown":
@@ -101683,7 +102102,7 @@ function toRepresentations(asts, options) {
       if (!candidate.emitted) {
         candidate.emitted = true;
         const annotated = candidate.identifier === undefined ? ast : annotateReference(ast, candidate, reference);
-        const representation = on(annotated, candidate.content);
+        const representation = on2(annotated, candidate.content);
         assignProperty(references, reference, representation);
       }
       return {
@@ -101691,9 +102110,9 @@ function toRepresentations(asts, options) {
         $ref: reference
       };
     }
-    return on(ast, candidate.content);
+    return on2(ast, candidate.content);
   }
-  function on(ast, content) {
+  function on2(ast, content) {
     const common = {
       checks: ast.checks?.map(fromCheck) ?? [],
       ...ast._tag === "Declaration" ? fromAnnotations(ast.annotations) : annotationsField(ast.annotations)
@@ -102477,9 +102896,9 @@ function toFormatter(ast, options) {
         return onBefore;
       }
     }
-    return on(ast2);
+    return on2(ast2);
   }
-  function on(ast2) {
+  function on2(ast2) {
     switch (ast2._tag) {
       default:
         return format;
@@ -109358,7 +109777,7 @@ class AcpRegistryOperationError extends TaggedError3()("AcpRegistryOperationErro
 }
 // node_modules/effect/dist/Fiber.js
 var await_ = fiberAwait;
-var join5 = fiberJoin;
+var join6 = fiberJoin;
 var joinAll = fiberJoinAll;
 var interrupt5 = fiberInterrupt;
 var getCurrent = getCurrentFiber;
@@ -111202,7 +111621,7 @@ var mapEffectConcurrent = (self2, f, options) => fromTransformBracket(fnUntraced
       const fiber2 = runFork3(suspend2(() => f(value3, index3)));
       trackFiber(fiber2);
       fiber2.addObserver(onExit3);
-      return offer(effects, join5(fiber2));
+      return offer(effects, join6(fiber2));
     }), forever3({
       disableYield: true
     }), catchCause2((cause) => offer(effects, failCause2(cause)).pipe(andThen2(failCause5(effects, cause)))), forkIn2(forkedScope));
@@ -111364,10 +111783,10 @@ var mergeAll3 = /* @__PURE__ */ dual(2, (channels, {
           yield* semaphore.take(1);
         } else {
           pullFiber = yield* forkChild2(pull);
-          yield* raceFirst2(semaphore.take(1), andThen2(join5(pullFiber), never2));
+          yield* raceFirst2(semaphore.take(1), andThen2(join6(pullFiber), never2));
         }
       }
-      const channel2 = pullFiber === undefined ? yield* pull : yield* join5(pullFiber);
+      const channel2 = pullFiber === undefined ? yield* pull : yield* join6(pullFiber);
       const childScope = forkUnsafe2(forkedScope);
       const childPull = yield* toTransform(channel2)(upstream, childScope);
       while (fibers.size >= concurrencyN) {
@@ -132134,7 +132553,7 @@ function clientRpcRequiredScopes(method, input) {
   return Object.hasOwn(CLIENT_GUARDED_RPC_SCOPES, method) ? [CLIENT_GUARDED_RPC_SCOPES[method]] : [];
 }
 // src/client/platform.ts
-import { chmod, mkdir as mkdir3, readFile as readFile3, rename, writeFile as writeFile3 } from "fs/promises";
+import { chmod, mkdir as mkdir4, readFile as readFile4, rename, writeFile as writeFile3 } from "fs/promises";
 import { dirname as dirname3 } from "path";
 
 // vendor/t3/packages/shared/src/speech.ts
@@ -135807,7 +136226,7 @@ var make45 = gen2(function* () {
           pendingTokens.delete(input.expectedEnvironmentId);
         }
       }))), forkIn2(serviceScope));
-      const token2 = join5(fiber2);
+      const token2 = join6(fiber2);
       pendingTokens.set(input.expectedEnvironmentId, { id: id2, identity: identity3, thumbprint, token: token2 });
       return { token: token2, fromCache: false };
     }));
@@ -136466,7 +136885,7 @@ function joinSocketFrameParts(socket) {
   return make33({
     reader: map7(socket.reader, (reader) => {
       let pending = "";
-      const join6 = (frame) => {
+      const join7 = (frame) => {
         if (typeof frame !== "string")
           return frame;
         if (frame.startsWith(PART_PREFIX)) {
@@ -136481,7 +136900,7 @@ function joinSocketFrameParts(socket) {
       };
       return {
         upgrade: reader.upgrade,
-        pull: map7(reader.pull, map4(join6))
+        pull: map7(reader.pull, map4(join7))
       };
     }),
     writer: socket.writer
@@ -138382,7 +138801,7 @@ var connectOverRoutes = fn2("ConnectionDriver.connectOverRoutes")(function* (ent
   });
   const silent = [];
   for (const [index3, route] of routes.entries()) {
-    const check2 = checks.length === 0 ? "unchecked" : yield* raceFirst2(join5(checks[index3]), join5(headStart).pipe(as2("silent")));
+    const check2 = checks.length === 0 ? "unchecked" : yield* raceFirst2(join6(checks[index3]), join6(headStart).pipe(as2("silent")));
     if (check2 === "silent") {
       silent.push({ route, index: index3 });
       continue;
@@ -138393,7 +138812,7 @@ var connectOverRoutes = fn2("ConnectionDriver.connectOverRoutes")(function* (ent
     if (result3.failure.reason === "unsupported")
       return yield* result3.failure;
   }
-  const late = yield* forEach2(silent, ({ index: index3 }) => join5(checks[index3]), {
+  const late = yield* forEach2(silent, ({ index: index3 }) => join6(checks[index3]), {
     concurrency: "unbounded"
   });
   const retry5 = [
@@ -139019,7 +139438,7 @@ var make51 = fn2("EnvironmentSupervisor.make")(function* (entry, options2) {
           await_(probe).pipe(map7((exit3) => ({ _tag: "ProbeCompleted", exit: exit3 }))),
           takeSignal.pipe(map7((signal2) => ({ _tag: "Signal", signal: signal2 }))),
           sleep2(nanos(remaining > 0n ? remaining : 0n)).pipe(as2({ _tag: "TimedOut" })),
-          (silentSocket ? join5(silentSocket) : never2).pipe(map7((check2) => check2 === "silent" ? { _tag: "SocketSilent" } : { _tag: "SocketAlive" }))
+          (silentSocket ? join6(silentSocket) : never2).pipe(map7((check2) => check2 === "silent" ? { _tag: "SocketSilent" } : { _tag: "SocketAlive" }))
         ]);
         if (probeEvent._tag === "SocketAlive") {
           silentSocket = undefined;
@@ -143950,7 +144369,7 @@ function webThreadUrl(url, threadId) {
 // src/client/platform.ts
 async function readOptional(path) {
   try {
-    return await readFile3(path, "utf8");
+    return await readFile4(path, "utf8");
   } catch (error2) {
     if (error2.code === "ENOENT")
       return;
@@ -144025,7 +144444,7 @@ function platform(config) {
         return Object.fromEntries(Object.entries(parsed).filter((entry) => typeof entry[1] === "string"));
       },
       async write(drafts) {
-        await mkdir3(dirname3(draftPath), { recursive: true, mode: 448 });
+        await mkdir4(dirname3(draftPath), { recursive: true, mode: 448 });
         const temporary = `${draftPath}.${process.pid}.tmp`;
         await writeFile3(temporary, JSON.stringify(drafts), { mode: 384 });
         await rename(temporary, draftPath);
@@ -144070,7 +144489,7 @@ function platform(config) {
       if (exit3 !== 0 || !token.trim())
         throw new Error("Token issuance failed; check t3 CLI and --base-dir");
       const credential = issuedToken(token);
-      await mkdir3(dirname3(config.tokenFile), { recursive: true, mode: 448 });
+      await mkdir4(dirname3(config.tokenFile), { recursive: true, mode: 448 });
       const temporary = `${config.tokenFile}.${process.pid}.tmp`;
       await writeFile3(temporary, credential, { mode: 384 });
       await chmod(temporary, 384);
@@ -144230,13 +144649,72 @@ function compatMessage(check2, url) {
     }
   }
 }
+
+// src/client/appearance.ts
+var OSC11_QUERY = "\x1B]11;?\x1B\\";
+function parseBackground(text4) {
+  const reply = /\x1b\]11;(?:rgb:([0-9a-f]{1,4})\/([0-9a-f]{1,4})\/([0-9a-f]{1,4})|#([0-9a-f]{6}))/i.exec(text4);
+  if (!reply)
+    return null;
+  if (reply[4]) {
+    const n = parseInt(reply[4], 16);
+    return [n >> 16 & 255, n >> 8 & 255, n & 255];
+  }
+  const channel2 = (digits) => Math.round(parseInt(digits, 16) / (16 ** digits.length - 1) * 255);
+  return [channel2(reply[1]), channel2(reply[2]), channel2(reply[3])];
+}
+function appearanceOf([r, g2, b]) {
+  return (0.299 * r + 0.587 * g2 + 0.114 * b) / 255 < 0.5 ? "dark" : "light";
+}
+function appearanceFromEnv(env) {
+  const last = (env.COLORFGBG ?? "").split(";").pop() ?? "";
+  const index3 = /^\d{1,2}$/.test(last) ? Number(last) : -1;
+  if (index3 < 0 || index3 > 15)
+    return null;
+  return index3 <= 6 || index3 === 8 ? "dark" : "light";
+}
+function queryBackground(input, output, timeoutMs = 300) {
+  const raw2 = input.setRawMode?.bind(input);
+  if (!input.isTTY || !raw2)
+    return Promise.resolve(null);
+  return new Promise((resolve9) => {
+    let text4 = "";
+    const finish = () => {
+      clearTimeout(timer);
+      input.off("data", onData);
+      raw2(false);
+      input.pause();
+      resolve9(parseBackground(text4));
+    };
+    const onData = (chunk) => {
+      text4 += typeof chunk === "string" ? chunk : chunk.toString("latin1");
+      if (/\x1b\[\?[\d;]*c/.test(text4))
+        finish();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    raw2(true);
+    input.on("data", onData);
+    input.resume();
+    output.write(OSC11_QUERY + DA1_QUERY);
+  });
+}
+async function detectAppearance(input, output, env) {
+  const background2 = await queryBackground(input, output);
+  if (background2)
+    return { appearance: appearanceOf(background2), source: "terminal background" };
+  const fromEnv = appearanceFromEnv(env);
+  return fromEnv ? { appearance: fromEnv, source: "COLORFGBG" } : { appearance: null, source: "no answer from the terminal" };
+}
 // package.json
 var version = "0.1.0";
 
 // src/doctor.ts
 var TERCET_VERSION = version;
 async function glyphsReport(settings2, probes, fcList) {
-  const theme2 = `${settings2.theme.preset ?? "cyberdream"}${settings2.theme.accent ? `, accent ${settings2.theme.accent}` : ""}`;
+  const preset = settings2.theme.preset ?? "cyberdream";
+  const detected = preset === "auto" ? await probes.appearance?.() : undefined;
+  const name = preset === "auto" ? `auto (${detected?.appearance ?? "dark"}, ${detected?.source ?? "not asked"}: ${resolvePreset(preset, detected?.appearance)})` : preset;
+  const theme2 = `${name}${settings2.theme.accent ? `, accent ${settings2.theme.accent}` : ""}`;
   const icons = settings2.icons;
   if (icons !== "nerd")
     return { theme: theme2, icons, glyphs: null };
@@ -144566,7 +145044,8 @@ function systemProbes() {
         throw new Error(`HTTP ${response.status}`);
       return response.json();
     },
-    terminal: () => queryTerminal(process.stdin, process.stdout)
+    terminal: () => queryTerminal(process.stdin, process.stdout),
+    appearance: () => detectAppearance(process.stdin, process.stdout, process.env)
   };
 }
 async function runDoctor(args2, probes = systemProbes()) {
@@ -148167,6 +148646,7 @@ function PullRequestPanel({ workflow, target: target2, effects, close: close2 })
           /* @__PURE__ */ import_jsx_runtime.jsx("textarea", {
             ref: editor2,
             focused: true,
+            cursorColor: theme.strong,
             flexGrow: 1,
             minHeight: 2,
             initialValue: key5 ? workflow.draft(key5) : "",
@@ -150725,7 +151205,7 @@ function measureMarkdown(item, width2, imageHeight = 12, offered = []) {
       const source = image2[2] ?? image2[3];
       const alt = image2[1] || "image";
       const target3 = { kind: "image", text: source };
-      const height = Math.max(1, Math.min(12, imageHeight));
+      const height = Math.max(1, Math.min(source.startsWith("tercet-page:") ? 24 : 12, imageHeight * (source.startsWith("tercet-page:") ? 2 : 1)));
       for (let offset2 = 0;offset2 < height; offset2++)
         rows.push({
           id: `${item.id}:${lineIndex}:${offset2}`,
@@ -150944,7 +151424,7 @@ function ImagePreview({
       active2 = false;
     };
   }, [image2.source, load, inspect2, cwd]);
-  const cells = Math.min(width2, Math.max(34, image2.height * 4));
+  const cells = image2.source.startsWith("tercet-page:") ? width2 : Math.min(width2, Math.max(34, image2.height * 4));
   const left = image2.right ? width2 - cells : 0;
   const inner = { width: Math.max(1, cells - 4), height: Math.max(1, image2.height - 2) };
   const size6 = info?.size ?? fileSource(image2.source)?.size;
@@ -152434,6 +152914,7 @@ function ModelPicker({
       !selection && /* @__PURE__ */ import_jsx_runtime.jsx("input", {
         focused: filtering,
         value: query2,
+        placeholderColor: theme.muted,
         placeholder: "Press / or type to filter all providers\u2026",
         onInput: (value4) => {
           setQuery(value4);
@@ -153966,6 +154447,7 @@ function ThreadPalette({
         /* @__PURE__ */ import_jsx_runtime.jsx("input", {
           focused: true,
           value: query2,
+          placeholderColor: theme.muted,
           placeholder: prompt === "delete" ? "Type DELETE" : prompt === "rename" ? "New title" : "Type to search\u2026",
           onInput: (text5) => {
             setQuery(text5);
@@ -156148,6 +156630,8 @@ function Editor({
         initialValue: text5,
         backgroundColor: theme.canvas,
         textColor: theme.input,
+        cursorColor: theme.strong,
+        placeholderColor: theme.muted,
         placeholder: "Message \xB7 @file \xB7 /skill \xB7 :emoji",
         keyBindings: [{ name: "return", shift: true, action: "newline" }],
         onContentChange: () => {
@@ -158809,7 +159293,8 @@ function workMessages(rows, expanded) {
         result3.push({
           id: `${id3}/page`,
           kind: "Rendered page",
-          text: `[open](tercet-page:${encodeURIComponent(page.attachmentId)})`
+          text: `[open](${pageSource(page.attachmentId)})${pageShotsOn() ? `
+![Rendered page](${pageSource(page.attachmentId)})` : ""}`
         });
     }
     if (item.type === "user_message" || item.type === "assistant_message") {
@@ -159645,7 +160130,7 @@ function TranscriptViewport({
                   setTarget(row.target);
                   put3({ row: start + offset - image2.offset, col: 0 });
                 }
-              }, row.id);
+              }, image2.id);
             }
             if (row.separator)
               return /* @__PURE__ */ import_jsx_runtime.jsx(SeparatorRow, {
@@ -161010,8 +161495,8 @@ function AppFrame({
 }
 
 // src/client/look.ts
-function applyLook(settings5) {
-  setTheme(settings5.theme);
+function applyLook(settings5, appearance) {
+  setTheme(settings5.theme, appearance);
   setIconMode(settings5.icons);
   setKeymap(resolveKeymap(settings5.keys, settingsTargetKeys(settings5)));
 }
@@ -161397,7 +161882,7 @@ ${found.rows.slice(0, 8).map((row) => `  ${row.shortId}  ${row.title}`).join(`
 
 // src/upgrade.ts
 import { chmodSync, existsSync, renameSync as renameSync2, rmSync, writeFileSync } from "fs";
-import { dirname as dirname4, join as join6 } from "path";
+import { dirname as dirname4, join as join7 } from "path";
 var REPO = "Steven-ODell/tercet";
 function assetName(platform2 = process.platform, arch = process.arch) {
   const os = { linux: "linux", darwin: "darwin", win32: "windows" }[platform2];
@@ -161478,7 +161963,7 @@ async function runUpgrade(args2, fetcher = fetch, self2 = process.execPath) {
     const bytes2 = new Uint8Array(await download.arrayBuffer());
     if (sha2563(bytes2) !== expected)
       throw new Error("the download does not match SHA256SUMS; nothing was changed");
-    const next2 = join6(dirname4(self2), `.${wanted}.new`);
+    const next2 = join7(dirname4(self2), `.${wanted}.new`);
     writeFileSync(next2, bytes2);
     if (process.platform !== "win32")
       chmodSync(next2, 493);
@@ -161503,9 +161988,9 @@ async function runUpgrade(args2, fetcher = fetch, self2 = process.execPath) {
 import { spawn as spawn4 } from "child_process";
 import { createHash } from "crypto";
 import { createReadStream, statSync as statSync2 } from "fs";
-import { mkdir as mkdir4, open as open2, rename as rename2, rm as rm2 } from "fs/promises";
+import { mkdir as mkdir5, open as open2, rename as rename2, rm as rm3 } from "fs/promises";
 import { homedir as homedir5 } from "os";
-import { join as join7, win32 as win323 } from "path";
+import { join as join8, win32 as win323 } from "path";
 import { createInterface } from "readline";
 var KOKORO_RELEASE_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0";
 var KOKORO_FILES = [
@@ -161530,7 +162015,7 @@ status prints ready, or what is missing, and exits 1 when read aloud is not read
 var megabytes = (bytes2) => `${Math.round(bytes2 / 1e6)} MB`;
 async function runSetup(options2, deps, signal) {
   const win = deps.platform === "win32";
-  const at = win ? win323.join : join7;
+  const at = win ? win323.join : join8;
   const { home } = options2;
   const venvDir = at(home, ".venv");
   const ownVenv = !deps.env.KOKORO_PYTHON;
@@ -161679,9 +162164,9 @@ function systemDeps(overrides = {}) {
       const hash2 = createHash("sha256");
       createReadStream(path).on("data", (chunk) => hash2.update(chunk)).once("error", reject).once("end", () => resolve9(hash2.digest("hex")));
     }),
-    mkdir: async (path) => void await mkdir4(path, { recursive: true }),
+    mkdir: async (path) => void await mkdir5(path, { recursive: true }),
     rename: rename2,
-    remove: (path) => rm2(path, { recursive: true, force: true }),
+    remove: (path) => rm3(path, { recursive: true, force: true }),
     prompt: (question) => new Promise((resolve9) => {
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       let answered = false;
@@ -161841,7 +162326,8 @@ try {
   if (!config.settingsFound && !config.dumpStatus)
     process.stderr.write(`tercet: no settings file at ${config.settingsPath}; using defaults. Run \`tercet doctor\` to check your setup.
 `);
-  applyLook(config.settings);
+  const appearance = config.settings.theme.preset === "auto" && !config.dumpStatus ? (await detectAppearance(process.stdin, process.stdout, process.env)).appearance : null;
+  applyLook(config.settings, appearance);
   const boundary = config.hello ? undefined : platform(config);
   const client = boundary && createClient(boundary, config.managedToken);
   const check2 = async () => {
@@ -161897,7 +162383,9 @@ ${lines.join(`
       tmux: inTmux ? await tmuxMedia(probe).catch(() => ({ inside: true, passthrough: null, client: null })) : { inside: false, passthrough: null, client: null },
       ascii: iconMode() === "ascii"
     }), config.settings.media.video);
-    const stdout = process.env.TMUX ? kittyStdout() : process.stdout;
+    setPageShots(pageShotsFromEnv(process.env) && media().rung !== "none");
+    const kittyImages = new Set;
+    const stdout = process.env.TMUX ? kittyStdout(kittyImages) : process.stdout;
     const renderer = await createCliRenderer({
       stdout,
       remote: false,
@@ -161927,7 +162415,11 @@ ${lines.join(`
         throw new Error(`${args3[0]} failed`);
       return text5;
     };
-    const loadImage = (source, cwd) => loadPreviewImage(source, cwd, (id3, mime) => client.pageUrl(id3, mime));
+    const shootPageId = cachedShots(async (id3) => shootPage(await client.pageUrl(id3), async (args3, timeoutMs) => {
+      const child = Bun.spawn(args3, { stdout: "ignore", stderr: "ignore", timeout: timeoutMs });
+      return child.exited;
+    }));
+    const loadImage = (source, cwd) => isPageSource(source) ? shootPageId(pageId(source)) : loadPreviewImage(source, cwd, (id3, mime) => client.pageUrl(id3, mime));
     const effects = hostActions({
       settings: config.settings,
       host: systemHost(),
@@ -161935,13 +162427,25 @@ ${lines.join(`
       writeTerminal: (bytes2) => process.stdout.write(bytes2),
       sshHost: sshHostLookup(process.env, output, (path) => Bun.file(path).text()),
       loadImage,
-      personalDictionary: join8(settingsDir(process.env, homedir6()), "dictionary.txt")
+      personalDictionary: join9(settingsDir(process.env, homedir6()), "dictionary.txt")
     });
-    const switchesSession = process.env.TMUX ? clearKittyBeforeSwitch(stdout, () => {
+    const repaint = () => {
       const { columns, rows } = process.stdout;
       renderer.requestResize(columns + 1, rows);
       renderer.requestResize(columns, rows);
-    }, (listener) => renderer.on("focus", listener)) : (run3) => run3;
+    };
+    const switchesSession = process.env.TMUX ? clearKittyBeforeSwitch(stdout, repaint, (listener) => renderer.on("focus", listener)) : (run3) => run3;
+    if (process.env.TMUX && process.env.TMUX_PANE && media().rung === "kitty")
+      clearKittyWhenHidden({
+        showing: () => tmuxClientsShowing(process.env.TMUX_PANE, output),
+        clear: async (tty) => {
+          if (kittyImages.size)
+            await appendFile2(tty, kittyDeletePlacements(kittyImages));
+        },
+        repaint,
+        onFocus: (listener) => renderer.on("focus", listener),
+        onBlur: (listener) => renderer.on("blur", listener)
+      });
     for (const name of ["shell", "editor", "tmux", "run"]) {
       const action = effects[name];
       if (action)
@@ -161958,8 +162462,10 @@ ${lines.join(`
       };
     }
     const attachmentsDir = isLoopback(new URL(config.url).hostname) ? `${config.baseDir}/userdata/attachments` : undefined;
-    if (effects.openPath)
-      effects.openImage = imageOpenAction(loadImage, attachmentsDir, effects.openPath);
+    if (effects.openPath) {
+      const openImage = imageOpenAction(loadImage, attachmentsDir, effects.openPath);
+      effects.openImage = async (source, cwd) => isPageSource(source) && effects.openPage ? effects.openPage(pageId(source)) : openImage(source, cwd);
+    }
     const mediaTarget = (source, cwd) => resolveMediaTarget(source, cwd, attachmentsDir, (id3, mime) => client.pageUrl(id3, mime));
     const playable = (source) => ["video", "audio"].includes(mediaKind(source));
     effects.inspectMedia = async (source, cwd) => {

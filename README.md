@@ -153,7 +153,7 @@ to check the file (the `settings` line should say `ok`). For example:
 ```jsonc
 {
   "defaults": { "provider": "codex", "model": "gpt-5.5", "sendShortcut": "enter" },
-  "theme": { "preset": "cyberdream" }, // or "light", or "ansi" for 16-color terminals
+  "theme": { "preset": "cyberdream" }, // 15 presets (nord, gruvbox, catppuccin-mocha...), "ansi", or "auto"
   "icons": "unicode", // "nerd" with a Nerd Font, "ascii" for no glyphs at all
   "keys": { "palette": "Ctrl+k", "focusUp": "Alt+k" },
   "launchers": { "terminal": ["foot", "-D", "{cwd}"], "editor": "nvim" },

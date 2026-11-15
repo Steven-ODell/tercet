@@ -11,6 +11,7 @@ import { extractToolActivityPresentation } from "@t3tools/client-runtime/work-lo
 import { toolCallLines, turnItemOutputText } from "@t3tools/client-runtime/work-log/item-detail";
 import type { Message } from "./markdown";
 import { fileSourceText } from "./media";
+import { pageShotsOn, pageSource } from "./page-shot";
 export type WorkRow = OrchestrationV2ThreadProjection["visibleTurnItems"][number];
 const grouped = new Set([
   "command_execution",
@@ -243,7 +244,9 @@ export function workMessages(rows: readonly WorkRow[], expanded: ReadonlySet<str
         result.push({
           id: `${id}/page`,
           kind: "Rendered page",
-          text: `[open](tercet-page:${encodeURIComponent(page.attachmentId)})`,
+          text: `[open](${pageSource(page.attachmentId)})${
+            pageShotsOn() ? `\n![Rendered page](${pageSource(page.attachmentId)})` : ""
+          }`,
         });
     }
     if (item.type === "user_message" || item.type === "assistant_message") {

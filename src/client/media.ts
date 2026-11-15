@@ -125,7 +125,7 @@ export async function tmuxMedia(
   };
 }
 
-interface TtyInput {
+export interface TtyInput {
   isTTY?: boolean;
   setRawMode?(mode: boolean): unknown;
   on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
@@ -236,7 +236,7 @@ const kindOfMime = (mime: string): MediaKind | null =>
 
 /** What a preview source is, by attachment MIME type or the path's extension (web's tables). */
 export function mediaKind(source: string): MediaKind {
-  if (source.startsWith("tercet-image:")) return "image";
+  if (source.startsWith("tercet-image:") || source.startsWith("tercet-page:")) return "image";
   const file = fileSource(source);
   if (file)
     return (
