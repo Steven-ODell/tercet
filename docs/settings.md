@@ -477,22 +477,66 @@ or Esc cancels. Nothing is read automatically. Voice and speed are configurable:
   "enabled": true,
   "engine": "local",
   "voice": "af_heart",
-  "speed": 1.0
+  "speed": 1.0,
+  "home": "" // where Kokoro lives; empty means tercet's own data directory
 }
 ```
 
-Local generation uses the same setup as Phone Assist hub: `KOKORO_HOME`, defaulting to
-`~/Projects/Side/kokoro`, containing `kokoro-v1.0.onnx`, `voices-v1.0.bin` and `.venv` with
-`kokoro_onnx` and numpy. `KOKORO_PYTHON` overrides its Python interpreter. British voices use
-en-gb phonemes, American voices en-us. A cancellable worker loads the model per Read and
-exits after generation; no hub request, hub token, additional service or Docker is needed.
-Voice IDs include af_heart, am_michael and bf_emma. Speed accepts 0.25–4. Restart after settings
-changes. Existing normal settings need no changes to use the local defaults.
+### Setting it up
 
-Optional `engine: "http"` uses `endpoint` (default
-`http://127.0.0.1:8880/v1/audio/speech`) for OpenAI-compatible Kokoro-FastAPI WAV synthesis.
-Only explicitly requested response text is sent there, never T3 credentials; redirects are
-refused. Local generation makes no HTTP requests.
+Local generation needs the Kokoro model files and a Python venv with `kokoro-onnx` and numpy.
+tercet installs them only when you ask:
+
+```sh
+tercet readback setup                # shows the plan, asks y/N
+tercet readback setup --yes          # no question
+tercet readback setup --dry-run      # print the plan, change nothing
+tercet readback setup --force        # replace a model file that differs from the release
+tercet readback setup --home DIR     # use DIR instead of the default location
+tercet readback status               # ready, or what is missing (exit 1 when not ready)
+```
+
+Setup uses `uv` when it is installed and `python3 -m venv` with pip otherwise. It downloads
+`kokoro-v1.0.onnx` and `voices-v1.0.bin` (about 354 MB together) from the kokoro-onnx GitHub
+release `model-files-v1.0`, to a temporary name, checks size and SHA-256, and only then renames
+them. A model file that is already there but differs from the release is refused unless you pass
+`--force`. Running setup again when everything is present does nothing. Ctrl+C leaves no half
+files behind. Nothing downloads at startup, at install time or on the first Read.
+
+The files live in the Kokoro home (`kokoro-v1.0.onnx`, `voices-v1.0.bin` and `.venv`):
+
+| System  | Default Kokoro home                                  |
+| ------- | ---------------------------------------------------- |
+| Linux   | `$XDG_DATA_HOME/tercet/kokoro`, else `~/.local/share/tercet/kokoro` |
+| macOS   | `~/Library/Application Support/tercet/kokoro`        |
+| Windows | `%LOCALAPPDATA%\tercet\kokoro`                       |
+
+To use a setup you already have somewhere else, point at it. The order is the `KOKORO_HOME`
+environment variable, then `readback.home` in settings (a leading `~` is expanded), then the
+default above. `--home DIR` on `setup` and `status` overrides all three for that run only; if it
+differs from what tercet reads, setup says so and tells you to set `readback.home` or
+`KOKORO_HOME` to match. `KOKORO_PYTHON` replaces the venv's Python interpreter; it must be able to import `kokoro_onnx`
+and numpy.
+
+Until the setup is ready, clicking **[read]** shows "Read aloud is not set up. Run `tercet
+readback setup`." and nothing is spawned. tercet checks again on every click, so a setup run in
+another terminal works without restarting tercet. `tercet doctor` shows a `read aloud` row:
+the Kokoro home when ready, the same hint when not, the endpoint (without calling it) for
+`engine: "http"`, or `off` when `readback.enabled` is false.
+
+British voices use en-gb phonemes, American voices en-us. A cancellable worker loads the model
+per Read and exits after generation. Voice IDs include af_heart, am_michael and bf_emma. Speed
+accepts 0.25 to 4. Restart after settings changes.
+
+### Kokoro-FastAPI instead
+
+`engine: "http"` uses `endpoint` (default `http://127.0.0.1:8880/v1/audio/speech`) for
+OpenAI-compatible [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) WAV synthesis. It
+needs no Python setup in tercet and no `tercet readback setup`. Only explicitly requested
+response text is sent there, never T3 credentials; redirects are refused. Local generation makes
+no HTTP requests.
+
+### Playback
 
 Speech is generated on the machine running tercet but plays where you click. Run locally, it
 plays there with mpv, ffplay or afplay and no window. Over SSH it plays on the machine you type
@@ -503,5 +547,5 @@ is found. That needs passwordless ssh back to the client, which the opener alrea
 Stop or Esc ends the remote player too. Read-only sessions block Read; Stop stays available. Temporary audio is removed after play
 or cancellation. Long responses are spoken sentence by sentence: the first piece starts as soon
 as it is made while the next is generated. Beside **[read]** a spinner shows speech is being
-prepared and a play icon shows it is playing; clicking **[read]** again stops it. Limits: 30,000 characters, 64 MB audio per piece and two minutes to make any one piece. Tercet does
-not install models or change the hub. Generation errors appear beneath the transcript.
+prepared and a play icon shows it is playing; clicking **[read]** again stops it. Limits: 30,000 characters, 64 MB audio per piece and two minutes to make any one piece.
+Generation errors appear beneath the transcript.

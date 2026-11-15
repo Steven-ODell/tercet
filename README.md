@@ -117,8 +117,22 @@ the running turn, and `Ctrl+x` drops a queued one.
 
 Click **[read]** below an assistant response to hear it through Kokoro. It plays on the machine you
 click from, including over SSH. A spinner beside it means the speech is being made, a play icon
-means it is playing. **[stop reading]** (or clicking **[read]** again) cancels it. Voice and speed are configurable in settings. Requires
-the same local Kokoro model/venv as Phone Assist hub and an audio player; see [readback setup](docs/settings.md#response-readback-kokoro).
+means it is playing. **[stop reading]** (or clicking **[read]** again) cancels it. Voice and speed
+are configurable in settings.
+
+Read aloud needs a one-time setup, and tercet never does it for you. Run:
+
+```sh
+tercet readback setup
+```
+
+It shows what it will do and asks y/N first. It creates a Python venv, installs `kokoro-onnx` and
+numpy there, and downloads the two Kokoro model files (about 354 MB, checked against SHA-256).
+`--yes` skips the question, `--dry-run` prints the plan and changes nothing. `tercet readback status`
+says whether it is ready and what is missing. Until then, clicking **[read]** shows "Read aloud is
+not set up. Run `tercet readback setup`." and `tercet doctor` has a `read aloud` row with the same
+hint. You also need an audio player (mpv, ffplay or afplay). Details, other locations and the
+Kokoro-FastAPI alternative: [readback setup](docs/settings.md#response-readback-kokoro).
 
 ## Settings
 

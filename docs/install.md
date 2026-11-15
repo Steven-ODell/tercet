@@ -151,3 +151,11 @@ particularly with buffered SoX capture; retry with a longer phrase.
 T3's server must also have a speech model configured through its web app, Settings → Voice.
 This is a separate prerequisite from the recorder. No Voxtype or cloud API key is needed.
 Linux capture and sandbox transcription have been verified; macOS capture remains untested.
+
+## Read aloud setup
+
+The **[read]** button needs a one-time `tercet readback setup`, which installs Kokoro into
+tercet's own data directory (about 354 MB, after a y/N question). Installing tercet never does
+this, and nothing downloads until you run it. You also need an audio player (mpv, ffplay or
+afplay); `tercet readback status` and the `read aloud` row of `tercet doctor` show what is
+missing. See [Response readback](settings.md#response-readback-kokoro).
