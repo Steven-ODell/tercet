@@ -80,3 +80,27 @@ test("the Read button shows a spinner while speech is made and a play icon while
     expect(readRow()).not.toMatch(/preparing|reading/);
   } finally { await act(async () => view.renderer.destroy()); }
 });
+
+test("a Read click that fails because setup is missing shows the hint, and [read] stays", async () => {
+  const hint = "Read aloud is not set up. Run `tercet readback setup`.";
+  let ready = false;
+  const calls: string[] = [];
+  // Mirrors the app: the check runs on every click, so setup finished meanwhile works at once.
+  const effects = { copy() {}, readback: async (text: string) => { calls.push(text); if (!ready) throw new Error(hint); } };
+  const view = await testRender(<TranscriptViewport items={[{ id: "a", kind: "assistant", text: "Hello world" }]} width={80} height={12} effects={effects} />, { width: 80, height: 12 });
+  const frame = () => view.captureCharFrame();
+  try {
+    await view.renderOnce();
+    const row = frame().split("\n").findIndex(l => l.includes("[read]"));
+    await act(async () => { await view.mockMouse.click(2, row); await Promise.resolve(); });
+    await view.renderOnce();
+    expect(frame()).toContain(`X ${hint}`);
+    expect(frame()).toContain("[read]");
+    expect(frame()).not.toMatch(/preparing|reading/);
+    ready = true;
+    await act(async () => { await view.mockMouse.click(2, row); await Promise.resolve(); });
+    await view.renderOnce();
+    expect(calls).toEqual(["Hello world", "Hello world"]);
+    expect(frame()).not.toContain("not set up");
+  } finally { await act(async () => view.renderer.destroy()); }
+});

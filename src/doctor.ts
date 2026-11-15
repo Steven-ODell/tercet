@@ -1,6 +1,7 @@
 import { access } from "node:fs/promises";
 import { homedir, release } from "node:os";
 import { recorderStatus } from "./dictation";
+import { READBACK_NOT_SET_UP, readbackPieces, readbackStatus } from "./readback";
 import { connectionConfig, isLoopback, type Config } from "./client/config";
 import { readOptional } from "./client/platform";
 import {
@@ -239,6 +240,24 @@ async function programOf(spec: CommandSpec, probes: DoctorProbes) {
   return { program, ok };
 }
 
+/** Read aloud: checked through the probes, and for `engine: "http"` named without a request. */
+async function readbackRow(
+  settings: Settings,
+  host: Host,
+  probes: DoctorProbes,
+  add: (name: string, available: boolean | null, detail: string) => void,
+) {
+  const { enabled, engine, endpoint, home: settingsHome } = settings.readback;
+  if (!enabled) return add("read aloud", null, "off (readback.enabled is false)");
+  if (engine === "http") return add("read aloud", null, `readback.engine http: ${endpoint} (not checked)`);
+  const { pieces } = readbackPieces(host.env, settingsHome, host.platform as NodeJS.Platform, probes.home);
+  const present = new Set<string>();
+  await Promise.all(pieces.map(async ({ path }) => { if (await probes.exists(path)) present.add(path); }));
+  const status = readbackStatus(host.env, settingsHome, host.platform as NodeJS.Platform, probes.home, (path) => present.has(path));
+  if (status.ready) return add("read aloud", true, `ready; home ${status.home}`);
+  add("read aloud", false, READBACK_NOT_SET_UP);
+}
+
 /** What each action will use on this machine, by the same chains and settings tercet runs with. */
 async function actionsReport(
   settings: Settings,
@@ -348,6 +367,7 @@ async function actionsReport(
         : recorder.reason,
     );
   }
+  await readbackRow(settings, host, probes, add);
   await command("link mapping", "commands.mapUrl", settings.commands.mapUrl);
   add(
     "spell check",

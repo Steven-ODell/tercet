@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { createReadback, speechChunks, spokenText, synthesizeReadback, playReadback, playReadbackVia, readbackHome, localReadbackCommand, readbackStatus } from "./readback";
+import { createReadback, synthesizeLocalReadback, speechChunks, spokenText, synthesizeReadback, playReadback, playReadbackVia, readbackHome, localReadbackCommand, readbackStatus } from "./readback";
 import { chmod, mkdir, mkdtemp, readFile, writeFile, rm, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -144,23 +144,45 @@ test.skipIf(process.platform === "win32")("local generation sends voice/speed/te
   const { tmpdir } = await import("node:os");
   const { synthesizeLocalReadback } = await import("./readback");
   const dir = await mkdtemp(join(tmpdir(), "tercet-local-readback-"));
-  const previous = process.env.KOKORO_PYTHON;
   try {
+    await writeFile(join(dir, "kokoro-v1.0.onnx"), "model"); await writeFile(join(dir, "voices-v1.0.bin"), "voices");
     const worker = join(dir, "fake-python"); const recorded = join(dir, "request.json");
     await writeFile(worker, `#!${process.execPath}\nconst body = await Bun.stdin.json(); await Bun.write(${JSON.stringify(recorded)}, JSON.stringify(body)); if (body.voice === "slow") setInterval(() => {}, 1000); else process.stdout.write("RIFFxxxxWAVEdata");\n`, { mode: 0o700 });
-    process.env.KOKORO_PYTHON = worker;
-    expect(Buffer.from(await synthesizeLocalReadback("**hello**", { ...settings, voice: "bm_george", speed: 1.25 }, new AbortController().signal))).toEqual(wav);
+    const env = { KOKORO_PYTHON: worker, KOKORO_HOME: dir };
+    expect(Buffer.from(await synthesizeLocalReadback("**hello**", { ...settings, voice: "bm_george", speed: 1.25 }, new AbortController().signal, env))).toEqual(wav);
     expect(JSON.parse(await readFile(recorded, "utf8"))).toEqual({ text: "hello", voice: "bm_george", speed: 1.25 });
     const abort = new AbortController();
-    const pending = synthesizeLocalReadback("cancel", { ...settings, voice: "slow" }, abort.signal);
+    const pending = synthesizeLocalReadback("cancel", { ...settings, voice: "slow" }, abort.signal, env);
     // Not `expect(pending).rejects`: Bun 1.4 hangs when the promise rejects in the same tick.
     const outcome = pending.then(() => "resolved", (error: Error) => error.message);
     abort.abort(new Error("cancelled"));
     expect(await outcome).toBe("cancelled");
   } finally {
-    if (previous === undefined) delete process.env.KOKORO_PYTHON; else process.env.KOKORO_PYTHON = previous;
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test.skipIf(process.platform === "win32")("a Read without a ready local setup fails fast with the hint and spawns nothing; setup while open fixes it", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "tercet-not-set-up-"));
+  try {
+    const home = join(dir, "kokoro"); const spawned = join(dir, "spawned");
+    // A stand-in worker that leaves a marker if it is ever started (a shell script, not Python).
+    const worker = join(dir, "fake-python");
+    await writeFile(worker, `#!/bin/sh\ntouch ${JSON.stringify(spawned)}\ncat > /dev/null\nprintf 'RIFFxxxxWAVEdata'\n`, { mode: 0o700 });
+    const env = { KOKORO_PYTHON: worker };
+    const local = { ...settings, engine: "local" as const, home };
+    const played: number[] = [];
+    const controller = createReadback(local, (text, s, signal) => synthesizeLocalReadback(text, s, signal, env), async (audio) => { played.push(audio.length); });
+    await expect(controller.readback("hello there")).rejects.toThrow("Read aloud is not set up. Run `tercet readback setup`.");
+    expect(await access(spawned).then(() => true, () => false)).toBe(false);
+    expect(played).toEqual([]);
+    // Another terminal finishes setup while this controller stays alive: the next Read works.
+    await mkdir(home, { recursive: true });
+    await writeFile(join(home, "kokoro-v1.0.onnx"), "model"); await writeFile(join(home, "voices-v1.0.bin"), "voices");
+    await controller.readback("hello there");
+    expect(await access(spawned).then(() => true, () => false)).toBe(true);
+    expect(played).toEqual([wav.length]);
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
 // A fake ssh that runs the remote command on this machine, and a fake mpv that records what it was given.

@@ -272,3 +272,32 @@ test("doctor exits 0 and prints JSON even when a probe blows up", async () => {
     console.log = log;
   }
 });
+
+test("doctor's read aloud line: local ready, local not set up, off, and http without a request", async () => {
+  const row = async (files: Record<string, string>) => {
+    const { probes, fetched } = machine({ files });
+    const report = await doctorReport([], probes);
+    return { action: report.actions.find((a) => a.name === "read aloud"), fetched, text: formatReport(report) };
+  };
+  const home = "/home/u/.local/share/tercet/kokoro";
+  const hint = "Read aloud is not set up. Run `tercet readback setup`.";
+  const notReady = await row({});
+  expect(notReady.action).toEqual({ name: "read aloud", available: false, detail: hint });
+  expect(notReady.text).toContain(hint);
+  // One missing model file is still not ready.
+  const some = await row({ [`${home}/.venv/bin/python`]: "", [`${home}/kokoro-v1.0.onnx`]: "" });
+  expect(some.action?.available).toBe(false);
+  const ready = await row({ [`${home}/.venv/bin/python`]: "", [`${home}/kokoro-v1.0.onnx`]: "", [`${home}/voices-v1.0.bin`]: "" });
+  expect(ready.action).toEqual({ name: "read aloud", available: true, detail: `ready; home ${home}` });
+  const custom = await row({
+    "/home/u/.config/tercet/settings.json": '{"readback":{"home":"/models/kokoro"}}',
+    "/models/kokoro/.venv/bin/python": "", "/models/kokoro/kokoro-v1.0.onnx": "", "/models/kokoro/voices-v1.0.bin": "",
+  });
+  expect(custom.action?.detail).toBe("ready; home /models/kokoro");
+  const http = await row({ "/home/u/.config/tercet/settings.json": '{"readback":{"engine":"http"}}' });
+  expect(http.action).toEqual({ name: "read aloud", available: null, detail: "readback.engine http: http://127.0.0.1:8880/v1/audio/speech (not checked)" });
+  // Doctor's only request is the T3 server probe; the Kokoro endpoint is never contacted.
+  expect(http.fetched.join(" ")).not.toContain("8880");
+  const off = await row({ "/home/u/.config/tercet/settings.json": '{"readback":{"enabled":false}}' });
+  expect(off.action).toEqual({ name: "read aloud", available: null, detail: "off (readback.enabled is false)" });
+});
