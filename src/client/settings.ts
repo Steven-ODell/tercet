@@ -198,6 +198,8 @@ export interface LoadedSettings {
   path: string;
   found: boolean;
   settings: Settings;
+  /** Unknown keys that were ignored, one line each (`file:line: key: unknown key; ...`). */
+  warnings?: string[];
 }
 
 /** Reads `<dir>/settings.json`. A missing file gives the defaults; a bad one throws SettingsError. */
@@ -209,7 +211,8 @@ export async function loadSettings(
   const path = settingsFile(dir);
   const text = await read(path);
   if (text === undefined) return { dir, path, found: false, settings: defaultSettings() };
-  return { dir, path, found: true, settings: parseSettings(text, path, { home, dir }) };
+  const warnings: string[] = [];
+  return { dir, path, found: true, settings: parseSettings(text, path, { home, dir }, warnings), warnings };
 }
 
 /** Key paths read like `defaults.model`, `commands["my cmd"]` and `defaults.favorites[0]`. */
@@ -336,7 +339,13 @@ const describe = (value: unknown) => {
   return text.length > 40 ? `${text.slice(0, 37)}...` : text;
 };
 
-type Problem = (path: string, message: string) => never;
+/**
+ * Reports a bad value by throwing. `warn`, when set, takes a key the schema does not know instead:
+ * a settings file written for a newer tercet must not stop an older one from starting.
+ */
+type Problem = ((path: string, message: string) => never) & {
+  warn?: (path: string, message: string) => void;
+};
 type Check = (value: unknown, path: string, problem: Problem) => unknown;
 
 const expect =
@@ -470,12 +479,13 @@ const struct =
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
       const at = keyPath(path, key);
       const check = Object.hasOwn(fields, key) ? fields[key] : undefined;
-      if (!check)
-        problem(
-          at,
-          `unknown key; ${path || "the top level"} takes ${Object.keys(fields).join(", ")}`,
-        );
-      out[key] = check!(item, at, problem);
+      if (!check) {
+        const message = `unknown key; ${path || "the top level"} takes ${Object.keys(fields).join(", ")}`;
+        if (!problem.warn) problem(at, message);
+        problem.warn!(at, message);
+        continue; // ignored, never copied into the result (so "__proto__" stays inert too)
+      }
+      out[key] = check(item, at, problem);
     }
     return out;
   };
@@ -555,11 +565,15 @@ const schema = struct({
 const expandPath = (path: string, home: string, dir: string) =>
   path === "~" ? home : path.startsWith("~/") ? join(home, path.slice(2)) : resolve(dir, path);
 
-/** Parses and validates a settings file's text; missing keys take their defaults. */
+/**
+ * Parses and validates a settings file's text; missing keys take their defaults. Unknown keys are
+ * ignored and described in `warnings` when given (a typo shows up in `tercet doctor`).
+ */
 export function parseSettings(
   source: string,
   path: string,
   where: { home: string; dir: string },
+  warnings?: string[],
 ): Settings {
   let parsed: ReturnType<typeof parseJsonc>;
   try {
@@ -575,6 +589,9 @@ export function parseSettings(
       `settings error in ${path}:${parsed.lines.get(at) ?? 1}: ${at || "file"}: ${message}`,
     );
   };
+  if (warnings)
+    problem.warn = (at, message) =>
+      warnings.push(`${path}:${parsed.lines.get(at) ?? 1}: ${at || "file"}: ${message}`);
   const raw = schema(parsed.value, "", problem) as Partial<Record<keyof Settings, any>>;
   const base = defaultSettings();
   const settings: Settings = {

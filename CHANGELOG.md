@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- settings: a key tercet does not know no longer stops startup. It is ignored and `tercet doctor`
+  lists it with its line, so a settings file from a newer build still opens in an older one.
+  Wrong types and values still stop startup.
 - read aloud: `tercet readback setup` installs Kokoro into tercet's own data directory (asks first,
   about 354 MB, checks SHA-256) and `tercet readback status` reports what is missing. Without it,
   **[read]** says "Read aloud is not set up. Run `tercet readback setup`." and `tercet doctor` has

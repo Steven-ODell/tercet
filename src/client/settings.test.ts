@@ -104,6 +104,24 @@ test("JSONC with comments and trailing commas fills every section", () => {
   );
 });
 
+test("unknown keys are ignored and reported when loading, so a newer settings file never blocks an older tercet", async () => {
+  const text = '{\n  "theme": { "preset": "cyberdream", "futureKnob": 1 },\n  "readbackFuture": {},\n  "__proto__": { "polluted": true }\n}';
+  const loaded = await loadSettings("/home/u/.config/tercet", async () => text, "/home/u");
+  expect(loaded.settings.theme.preset).toBe("cyberdream");
+  expect(loaded.warnings).toEqual([
+    `${PATH}:2: theme.futureKnob: unknown key; theme takes preset, accent`,
+    expect.stringContaining(`${PATH}:3: readbackFuture: unknown key; the top level takes `),
+    expect.stringContaining(`${PATH}:4: __proto__: unknown key`),
+  ]);
+  expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  // A wrong value still stops startup, even next to an unknown key.
+  await expect(
+    loadSettings("/home/u/.config/tercet", async () => '{"nope": 1, "theme": {"accent": "purple"}}', "/home/u"),
+  ).rejects.toThrow(':1: theme.accent: expected a "#rrggbb" color');
+  // parseSettings without a warnings list stays strict.
+  expect(() => parse('{"nope": 1}')).toThrow("nope: unknown key");
+});
+
 test("schema errors name the file, line and key", () => {
   expect(failure('{\n  "theme": {\n    "colour": "#fff"\n  }\n}')).toBe(
     `settings error in ${PATH}:3: theme.colour: unknown key; theme takes preset, accent`,
@@ -188,10 +206,15 @@ test("settings feed the connection; flags still win", async () => {
     managedToken: true,
     settingsFound: false,
   });
-  files["/xdg/tercet/settings.json"] = '{\n  "server": { "tokn": "x" }\n}';
+  // An unknown key does not stop startup (see "unknown keys are ignored and reported"); a bad value does.
+  files["/xdg/tercet/settings.json"] = '{\n  "server": { "url": 3 }\n}';
   await expect(connectionConfig([], read, "/home/u", { XDG_CONFIG_HOME: "/xdg" })).rejects.toThrow(
-    "settings.json:2: server.tokn: unknown key",
+    "settings.json:2: server.url: expected",
   );
+  files["/xdg/tercet/settings.json"] = '{\n  "server": { "tokn": "x" }\n}';
+  await expect(connectionConfig([], read, "/home/u", { XDG_CONFIG_HOME: "/xdg" })).resolves.toMatchObject({
+    settingsFound: true,
+  });
 });
 
 test("server.ignoreVersion in the settings file matches --ignore-version", async () => {

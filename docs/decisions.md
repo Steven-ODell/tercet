@@ -95,8 +95,10 @@ sandboxes use port 3775 and up.
   `sendShortcut` and favorites; those moved into `defaults`. No dependency: a 100-line parser in
   `src/client/settings.ts` records each key's line so errors name the line and the key. TOML
   would have needed a package. Reference: `docs/settings.md`.
-- Unknown keys are errors in every section, including sections a later step reads (theme, keys,
-  launchers, media, commands), so typos surface on day one.
+- Unknown keys are ignored and listed by `tercet doctor` (changed 2026-11-14; they used to stop
+  startup). A settings file from a newer build, or a laptop and a PC on different builds, kept
+  blocking the older one. Wrong types and values still stop startup. `parseSettings` without a
+  warnings list stays strict, which the schema tests use.
 - Precedence: flags, then the file, then `server-runtime.json`, then defaults. A token file named
   in settings is treated like `--token-file`: read, never reissued or chmodded.
 - `defaults.model` beats the current thread's model for new threads, because a user who set a
