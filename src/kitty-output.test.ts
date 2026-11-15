@@ -3,6 +3,9 @@ import {
   KITTY_CLEAR_PLACEMENTS,
   KittyPlacementOutput,
   clearKittyBeforeSwitch,
+  clearKittyWhenHidden,
+  kittyDeletePlacements,
+  tmuxClientsShowing,
 } from "./kitty-output";
 const cup = "\x1b[7;49H";
 const place = "\x1bPtmux;\x1b\x1b_Ga=p,i=42,c=40,r=8,C=1\x1b\x1b\\\x1b\\";
@@ -66,4 +69,53 @@ test("a placement delete is dropped when the same write places it again, and kep
   // Deleting the whole image (d=I) is never dropped.
   const image = wrap("\x1b_Ga=d,d=I,i=7,q=2\x1b\\");
   expect(run(image + cup + put(7, 1))).toContain("d=I");
+});
+test("placed image ids are tracked, a whole-image delete forgets one, and the clear names them", () => {
+  const wrap = (g: string) => `\x1bPtmux;${g.replaceAll("\x1b", "\x1b\x1b")}\x1b\\`;
+  const out = new KittyPlacementOutput();
+  out.push(
+    Buffer.from(wrap("\x1b_Ga=t,i=3,f=100;AAAA\x1b\\") + cup + wrap("\x1b_Ga=p,i=3,p=1\x1b\\")),
+  );
+  out.push(Buffer.from(wrap("\x1b_Ga=p,i=9,p=1\x1b\\") + wrap("\x1b_Ga=d,d=I,i=9,q=2\x1b\\")));
+  expect([...out.images]).toEqual(["3"]);
+  expect(kittyDeletePlacements(out.images)).toBe("\x1b_Ga=d,d=i,i=3,q=2\x1b\\");
+});
+test("hidden by a tmux switch: clears on the clients that stopped showing tercet, repaints on return", async () => {
+  const events: string[] = [];
+  let showing = ["/dev/pts/1", "/dev/pts/2"];
+  let focus = () => {};
+  let blur = () => {};
+  const settle = () => Bun.sleep(5);
+  await clearKittyWhenHidden({
+    showing: async () => showing,
+    clear: async (tty) => void events.push("clear " + tty),
+    repaint: () => events.push("repaint"),
+    onFocus: (f) => (focus = f),
+    onBlur: (f) => (blur = f),
+  });
+  // The terminal window lost focus; both clients still show tercet, so nothing is cleared.
+  blur();
+  await settle();
+  focus();
+  await settle();
+  expect(events).toEqual([]);
+  // Client 2 switched to another session.
+  showing = ["/dev/pts/1"];
+  blur();
+  await settle();
+  expect(events).toEqual(["clear /dev/pts/2"]);
+  showing = ["/dev/pts/1", "/dev/pts/2"];
+  focus();
+  focus();
+  await settle();
+  expect(events).toEqual(["clear /dev/pts/2", "repaint"]);
+});
+test("tmuxClientsShowing keeps the clients whose current window is the pane's", async () => {
+  let asked: string[] = [];
+  const ttys = await tmuxClientsShowing("%3", async (args) => {
+    asked = args;
+    return "@2\n@2 /dev/pts/4\n@5 /dev/pts/6\n@2 /dev/pts/7\n";
+  });
+  expect(ttys).toEqual(["/dev/pts/4", "/dev/pts/7"]);
+  expect(asked).toContain("%3");
 });
