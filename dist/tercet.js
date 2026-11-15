@@ -82574,7 +82574,8 @@ async function loadSettings(dir, read, home) {
   const text2 = await read(path);
   if (text2 === undefined)
     return { dir, path, found: false, settings: defaultSettings() };
-  return { dir, path, found: true, settings: parseSettings(text2, path, { home, dir }) };
+  const warnings = [];
+  return { dir, path, found: true, settings: parseSettings(text2, path, { home, dir }, warnings), warnings };
 }
 var keyPath = (parent, key) => /^[A-Za-z_][\w-]*$/.test(key) ? parent ? `${parent}.${key}` : key : `${parent}[${JSON.stringify(key)}]`;
 
@@ -82771,8 +82772,13 @@ var struct = (fields) => (value, path, problem) => {
   for (const [key, item] of Object.entries(value)) {
     const at = keyPath(path, key);
     const check = Object.hasOwn(fields, key) ? fields[key] : undefined;
-    if (!check)
-      problem(at, `unknown key; ${path || "the top level"} takes ${Object.keys(fields).join(", ")}`);
+    if (!check) {
+      const message = `unknown key; ${path || "the top level"} takes ${Object.keys(fields).join(", ")}`;
+      if (!problem.warn)
+        problem(at, message);
+      problem.warn(at, message);
+      continue;
+    }
     out[key] = check(item, at, problem);
   }
   return out;
@@ -82843,7 +82849,7 @@ var schema = struct({
   })
 });
 var expandPath = (path, home, dir) => path === "~" ? home : path.startsWith("~/") ? join2(home, path.slice(2)) : resolve(dir, path);
-function parseSettings(source, path, where) {
+function parseSettings(source, path, where, warnings) {
   let parsed;
   try {
     parsed = parseJsonc(source);
@@ -82855,6 +82861,8 @@ function parseSettings(source, path, where) {
   const problem = (at, message) => {
     throw new SettingsError(`settings error in ${path}:${parsed.lines.get(at) ?? 1}: ${at || "file"}: ${message}`);
   };
+  if (warnings)
+    problem.warn = (at, message) => warnings.push(`${path}:${parsed.lines.get(at) ?? 1}: ${at || "file"}: ${message}`);
   const raw = schema(parsed.value, "", problem);
   const base = defaultSettings();
   const settings = {
@@ -144407,6 +144415,8 @@ async function doctorReport(args2, probes) {
   try {
     loaded = await loadSettings(dir, probes.read, probes.home);
     settings2 = { path: loaded.path, status: loaded.found ? "found" : "missing" };
+    if (loaded.warnings?.length)
+      settings2.warnings = loaded.warnings;
   } catch (error2) {
     const path = settingsFile(dir);
     loaded = { dir, path, found: true, settings: defaultSettings() };
@@ -144489,6 +144499,8 @@ function formatReport(report) {
   row(null, "tercet", report.tercet);
   row(null, "os", [os.name, `${os.platform} ${os.release} ${os.arch}`].filter(Boolean).join(", "));
   row(settings2.status !== "invalid", "settings", settings2.status === "found" ? settings2.path : settings2.status === "missing" ? `${settings2.path} (none yet; using defaults)` : `${settings2.error} (using defaults)`);
+  for (const warning of settings2.warnings ?? [])
+    row(false, "settings", `ignored ${warning} (a newer tercet may know it; a typo is ignored until fixed)`);
   if (settings2.status !== "invalid" && settings2.error)
     row(false, "arguments", settings2.error);
   row(null, "terminal", [

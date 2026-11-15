@@ -204,6 +204,18 @@ test("a TERM_PROGRAM left over from tmux is not the terminal once outside it", a
   expect(formatReport(report)).not.toMatch(/^.. tmux /m);
 });
 
+test("unknown settings keys are listed and do not make the report fail", async () => {
+  const { probes } = machine({
+    files: { "/home/u/.config/tercet/settings.json": '{\n  "readback": { "speed": 1.4, "futureKnob": true }\n}' },
+  });
+  const report = await doctorReport([], probes);
+  expect(report.settings.status).toBe("found");
+  expect(report.settings.warnings).toEqual([
+    expect.stringContaining("settings.json:2: readback.futureKnob: unknown key"),
+  ]);
+  expect(formatReport(report)).toMatch(/^!! settings\s+ignored .*readback\.futureKnob: unknown key/m);
+});
+
 test("a bad settings file, bad flags and an unreachable or newer server still give a report", async () => {
   const { probes } = machine({
     files: { "/home/u/.config/tercet/settings.json": '{\n  "media": { "protocol": "iterm" }\n}' },

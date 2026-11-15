@@ -5,12 +5,14 @@ tercet reads one file: `$XDG_CONFIG_HOME/tercet/settings.json`, or
 defaults and prints one line pointing here and to `tercet doctor`.
 
 The file is JSON with comments: `//` and `/* */` comments and trailing commas are allowed. Every
-key is optional. An unknown key or a wrong type stops startup with one line that names the file,
-the line and the key (wrapped here, one line on screen):
+key is optional. A key tercet does not know is ignored, so a file written for a newer tercet
+still starts an older one; `tercet doctor` lists each ignored key with its line, which is how
+you find a typo. A wrong type or value stops startup with one line that names the file, the line
+and the key (wrapped here, one line on screen):
 
 ```
-tercet: settings error in /home/you/.config/tercet/settings.json:3: theme.colour: unknown key;
-theme takes preset, accent
+tercet: settings error in /home/you/.config/tercet/settings.json:3: theme.accent: expected a
+"#rrggbb" color, got "purple"
 ```
 
 Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. See
@@ -97,7 +99,7 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
 | `targets.<name>`                                      | `{ copy, key? }`                                                | none                                       | now       |
 
 "Read from" is the build step that starts using a key. Keys for later steps are already checked,
-so a typo shows up now rather than later.
+so a wrong value shows up now rather than later.
 
 A token file you name in `server.tokenFile` or `--token-file` is yours: tercet reads it but never
 issues a new token into it or changes its permissions.

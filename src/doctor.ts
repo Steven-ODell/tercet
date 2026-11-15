@@ -59,7 +59,7 @@ type Found = string | null;
 export interface DoctorReport {
   tercet: string;
   os: { platform: string; name: string | null; release: string; arch: string };
-  settings: { path: string; status: "found" | "missing" | "invalid"; error?: string };
+  settings: { path: string; status: "found" | "missing" | "invalid"; error?: string; warnings?: string[] };
   terminal: {
     term: string | null;
     program: string | null;
@@ -390,6 +390,7 @@ export async function doctorReport(args: string[], probes: DoctorProbes): Promis
   try {
     loaded = await loadSettings(dir, probes.read, probes.home);
     settings = { path: loaded.path, status: loaded.found ? "found" : "missing" };
+    if (loaded.warnings?.length) settings.warnings = loaded.warnings;
   } catch (error) {
     const path = settingsFile(dir);
     loaded = { dir, path, found: true, settings: defaultSettings() };
@@ -490,6 +491,8 @@ export function formatReport(report: DoctorReport) {
         ? `${settings.path} (none yet; using defaults)`
         : `${settings.error} (using defaults)`,
   );
+  for (const warning of settings.warnings ?? [])
+    row(false, "settings", `ignored ${warning} (a newer tercet may know it; a typo is ignored until fixed)`);
   if (settings.status !== "invalid" && settings.error) row(false, "arguments", settings.error);
   row(
     null,
