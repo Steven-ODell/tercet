@@ -13,6 +13,8 @@
 - rendered pages: with `TERCET_PAGE_SHOTS=1` and a terminal that can draw images, a page the
   agent rendered (T3's `html_render`) shows as a screenshot taken with headless chromium instead
   of only an `[open]` link. Off by default; Enter still opens the page itself in the browser.
+- Video and audio opening over SSH follows the active client through the configured SSH-aware
+  photo opener instead of launching the server's mpv. Explicit player templates keep their routing.
 - settings: a key tercet does not know no longer stops startup. It is ignored and `tercet doctor`
   lists it with its line, so a settings file from a newer build still opens in an older one.
   Wrong types and values still stop startup.

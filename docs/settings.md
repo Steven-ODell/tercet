@@ -229,7 +229,15 @@ set -g allow-passthrough on
 everywhere.
 
 Video shows its first frame and duration when `ffmpeg` is installed, and name and size when it
-is not. Enter or `[open]` plays it with `launchers.player`, else `mpv`, else the opener. With
+is not. Enter or `[open]` plays it with `launchers.player`, else `mpv`, else the opener. Over
+SSH, when no player is explicitly configured, it instead uses your SSH-aware
+`launchers.opener` (a template taking `{sshHost}`), just like opening a photo: files are passed
+as `{path}` and URLs as `{url}` with an empty `{path}`. URL playback also applies `commands.mapUrl`
+so a loopback URL can be rewritten to an address the client can reach. The destination is
+looked up on each click, including when switching between local and SSH tmux clients. Without
+an SSH-aware opener, remote playback reports an error; it never falls back to the server's
+desktop. An explicit `launchers.player` keeps control of its own routing, with the file or URL
+in `{path}` as before. The opener controls file transfer; this adds no streaming server. With
 `"video": "terminal"` and `mpv` installed, tercet steps aside and mpv plays inside the terminal
 (`--vo=kitty`, `sixel`, or `tct` in tmux and on the blocks rung) until you quit it. Audio works
 the same way without a frame; other files open with the opener.
