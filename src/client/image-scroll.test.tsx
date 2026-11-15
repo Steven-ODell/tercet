@@ -184,7 +184,7 @@ test("a Kitty image behind tmux scrolls and crops row for row with the text arou
       // Partly or wholly visible: exactly one placement, cropped to the rows the text leaves it.
       expect(shot.placements).toEqual([want.placement]);
       // OpenTUI deletes then re-places; only the re-place may reach the terminal, or the image
-      // flashes as an empty hole between the two (the bug in Sao's recording).
+      // flashes as an empty hole between the two (the bug seen in a screen recording).
       expect(shot.raw).toContain("a=d,d=i,");
       // The card keeps its picture while it scrolls: no image delete and no re-upload.
       expect(shot.raw).not.toContain("d=I,");
