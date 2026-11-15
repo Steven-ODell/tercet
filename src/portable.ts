@@ -771,8 +771,26 @@ export function hostActions(deps: HostDeps): Actions {
   const player = playerChain(settings, host);
   if (player)
     actions.play = async (target) => {
-      const spec = player.name === "launchers.player" ? launchers.player : launchers.opener;
-      await runArgs(host, player.args(target, await vars(spec, { path: target, url: target })), {
+      const url = /^https?:\/\//i.test(target);
+      const own = { path: url ? "" : target, url: target };
+      // An explicit player owns its routing. Otherwise follow the active SSH client,
+      // using the same file-transfer opener as photos instead of this host's mpv.
+      const via = launchers.player ? undefined : await deps.sshHost?.();
+      if (via) {
+        if (!opener || !mentions(launchers.opener, "sshHost"))
+          throw new Error("Remote video/audio playback needs an SSH-aware launchers.opener or an explicit launchers.player.");
+        let link = target;
+        if (url && commands.mapUrl)
+          link = decode(await runArgs(host, expand(commands.mapUrl, { url: target, sshHost: via }), {
+            capture: true,
+          })).trim() || target;
+        await runArgs(host, opener.args(link, { ...own, url: link, sshHost: via }), { graceMs: grace });
+        return;
+      }
+      const values = launchers.player
+        ? await vars(launchers.player, { path: target, url: target })
+        : { ...own, sshHost: "" };
+      await runArgs(host, player.args(target, values), {
         graceMs: grace,
       });
     };

@@ -279,6 +279,89 @@ test("a failed open copies the link; mapUrl rewrites links first and gets {sshHo
   expect(terminal.at(-1)).toContain(Buffer.from("https://box.example.test/e/t").toString("base64"));
 });
 
+test("default media follows the current client through the SSH-aware photo opener", async () => {
+  const fake = await fakePath(["mpv", "router"]);
+  const settings = settingsWith('{"launchers": {"opener": ["router", "{sshHost}", "{path}", "{url}"]}}');
+  let via: string | undefined = "laptop";
+  let lookups = 0;
+  const { actions } = build(fake.host, settings, { sshHost: async () => { lookups++; return via; } });
+  const path = "/tmp/a 'video'; $(touch nope).mp4";
+  await actions.play!(path);
+  via = undefined;
+  await actions.play!(path);
+  via = "second-laptop";
+  await actions.play!(path);
+  expect(await fake.log()).toEqual([
+    `router laptop ${path} ${path}`,
+    `mpv -- ${path}`,
+    `router second-laptop ${path} ${path}`,
+  ]);
+  expect(lookups).toBe(3);
+});
+
+test("remote media URLs are mapped and passed as URLs, with one destination lookup", async () => {
+  const fake = await fakePath(["mpv", "router", "mapper"]);
+  const settings = settingsWith(JSON.stringify({
+    launchers: { opener: ["router", "{sshHost}", "{path}", "{url}"] },
+    commands: { mapUrl: ["mapper", "{sshHost}", "{url}"] },
+  }));
+  let lookups = 0;
+  const { actions } = build(fake.host, settings, { sshHost: async () => { lookups++; return "laptop"; } });
+  await fake.output("mapper", "https://desktop.example/video?id=123\n");
+  await actions.play!("http://127.0.0.1:3773/video?id=123");
+  expect(await fake.log()).toEqual([
+    "mapper laptop http://127.0.0.1:3773/video?id=123",
+    "router laptop  https://desktop.example/video?id=123",
+  ]);
+  expect(lookups).toBe(1);
+});
+
+test("remote media failures never fall back to the desktop player", async () => {
+  const fake = await fakePath(["mpv", "router", "mapper"]);
+  const settings = settingsWith('{"launchers": {"opener": ["router", "{sshHost}", "{path}", "{url}"]}}');
+  const extra = { sshHost: async () => "laptop" };
+  await fake.fail("router");
+  await expect(build(fake.host, settings, extra).actions.play!("/tmp/demo.mp4")).rejects.toThrow();
+  expect(await fake.log()).toEqual(["router laptop /tmp/demo.mp4 /tmp/demo.mp4"]);
+  settings.commands.mapUrl = ["mapper", "{url}"];
+  await fake.fail("mapper");
+  await expect(build(fake.host, settings, extra).actions.play!("http://127.0.0.1/v.mp4")).rejects.toThrow();
+  expect(await fake.log()).toEqual([
+    "router laptop /tmp/demo.mp4 /tmp/demo.mp4",
+    "mapper http://127.0.0.1/v.mp4",
+  ]);
+});
+
+test("default remote media refuses a non-routing opener", async () => {
+  const fake = await fakePath(["mpv", "xdg-open"]);
+  const { actions } = build(fake.host, defaultSettings(), { sshHost: async () => "laptop" });
+  await expect(actions.play!("/tmp/demo.mp4")).rejects.toThrow("SSH-aware launchers.opener");
+  expect(await fake.log()).toEqual([]);
+});
+
+test("an explicit media player keeps control of its own routing", async () => {
+  const fake = await fakePath(["custom-player", "router"]);
+  const settings = settingsWith('{"launchers": {"player": ["custom-player", "{sshHost}", "{path}"]}}');
+  const { actions } = build(fake.host, settings, { sshHost: async () => "laptop" });
+  await actions.play!("https://example.test/demo.mp4");
+  expect(await fake.log()).toEqual(["custom-player laptop https://example.test/demo.mp4"]);
+});
+
+test("remote media can use the photo opener without mpv installed", async () => {
+  const fake = await fakePath(["router"]);
+  const settings = settingsWith('{"launchers": {"opener": ["router", "{sshHost}", "{path}", "{url}"]}}');
+  const { actions } = build(fake.host, settings, { sshHost: async () => "laptop" });
+  await actions.play!("/tmp/demo.mp4");
+  await actions.play!("https://example.test/demo.mp4");
+  expect(await fake.log()).toEqual([
+    "router laptop /tmp/demo.mp4 /tmp/demo.mp4",
+    "router laptop  https://example.test/demo.mp4",
+  ]);
+  const local = build(fake.host, settings, { sshHost: async () => undefined }).actions;
+  await local.play!("https://example.test/local.mp4");
+  expect((await fake.log()).at(-1)).toBe("router   https://example.test/local.mp4");
+});
+
 test("absent commands hide their actions; present ones run their argv with text on stdin", async () => {
   const none = build((await fakePath(["tmux", "xdg-open"])).host).actions;
   for (const name of [

@@ -83791,8 +83791,22 @@ function hostActions(deps) {
   const player = playerChain(settings, host);
   if (player)
     actions.play = async (target2) => {
-      const spec = player.name === "launchers.player" ? launchers.player : launchers.opener;
-      await runArgs(host, player.args(target2, await vars(spec, { path: target2, url: target2 })), {
+      const url = /^https?:\/\//i.test(target2);
+      const own = { path: url ? "" : target2, url: target2 };
+      const via = launchers.player ? undefined : await deps.sshHost?.();
+      if (via) {
+        if (!opener || !mentions(launchers.opener, "sshHost"))
+          throw new Error("Remote video/audio playback needs an SSH-aware launchers.opener or an explicit launchers.player.");
+        let link = target2;
+        if (url && commands.mapUrl)
+          link = decode(await runArgs(host, expand(commands.mapUrl, { url: target2, sshHost: via }), {
+            capture: true
+          })).trim() || target2;
+        await runArgs(host, opener.args(link, { ...own, url: link, sshHost: via }), { graceMs: grace });
+        return;
+      }
+      const values = launchers.player ? await vars(launchers.player, { path: target2, url: target2 }) : { ...own, sshHost: "" };
+      await runArgs(host, player.args(target2, values), {
         graceMs: grace
       });
     };

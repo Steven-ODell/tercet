@@ -54,7 +54,7 @@ export interface Actions {
   openUrl?(url: string): Promise<unknown>;
   /** Opens a local file with the opener. */
   openPath?(path: string): Promise<unknown>;
-  /** Plays a video or audio file or URL with the player chain (`launchers.player`, mpv, opener). */
+  /** Plays video/audio: explicit player, SSH-aware opener for a remote client, else mpv/opener. */
   play?(target: string): Promise<unknown>;
   /** mpv inside this terminal with `--vo=<vo>`; the caller suspends the renderer around it. */
   playHere?(target: string, vo: string): Promise<unknown>;
