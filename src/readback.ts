@@ -63,7 +63,7 @@ export function readbackHome(
   return join(data, "tercet", "kokoro");
 }
 
-function venvPython(modelHome: string, platform: NodeJS.Platform) {
+export function venvPython(modelHome: string, platform: NodeJS.Platform) {
   return platform === "win32"
     ? win32.join(modelHome, ".venv", "Scripts", "python.exe")
     : join(modelHome, ".venv", "bin", "python");

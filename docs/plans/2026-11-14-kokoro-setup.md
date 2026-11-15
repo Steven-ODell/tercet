@@ -61,7 +61,7 @@ automatic, a clear not-set-up message.
   tests for each OS default, each precedence level, Windows paths with spaces, and
   `readbackStatus` on a temp dir with none, some and all files; `rg -i 'phone.?assist|hub' src/readback.ts` prints nothing.
 
-- [ ] 2. `tercet readback setup` and `status`
+- [x] 2. `tercet readback setup` and `status`
   Files: src/main.tsx (subcommand dispatch near line 60), src/cli.ts (usage text style),
   src/upgrade.ts and src/doctor.ts (how existing subcommands are structured and tested),
   src/readback.ts (new helpers from step 1).

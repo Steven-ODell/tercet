@@ -80675,6 +80675,7 @@ import { isAbsolute as isAbsolute3, resolve as resolve3 } from "path";
 
 // src/readback.ts
 import { spawn } from "child_process";
+import { statSync } from "fs";
 import { mkdtemp, writeFile, rm } from "fs/promises";
 import { homedir, tmpdir } from "os";
 import { join, win32 } from "path";
@@ -80771,6 +80772,8 @@ with wave.open(audio, "wb") as wav:
     wav.writeframes(pcm)
 sys.stdout.buffer.write(audio.getvalue())
 `;
+var KOKORO_MODEL_FILE = "kokoro-v1.0.onnx";
+var KOKORO_VOICES_FILE = "voices-v1.0.bin";
 function readbackHome(env = process.env, settingsHome = "", platform = process.platform, home = homedir()) {
   if (env.KOKORO_HOME)
     return env.KOKORO_HOME;
@@ -80790,6 +80793,25 @@ function localReadbackCommand(env = process.env, settingsHome = "", platform = p
   const modelHome = readbackHome(env, settingsHome, platform, home);
   const python = env.KOKORO_PYTHON || venvPython(modelHome, platform);
   return { python, args: ["-c", LOCAL_SYNTHESIS, modelHome] };
+}
+var isFile = (path) => {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+};
+function readbackStatus(env = process.env, settingsHome = "", platform = process.platform, home = homedir()) {
+  const modelHome = readbackHome(env, settingsHome, platform, home);
+  const { python } = localReadbackCommand(env, settingsHome, platform, home);
+  const pathJoin = platform === "win32" ? win32.join : join;
+  const missing = [];
+  if (!isFile(python))
+    missing.push(env.KOKORO_PYTHON ? python : ".venv");
+  for (const name of [KOKORO_MODEL_FILE, KOKORO_VOICES_FILE])
+    if (!isFile(pathJoin(modelHome, name)))
+      missing.push(name);
+  return { ready: missing.length === 0, home: modelHome, python, missing };
 }
 async function synthesizeLocalReadback(text, settings, signal) {
   const input = spokenText(text);
@@ -83957,8 +83979,8 @@ function imageOpenAction(load, attachmentsDir, openPath, tmp = "/tmp/tercet-imag
 }
 
 // src/main.tsx
-import { homedir as homedir5 } from "os";
-import { join as join7 } from "path";
+import { homedir as homedir6 } from "os";
+import { join as join8 } from "path";
 
 // src/terminal-lifecycle.ts
 var TERMINAL_RESET = "\x1B[?1000l\x1B[?1002l\x1B[?1003l\x1B[?1006l\x1B[?2004l\x1B[<u\x1B[?25h\x1B[?1049l";
@@ -91417,6 +91439,7 @@ var USAGE = `Usage: tercet [options]
        tercet attach THREAD [options]
        tercet tmux [--watch] [--session NAME] [options]
        tercet upgrade [--check]
+       tercet readback setup|status [--yes] [--dry-run] [--home DIR]
 
 Options:
   --url ORIGIN        The T3 server, e.g. http://127.0.0.1:3773
@@ -161437,13 +161460,315 @@ async function runUpgrade(args2, fetcher = fetch, self2 = process.execPath) {
   }
 }
 
+// src/readback-setup.ts
+import { spawn as spawn4 } from "child_process";
+import { createHash } from "crypto";
+import { createReadStream, statSync as statSync2 } from "fs";
+import { mkdir as mkdir4, open as open2, rename as rename2, rm as rm2 } from "fs/promises";
+import { homedir as homedir5 } from "os";
+import { join as join7, win32 as win323 } from "path";
+import { createInterface } from "readline";
+var KOKORO_RELEASE_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0";
+var KOKORO_FILES = [
+  { name: KOKORO_MODEL_FILE, bytes: 325532387, sha256: "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5" },
+  { name: KOKORO_VOICES_FILE, bytes: 28214398, sha256: "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d" }
+];
+var KOKORO_PACKAGES = ["kokoro-onnx==0.6.1", "numpy>=2.0.2,<3"];
+var READBACK_USAGE = `Usage: tercet readback setup [--yes] [--dry-run] [--force] [--home DIR]
+       tercet readback status [--home DIR]
+
+setup makes read aloud work: it creates a Python venv in the Kokoro home, installs
+kokoro-onnx and numpy there, and downloads the Kokoro model files (about 354 MB) from the
+kokoro-onnx GitHub release after checking their SHA-256. It asks before doing anything and
+never runs on its own. An existing venv is left alone, and a model file that differs from the
+release is never replaced without --force.
+  --yes       Do not ask first
+  --dry-run   Print the plan and change nothing
+  --force     Replace a model file that differs from the release
+  --home DIR  Kokoro home (default: KOKORO_HOME, then readback.home, then tercet's data directory)
+
+status prints ready, or what is missing, and exits 1 when read aloud is not ready.`;
+var megabytes = (bytes2) => `${Math.round(bytes2 / 1e6)} MB`;
+async function runSetup(options2, deps, signal) {
+  const win = deps.platform === "win32";
+  const at = win ? win323.join : join7;
+  const { home } = options2;
+  const venvDir = at(home, ".venv");
+  const ownVenv = !deps.env.KOKORO_PYTHON;
+  const python = deps.env.KOKORO_PYTHON || venvPython(home, deps.platform);
+  const fail16 = (message) => {
+    deps.error(`tercet readback setup: ${message}`);
+    return 1;
+  };
+  const todo = [];
+  const refused = [];
+  for (const file2 of deps.files) {
+    const path = at(home, file2.name);
+    const size6 = deps.size(path);
+    if (size6 === undefined)
+      todo.push(file2);
+    else if (size6 !== file2.bytes || await deps.sha256(path) !== file2.sha256) {
+      refused.push(`${file2.name} is there but is not the release's file (${size6} bytes here, ${file2.bytes} in the release)`);
+      if (options2.force)
+        todo.push(file2);
+    }
+  }
+  const pythonThere = deps.size(python) !== undefined;
+  if (!ownVenv && !pythonThere)
+    return fail16(`KOKORO_PYTHON points at ${python}, which does not exist`);
+  if (ownVenv && !pythonThere && deps.exists(venvDir))
+    return fail16(`${venvDir} exists but has no Python. Remove it and run setup again; tercet never deletes a venv it did not create.`);
+  const packagesReady = pythonThere && await deps.run([python, "-c", "import kokoro_onnx, numpy"], signal, true) === 0;
+  if (!ownVenv && !packagesReady)
+    return fail16(`KOKORO_PYTHON (${python}) cannot import kokoro_onnx and numpy. Install them there, or unset KOKORO_PYTHON.`);
+  const uv = deps.which("uv");
+  const system = win ? deps.which("python") ? ["python"] : deps.which("py") ? ["py", "-3"] : null : deps.which("python3") ? ["python3"] : deps.which("python") ? ["python"] : null;
+  const createVenv = !pythonThere && ownVenv;
+  const blocker = !uv && !system && (createVenv || !packagesReady && ownVenv) ? "setup needs uv or Python 3 on PATH; install one and run it again" : null;
+  const toInstall = ownVenv && !packagesReady;
+  const venvCommand = uv ? [uv, "venv", venvDir] : [...system ?? [], "-m", "venv", venvDir];
+  const installCommand = uv ? [uv, "pip", "install", "--python", python, ...deps.packages] : [python, "-m", "pip", "install", ...deps.packages];
+  if (!createVenv && !toInstall && !todo.length && !refused.length) {
+    deps.log(`Read aloud is already set up at ${home}. Nothing to do.`);
+    return 0;
+  }
+  const plan = [`Read aloud setup, in ${home}`];
+  if (createVenv)
+    plan.push(`  create the Python venv ${venvDir} with ${uv ? "uv" : (system ?? ["python"]).join(" ") + " -m venv"}`);
+  if (toInstall)
+    plan.push(`  install ${deps.packages.join(" ")}${createVenv ? "" : ` into the existing venv ${venvDir}`}`);
+  else if (pythonThere && ownVenv)
+    plan.push(`  keep the existing venv ${venvDir} (kokoro-onnx and numpy already import)`);
+  for (const file2 of todo)
+    plan.push(`  download ${file2.name} (${megabytes(file2.bytes)}) from ${deps.baseUrl}/${file2.name}`);
+  const total = todo.reduce((sum3, file2) => sum3 + file2.bytes, 0);
+  if (total)
+    plan.push(`  about ${megabytes(total)} of model files${toInstall ? ", plus the Python packages" : ""}`);
+  for (const line of refused)
+    plan.push(`  ${options2.force ? "replace (--force)" : "REFUSED"}: ${line}`);
+  for (const line of plan)
+    deps.log(line);
+  if (blocker)
+    return fail16(blocker);
+  if (refused.length && !options2.force) {
+    deps.error("tercet readback setup: refusing to overwrite a file that differs from the release; run it with --force, or pick another --home. Nothing was changed.");
+    return 1;
+  }
+  if (options2.dryRun) {
+    deps.log("Dry run: nothing was created, installed or downloaded.");
+    return 0;
+  }
+  if (!options2.yes) {
+    const answer = (await deps.prompt("Continue? [y/N] ")).trim().toLowerCase();
+    if (answer !== "y" && answer !== "yes") {
+      deps.log("Cancelled. Nothing was changed.");
+      return 1;
+    }
+  }
+  let createdVenv = false;
+  const parts2 = [];
+  try {
+    await deps.mkdir(home);
+    if (createVenv) {
+      createdVenv = true;
+      if (await deps.run(venvCommand, signal) !== 0)
+        throw new Error(`could not create the venv with: ${venvCommand.join(" ")}`);
+    }
+    if (toInstall) {
+      if (await deps.run(installCommand, signal) !== 0)
+        throw new Error(`installing the Python packages failed (${installCommand.join(" ")})`);
+      if (await deps.run([python, "-c", "import kokoro_onnx, numpy"], signal, true) !== 0)
+        throw new Error("the Python packages installed but kokoro_onnx does not import");
+    }
+    for (const file2 of todo) {
+      const part = at(home, `.${file2.name}.part`);
+      parts2.push(part);
+      deps.log(`Downloading ${file2.name}...`);
+      await deps.download(`${deps.baseUrl}/${file2.name}`, part, signal);
+      if (deps.size(part) !== file2.bytes || await deps.sha256(part) !== file2.sha256)
+        throw new Error(`the downloaded ${file2.name} does not match the pinned size and SHA-256 (the release may have changed); nothing was kept`);
+      await deps.rename(part, at(home, file2.name));
+    }
+  } catch (error2) {
+    for (const part of parts2)
+      await deps.remove(part).catch(() => {});
+    if (createdVenv)
+      await deps.remove(venvDir).catch(() => {});
+    if (signal.aborted) {
+      deps.error("tercet readback setup: interrupted; partial files were removed.");
+      return 130;
+    }
+    return fail16(error2 instanceof Error ? error2.message : String(error2));
+  }
+  deps.log(`Read aloud is set up in ${home}.`);
+  if (home !== options2.usualHome)
+    deps.log(`tercet reads ${options2.usualHome} right now. To use ${home}, set readback.home to it or export KOKORO_HOME.`);
+  return 0;
+}
+var isFile2 = (path) => {
+  try {
+    const stat3 = statSync2(path);
+    return stat3.isFile() ? stat3.size : undefined;
+  } catch {
+    return;
+  }
+};
+function systemDeps(overrides = {}) {
+  return {
+    platform: process.platform,
+    env: process.env,
+    files: KOKORO_FILES,
+    baseUrl: KOKORO_RELEASE_URL,
+    packages: KOKORO_PACKAGES,
+    which: (program) => Bun.which(program),
+    run: (command2, signal, quiet) => new Promise((resolve9) => {
+      const child = spawn4(command2[0], command2.slice(1), { stdio: quiet ? "ignore" : "inherit", windowsHide: true, signal });
+      child.once("error", (error2) => resolve9(error2.code === "ABORT_ERR" ? 130 : 127));
+      child.once("close", (code2) => resolve9(code2 ?? 1));
+    }),
+    download: downloadTo,
+    size: isFile2,
+    exists: (path) => {
+      try {
+        statSync2(path);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    sha256: (path) => new Promise((resolve9, reject) => {
+      const hash2 = createHash("sha256");
+      createReadStream(path).on("data", (chunk) => hash2.update(chunk)).once("error", reject).once("end", () => resolve9(hash2.digest("hex")));
+    }),
+    mkdir: async (path) => void await mkdir4(path, { recursive: true }),
+    rename: rename2,
+    remove: (path) => rm2(path, { recursive: true, force: true }),
+    prompt: (question) => new Promise((resolve9) => {
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      let answered = false;
+      rl.question(question, (answer) => {
+        answered = true;
+        rl.close();
+        resolve9(answer);
+      });
+      rl.once("close", () => answered || resolve9(""));
+    }),
+    log: (line) => console.log(line),
+    error: (line) => console.error(line),
+    ...overrides
+  };
+}
+async function downloadTo(url, dest, signal) {
+  const response = await fetch(url, {
+    headers: { "User-Agent": "tercet-readback-setup" },
+    signal: AbortSignal.any([signal, AbortSignal.timeout(30 * 60000)])
+  });
+  if (!response.ok || !response.body)
+    throw new Error(`download answered ${response.status} for ${url}`);
+  const total = Number(response.headers.get("content-length")) || 0;
+  const file2 = await open2(dest, "w");
+  let received = 0;
+  let shown = -1;
+  try {
+    for await (const chunk of response.body) {
+      await file2.write(chunk);
+      received += chunk.length;
+      const step = total && process.stdout.isTTY ? Math.floor(received / total * 20) * 5 : -1;
+      if (step > shown) {
+        shown = step;
+        process.stdout.write(`\r  ${step}%`);
+      }
+    }
+  } finally {
+    await file2.close();
+    if (shown >= 0)
+      process.stdout.write("\r      \r");
+  }
+}
+function parseFlags(args2) {
+  const bools = new Set;
+  let home;
+  for (let i = 0;i < args2.length; i++) {
+    const arg = args2[i];
+    if (["--yes", "-y", "--dry-run", "--force"].includes(arg))
+      bools.add(arg === "-y" ? "--yes" : arg);
+    else if (arg === "--home" || arg.startsWith("--home=")) {
+      const value4 = arg === "--home" ? args2[++i] : arg.slice("--home=".length);
+      if (!value4 || value4.startsWith("--"))
+        throw new Error("missing value for --home");
+      home = value4;
+    } else
+      throw new Error(`unknown option ${arg}; see tercet readback --help`);
+  }
+  return { bools, home };
+}
+async function runReadback(args2, deps = systemDeps()) {
+  const [sub, ...rest] = args2;
+  if (!sub || sub === "--help" || sub === "-h" || rest.includes("--help") || rest.includes("-h")) {
+    deps.log(READBACK_USAGE);
+    return sub || rest.length ? 0 : 2;
+  }
+  if (sub !== "setup" && sub !== "status") {
+    deps.error(`tercet readback: unknown command ${sub}; see tercet readback --help`);
+    return 2;
+  }
+  let flags;
+  try {
+    flags = parseFlags(rest);
+    if (sub === "status" && [...flags.bools].length)
+      throw new Error(`unknown option ${[...flags.bools][0]}; see tercet readback --help`);
+  } catch (error2) {
+    deps.error(`tercet readback ${sub}: ${error2.message}`);
+    return 2;
+  }
+  const user = homedir5();
+  let settingsHome = "";
+  let engine2 = "local";
+  try {
+    const { settings: settings5 } = await loadSettings(settingsDir(deps.env, user), readOptional, user);
+    settingsHome = settings5.readback.home;
+    engine2 = settings5.readback.engine;
+  } catch (error2) {
+    if (!(error2 instanceof SettingsError))
+      throw error2;
+    deps.error(`tercet readback ${sub}: ${error2.message}`);
+    return 1;
+  }
+  const usualHome = readbackHome(deps.env, settingsHome, deps.platform, user);
+  const home = flags.home ?? usualHome;
+  if (sub === "status") {
+    const env = flags.home ? { ...deps.env, KOKORO_HOME: flags.home } : deps.env;
+    const status2 = readbackStatus(env, settingsHome, deps.platform, user);
+    if (status2.ready) {
+      deps.log(`Read aloud is ready.
+  home: ${status2.home}
+  python: ${status2.python}`);
+      if (engine2 === "http")
+        deps.log("  readback.engine is http, so Read uses readback.endpoint, not this setup.");
+      return 0;
+    }
+    deps.log(`Read aloud is not set up. Missing: ${status2.missing.join(", ")}
+  home: ${status2.home}
+Run \`tercet readback setup\`.`);
+    return 1;
+  }
+  const controller = new AbortController;
+  const onInterrupt3 = () => controller.abort(new Error("interrupted"));
+  process.once("SIGINT", onInterrupt3);
+  try {
+    return await runSetup({ home, usualHome, yes: flags.bools.has("--yes"), dryRun: flags.bools.has("--dry-run"), force: flags.bools.has("--force") }, deps, controller.signal);
+  } finally {
+    process.off("SIGINT", onInterrupt3);
+  }
+}
+
 // src/main.tsx
 var args2 = process.argv.slice(2);
-if ((args2.includes("--help") || args2.includes("-h")) && !["list", "tmux", "upgrade"].includes(args2[0] ?? "")) {
+if ((args2.includes("--help") || args2.includes("-h")) && !["list", "tmux", "upgrade", "readback"].includes(args2[0] ?? "")) {
   console.log(USAGE);
   process.exit(0);
 }
-var migrated = args2.includes("--version") ? undefined : migrateLegacyDir(process.env, homedir5());
+var migrated = args2.includes("--version") ? undefined : migrateLegacyDir(process.env, homedir6());
 if (migrated)
   process.stderr.write(`${migrated}
 `);
@@ -161457,6 +161782,8 @@ if (process.argv[2] === "list")
   process.exit(await runList(process.argv.slice(3)));
 if (process.argv[2] === "tmux")
   process.exit(await runTmux(process.argv.slice(3)));
+if (process.argv[2] === "readback")
+  process.exit(await runReadback(process.argv.slice(3)));
 var attachTo = process.argv[2] === "attach" ? process.argv[3] : undefined;
 if (process.argv[2] === "attach" && (!attachTo || attachTo.startsWith("-"))) {
   console.error("usage: tercet attach THREAD [options]   (THREAD: id, short id or part of the title)");
@@ -161569,7 +161896,7 @@ ${lines.join(`
       writeTerminal: (bytes2) => process.stdout.write(bytes2),
       sshHost: sshHostLookup(process.env, output, (path) => Bun.file(path).text()),
       loadImage,
-      personalDictionary: join7(settingsDir(process.env, homedir5()), "dictionary.txt")
+      personalDictionary: join8(settingsDir(process.env, homedir6()), "dictionary.txt")
     });
     const switchesSession = process.env.TMUX ? clearKittyBeforeSwitch(stdout, () => {
       const { columns, rows } = process.stdout;
