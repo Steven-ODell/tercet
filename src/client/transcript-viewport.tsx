@@ -609,9 +609,12 @@ export function TranscriptViewport({
             const image = row.image;
             if (offset > 0 && rows[start + offset - 1]?.image?.id === image.id) return null;
 
+            // Keyed by the image, not the first visible row: that row changes on every scroll that
+            // crops the top, and a remount reloads the bytes and re-uploads the picture, so the card
+            // flashes empty while it scrolls.
             return (
               <ImagePreview
-                key={row.id}
+                key={image.id}
                 visibleHeight={Math.min(image.height - image.offset, viewport - offset)}
                 image={image}
                 width={width}

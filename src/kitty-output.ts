@@ -63,8 +63,42 @@ export class KittyPlacementOutput {
       this.cup = "";
     }
     // CUP alone at a write boundary must remain ordered with the next placement.
-    return Buffer.from(output, "latin1");
+    return Buffer.from(withoutReplacedDeletes(output), "latin1");
   }
+}
+
+const PASSTHROUGH_GRAPHICS =
+  /\x1bPtmux;(?:\x1b\x1b\[\d+;\d+H)?\x1b\x1b_G([^;\x1b]*)(?:;[^\x1b]*)?\x1b\x1b\\\x1b\\/g;
+
+/**
+ * OpenTUI moves a placement by deleting it (`a=d,d=i`) and placing it again (`a=p`, same `i` and
+ * `p`). Behind tmux the outer terminal can draw a frame between the two, so a scrolling image
+ * flashes as an empty hole (the bare background, or the wallpaper on a translucent terminal).
+ * Kitty replaces a placement that reuses its image and placement ids, so the delete is dropped
+ * when the same write places it again. A delete with no placement after it stays.
+ */
+export function withoutReplacedDeletes(output: string) {
+  if (!output.includes("a=d,d=i,")) return output;
+  const keys = (params: string) => Object.fromEntries(params.split(",").map((kv) => kv.split("=")));
+  const graphics = [...output.matchAll(PASSTHROUGH_GRAPHICS)].map((m) => ({
+    index: m.index,
+    length: m[0].length,
+    keys: keys(m[1]!),
+  }));
+  let result = output;
+  for (const [n, g] of [...graphics.entries()].reverse()) {
+    if (g.keys.a !== "d" || g.keys.d !== "i" || !g.keys.i) continue;
+    const replaced = graphics
+      .slice(n + 1)
+      .some(
+        (later) =>
+          later.keys.a === "p" &&
+          later.keys.i === g.keys.i &&
+          (later.keys.p ?? "") === (g.keys.p ?? ""),
+      );
+    if (replaced) result = result.slice(0, g.index) + result.slice(g.index + g.length);
+  }
+  return result;
 }
 
 export function kittyStdout(): NodeJS.WriteStream {
