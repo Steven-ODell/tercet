@@ -103,7 +103,7 @@ automatic, a clear not-set-up message.
   (docs/plans and docs/decisions.md history excluded from this check); every command in the
   docs matches `tercet readback --help` output; `bun test` passes.
 
-- [ ] 5. Real verification and final check
+- [x] 5. Real verification and final check
   Files: scripts/check, scripts/build, this plan.
   Do: quietly (bgrun, no sound) run a real `tercet readback setup --yes --home /tmp/tercet-kokoro-real`
   with the real download (one time, about 340 MB), confirm `status` reports ready, then
