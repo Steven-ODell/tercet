@@ -6,8 +6,6 @@ over SSH and inside tmux, and needs no window.
 
 ![tercet: threads, image preview, diff, reply, terminal, embedded editor and external tmux editor](docs/media/demo-extended.gif)
 
-[Original demo, preserved](docs/media/demo.gif).
-
 - **The web app's behavior, in a terminal.** Same thread list, shelves and models, live
   streaming, a composer with `@file`, `/skill` and `:emoji`, diffs and the files panel. Mouse
   and keyboard (vim keys in the transcript) both work.
