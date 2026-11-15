@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- inline images: scrolling a Kitty image no longer leaves holes or flickers (it was re-uploaded on
+  every scroll that cropped its top), and inside tmux the image is cleared when you switch to
+  another session or window and redrawn when you come back, instead of staying on top of the
+  other pane.
 - settings: a key tercet does not know no longer stops startup. It is ignored and `tercet doctor`
   lists it with its line, so a settings file from a newer build still opens in an older one.
   Wrong types and values still stop startup.

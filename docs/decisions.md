@@ -407,3 +407,17 @@ Linux/macOS retain their full POSIX rigs. Windows remains experimental until tha
 and a Windows Terminal hands-on trial pass. Git paths remain opaque server values, including
 drive letters and UNC shares. See `docs/windows.md` for coverage and remaining limits.
 P10 release/publication gates remain paused.
+
+## Inline Kitty images: scrolling and tmux switches (2026-11-14)
+
+- Scrolling holes were a remount, not a bad crop: `ImagePreview` was keyed by the first visible
+  row, so every scroll that cropped the top dropped the bytes and re-uploaded the PNG. It is
+  keyed by `image.id` now, and `withoutReplacedDeletes` (`src/kitty-output.ts`) drops OpenTUI's
+  delete when the same write places that placement again.
+- tmux drops passthrough from a hidden pane (`allow-passthrough on`; `all` still drops it for
+  another session), so a delete sent after the switch never arrives. On blur,
+  `clearKittyWhenHidden` asks tmux which clients still show tercet's window
+  (`tmuxClientsShowing`) and writes the delete of tercet's own image ids straight to the tty of
+  each client that stopped showing it. Image data is kept; focus-in repaints. A blur while the
+  window is still shown (the terminal lost focus) leaves the images alone.
+- Needs `focus-events on`. Without it there is no blur and the old behavior stays.
