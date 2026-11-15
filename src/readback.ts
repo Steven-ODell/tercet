@@ -82,8 +82,11 @@ export function localReadbackCommand(
 
 const isFile = (path: string) => { try { return statSync(path).isFile(); } catch { return false; } };
 
-/** Whether local Read aloud can run: the venv Python and both model files exist. */
-export function readbackStatus(
+/** What a Read click and `tercet doctor` say while local read aloud has not been set up. */
+export const READBACK_NOT_SET_UP = "Read aloud is not set up. Run `tercet readback setup`.";
+
+/** The pieces local Read aloud needs: the Python that runs Kokoro and the two model files. */
+export function readbackPieces(
   env: NodeJS.ProcessEnv = process.env,
   settingsHome = "",
   platform: NodeJS.Platform = process.platform,
@@ -92,18 +95,43 @@ export function readbackStatus(
   const modelHome = readbackHome(env, settingsHome, platform, home);
   const { python } = localReadbackCommand(env, settingsHome, platform, home);
   const pathJoin = platform === "win32" ? win32.join : join;
-  const missing: string[] = [];
-  if (!isFile(python)) missing.push(env.KOKORO_PYTHON ? python : ".venv");
-  for (const name of [KOKORO_MODEL_FILE, KOKORO_VOICES_FILE])
-    if (!isFile(pathJoin(modelHome, name))) missing.push(name);
+  return {
+    home: modelHome,
+    python,
+    pieces: [
+      { label: env.KOKORO_PYTHON ? python : ".venv", path: python },
+      ...[KOKORO_MODEL_FILE, KOKORO_VOICES_FILE].map((name) => ({ label: name, path: pathJoin(modelHome, name) })),
+    ],
+  };
+}
+
+/**
+ * Whether local Read aloud can run: the venv Python and both model files exist. `has` is how a
+ * path is checked (a real file by default); doctor passes answers it gathered through its probes.
+ */
+export function readbackStatus(
+  env: NodeJS.ProcessEnv = process.env,
+  settingsHome = "",
+  platform: NodeJS.Platform = process.platform,
+  home = homedir(),
+  has: (path: string) => boolean = isFile,
+) {
+  const { home: modelHome, python, pieces } = readbackPieces(env, settingsHome, platform, home);
+  const missing = pieces.filter((piece) => !has(piece.path)).map((piece) => piece.label);
   return { ready: missing.length === 0, home: modelHome, python, missing };
 }
-export async function synthesizeLocalReadback(text: string, settings: Settings["readback"], signal: AbortSignal) {
+
+/**
+ * Checked on every Read, not once at startup, so a `tercet readback setup` run in another terminal
+ * works without restarting tercet. Nothing is spawned until it passes.
+ */
+export async function synthesizeLocalReadback(text: string, settings: Settings["readback"], signal: AbortSignal, env: NodeJS.ProcessEnv = process.env) {
   const input = spokenText(text);
   if (!input) throw new Error("No text to read.");
   if (input.length > 30_000) throw new Error("Response is too long to read (30,000 character limit).");
   signal.throwIfAborted();
-  const command = localReadbackCommand(process.env, settings.home);
+  if (!readbackStatus(env, settings.home).ready) throw new Error(READBACK_NOT_SET_UP);
+  const command = localReadbackCommand(env, settings.home);
   return new Promise<Uint8Array>((resolve, reject) => {
     const child = spawn(command.python, command.args, { stdio: ["pipe", "pipe", "ignore"], windowsHide: true, signal });
     const abort = () => { child.kill(); reject(signal.reason); };

@@ -77,7 +77,7 @@ automatic, a clear not-set-up message.
   Windows Scripts path); `bun src/main.tsx readback setup --dry-run --home /tmp/tercet-kokoro-dry`
   prints the plan and creates nothing; `bun src/main.tsx readback status --home /tmp/tercet-kokoro-dry` exits nonzero listing the missing pieces.
 
-- [ ] 3. Not-set-up feedback in the app and in doctor
+- [x] 3. Not-set-up feedback in the app and in doctor
   Files: src/portable.ts (readback block near line 896), src/readback.ts, src/doctor.ts,
   src/doctor.test.ts, src/client/readback.test.tsx, src/client/transcript-viewport.tsx
   (line 183 onward, how errors reach the transcript).

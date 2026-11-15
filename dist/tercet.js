@@ -80801,26 +80801,35 @@ var isFile = (path) => {
     return false;
   }
 };
-function readbackStatus(env = process.env, settingsHome = "", platform = process.platform, home = homedir()) {
+var READBACK_NOT_SET_UP = "Read aloud is not set up. Run `tercet readback setup`.";
+function readbackPieces(env = process.env, settingsHome = "", platform = process.platform, home = homedir()) {
   const modelHome = readbackHome(env, settingsHome, platform, home);
   const { python } = localReadbackCommand(env, settingsHome, platform, home);
   const pathJoin = platform === "win32" ? win32.join : join;
-  const missing = [];
-  if (!isFile(python))
-    missing.push(env.KOKORO_PYTHON ? python : ".venv");
-  for (const name of [KOKORO_MODEL_FILE, KOKORO_VOICES_FILE])
-    if (!isFile(pathJoin(modelHome, name)))
-      missing.push(name);
+  return {
+    home: modelHome,
+    python,
+    pieces: [
+      { label: env.KOKORO_PYTHON ? python : ".venv", path: python },
+      ...[KOKORO_MODEL_FILE, KOKORO_VOICES_FILE].map((name) => ({ label: name, path: pathJoin(modelHome, name) }))
+    ]
+  };
+}
+function readbackStatus(env = process.env, settingsHome = "", platform = process.platform, home = homedir(), has = isFile) {
+  const { home: modelHome, python, pieces } = readbackPieces(env, settingsHome, platform, home);
+  const missing = pieces.filter((piece) => !has(piece.path)).map((piece) => piece.label);
   return { ready: missing.length === 0, home: modelHome, python, missing };
 }
-async function synthesizeLocalReadback(text, settings, signal) {
+async function synthesizeLocalReadback(text, settings, signal, env = process.env) {
   const input = spokenText(text);
   if (!input)
     throw new Error("No text to read.");
   if (input.length > 30000)
     throw new Error("Response is too long to read (30,000 character limit).");
   signal.throwIfAborted();
-  const command = localReadbackCommand(process.env, settings.home);
+  if (!readbackStatus(env, settings.home).ready)
+    throw new Error(READBACK_NOT_SET_UP);
+  const command = localReadbackCommand(env, settings.home);
   return new Promise((resolve, reject) => {
     const child = spawn(command.python, command.args, { stdio: ["pipe", "pipe", "ignore"], windowsHide: true, signal });
     const abort = () => {
@@ -144318,6 +144327,23 @@ async function programOf(spec, probes) {
   const ok = /[\\/]/.test(program) ? await probes.exists(program) : !!probes.which(program);
   return { program, ok };
 }
+async function readbackRow(settings2, host, probes, add4) {
+  const { enabled, engine: engine2, endpoint: endpoint2, home: settingsHome } = settings2.readback;
+  if (!enabled)
+    return add4("read aloud", null, "off (readback.enabled is false)");
+  if (engine2 === "http")
+    return add4("read aloud", null, `readback.engine http: ${endpoint2} (not checked)`);
+  const { pieces } = readbackPieces(host.env, settingsHome, host.platform, probes.home);
+  const present3 = new Set;
+  await Promise.all(pieces.map(async ({ path }) => {
+    if (await probes.exists(path))
+      present3.add(path);
+  }));
+  const status2 = readbackStatus(host.env, settingsHome, host.platform, probes.home, (path) => present3.has(path));
+  if (status2.ready)
+    return add4("read aloud", true, `ready; home ${status2.home}`);
+  add4("read aloud", false, READBACK_NOT_SET_UP);
+}
 async function actionsReport(settings2, host, probes, readOnly2) {
   const chain = clipboardChain(settings2, host);
   const opener = openerChain(settings2, host);
@@ -144367,6 +144393,7 @@ async function actionsReport(settings2, host, probes, readOnly2) {
     const recorder = recorderStatus(host, custom ? expand(custom, {}) : undefined);
     add4("dictation", recorder.ready, recorder.ready ? `${recorder.name}; T3 web app \u2192 Settings \u2192 Voice must have a model installed` : recorder.reason);
   }
+  await readbackRow(settings2, host, probes, add4);
   await command2("link mapping", "commands.mapUrl", settings2.commands.mapUrl);
   add4("spell check", settings2.spell.enabled ? true : null, settings2.spell.enabled ? "built-in English (US); words you add go to the personal dictionary file" : "off (spell.enabled is false)");
   return rows;
