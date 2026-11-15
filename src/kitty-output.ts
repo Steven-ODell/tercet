@@ -7,6 +7,8 @@ import { Writable } from "node:stream";
 export class KittyPlacementOutput {
   private pending = "";
   private cup = "";
+  /** Ids of the images this process has uploaded, so a clear can name only tercet's own. */
+  constructor(readonly images = new Set<string>()) {}
   push(bytes: Uint8Array): Buffer {
     this.pending += Buffer.from(bytes).toString("latin1");
     let output = "";
@@ -63,12 +65,22 @@ export class KittyPlacementOutput {
       this.cup = "";
     }
     // CUP alone at a write boundary must remain ordered with the next placement.
-    return Buffer.from(withoutReplacedDeletes(output), "latin1");
+    output = withoutReplacedDeletes(output);
+    for (const m of output.matchAll(PASSTHROUGH_GRAPHICS)) {
+      const { a, d, i } = graphicsKeys(m[1]!);
+      if (!i) continue;
+      if (a === "t" || a === "T" || a === "p") this.images.add(i);
+      else if (a === "d" && d === "I") this.images.delete(i);
+    }
+    return Buffer.from(output, "latin1");
   }
 }
 
 const PASSTHROUGH_GRAPHICS =
   /\x1bPtmux;(?:\x1b\x1b\[\d+;\d+H)?\x1b\x1b_G([^;\x1b]*)(?:;[^\x1b]*)?\x1b\x1b\\\x1b\\/g;
+
+const graphicsKeys = (params: string): Record<string, string | undefined> =>
+  Object.fromEntries(params.split(",").map((kv) => kv.split("=")));
 
 /**
  * OpenTUI moves a placement by deleting it (`a=d,d=i`) and placing it again (`a=p`, same `i` and
@@ -79,7 +91,7 @@ const PASSTHROUGH_GRAPHICS =
  */
 export function withoutReplacedDeletes(output: string) {
   if (!output.includes("a=d,d=i,")) return output;
-  const keys = (params: string) => Object.fromEntries(params.split(",").map((kv) => kv.split("=")));
+  const keys = graphicsKeys;
   const graphics = [...output.matchAll(PASSTHROUGH_GRAPHICS)].map((m) => ({
     index: m.index,
     length: m[0].length,
@@ -101,8 +113,8 @@ export function withoutReplacedDeletes(output: string) {
   return result;
 }
 
-export function kittyStdout(): NodeJS.WriteStream {
-  const placement = new KittyPlacementOutput();
+export function kittyStdout(images?: Set<string>): NodeJS.WriteStream {
+  const placement = new KittyPlacementOutput(images);
   const write = process.stdout.write.bind(process.stdout);
   const stream = new Writable({
     write(bytes: Buffer, _encoding, done) {
@@ -153,4 +165,82 @@ export function clearKittyBeforeSwitch(
         throw error;
       }
     };
+}
+
+/** Deletes the placements of these images, sent straight to the outer terminal; data stays. */
+export const kittyDeletePlacements = (images: Iterable<string>) =>
+  [...images].map((i) => `\x1b_Ga=d,d=i,i=${i},q=2\x1b\\`).join("");
+
+/**
+ * When tmux switches the client to another window or session, the outer terminal keeps tercet's
+ * placements drawn over it, and the passthrough of a hidden pane is dropped (`allow-passthrough on`
+ * drops it for any hidden pane, `all` still for one in another session). So on focus-out (tmux
+ * sends one to the pane with `focus-events on`) the delete is written straight to the tty of each
+ * client that showed tercet and no longer does. A focus-out while still shown (the terminal window
+ * lost focus) leaves the images alone. Focus-in records the clients again and repaints.
+ */
+export function clearKittyWhenHidden(options: {
+  /** Ttys of the tmux clients now showing tercet's window. */
+  showing: () => Promise<string[]>;
+  clear: (tty: string) => Promise<void>;
+  repaint: () => void;
+  onFocus: (listener: () => void) => void;
+  onBlur: (listener: () => void) => void;
+}) {
+  let shown = new Set<string>();
+  let cleared = false;
+  // Focus events can arrive faster than tmux answers; each check waits for the one before it.
+  let queue = Promise.resolve();
+  const check = (step: (now: Set<string>) => Promise<void> | void) => {
+    queue = queue.then(async () => {
+      const now = new Set(await options.showing().catch(() => [...shown]));
+      await step(now);
+      shown = now;
+    });
+    return queue;
+  };
+  options.onBlur(() =>
+    check(async (now) => {
+      for (const tty of shown)
+        if (!now.has(tty)) {
+          await options.clear(tty).catch(() => {});
+          cleared = true;
+        }
+    }),
+  );
+  options.onFocus(() =>
+    check(() => {
+      if (!cleared) return;
+      cleared = false;
+      options.repaint();
+    }),
+  );
+  return check(() => {});
+}
+
+/** Ttys of the tmux clients whose current window holds `pane`. */
+export async function tmuxClientsShowing(
+  pane: string,
+  output: (args: string[]) => Promise<string>,
+) {
+  const [window, ...clients] = (
+    await output([
+      "tmux",
+      "display-message",
+      "-p",
+      "-t",
+      pane,
+      "#{window_id}",
+      ";",
+      "list-clients",
+      "-F",
+      "#{window_id} #{client_tty}",
+    ])
+  )
+    .trim()
+    .split("\n");
+  return clients.flatMap((line) => {
+    const [id, tty] = line.split(" ");
+    return id === window && tty ? [tty] : [];
+  });
 }

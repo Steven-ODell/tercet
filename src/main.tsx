@@ -3,7 +3,10 @@ import {
   KITTY_CLEAR_DIRECT,
   KITTY_CLEAR_PLACEMENTS,
   clearKittyBeforeSwitch,
+  clearKittyWhenHidden,
+  kittyDeletePlacements,
   kittyStdout,
+  tmuxClientsShowing,
 } from "./kitty-output";
 import { loadPreviewImage, attachmentSource, isRemoteSource } from "./client/image-preview-source";
 import { imageOpenAction, resolveMediaTarget } from "./client/image-open";
@@ -16,6 +19,7 @@ import {
   setMedia,
   tmuxMedia,
 } from "./client/media";
+import { appendFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { terminalLifecycle } from "./terminal-lifecycle";
@@ -153,7 +157,8 @@ try {
       }),
       config.settings.media.video,
     );
-    const stdout = process.env.TMUX ? kittyStdout() : process.stdout;
+    const kittyImages = new Set<string>();
+    const stdout = process.env.TMUX ? kittyStdout(kittyImages) : process.stdout;
     const renderer = await createCliRenderer({
       stdout,
       remote: false,
@@ -206,18 +211,26 @@ try {
     });
     // Shell, editor, tmux and run commands may switch tmux to another session (a launcher like
     // `tmux new-window` or a script around `switch-client`); see clearKittyBeforeSwitch.
+    const repaint = () => {
+      // A same-size resize does not repaint; passing through another size forces a full one.
+      const { columns, rows } = process.stdout;
+      renderer.requestResize(columns + 1, rows);
+      renderer.requestResize(columns, rows);
+    };
     const switchesSession = process.env.TMUX
-      ? clearKittyBeforeSwitch(
-          stdout,
-          () => {
-            // A same-size resize does not repaint; passing through another size forces a full one.
-            const { columns, rows } = process.stdout;
-            renderer.requestResize(columns + 1, rows);
-            renderer.requestResize(columns, rows);
-          },
-          (listener) => renderer.on("focus", listener),
-        )
+      ? clearKittyBeforeSwitch(stdout, repaint, (listener) => renderer.on("focus", listener))
       : <A extends unknown[], R>(run: (...args: A) => Promise<R>) => run;
+    // Switching tmux windows or sessions by hand; see clearKittyWhenHidden.
+    if (process.env.TMUX && process.env.TMUX_PANE && media().rung === "kitty")
+      void clearKittyWhenHidden({
+        showing: () => tmuxClientsShowing(process.env.TMUX_PANE!, output),
+        clear: async (tty) => {
+          if (kittyImages.size) await appendFile(tty, kittyDeletePlacements(kittyImages));
+        },
+        repaint,
+        onFocus: (listener) => renderer.on("focus", listener),
+        onBlur: (listener) => renderer.on("blur", listener),
+      });
     for (const name of ["shell", "editor", "tmux", "run"] as const) {
       const action = effects[name] as ((input: never) => Promise<unknown>) | undefined;
       if (action) effects[name] = switchesSession(action) as never;
