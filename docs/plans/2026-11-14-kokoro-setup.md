@@ -89,7 +89,7 @@ automatic, a clear not-set-up message.
   Done when: new tests pass for not-ready click, ready-after-setup without restart, and the
   doctor lines; `bun run typecheck && bun test` passes.
 
-- [ ] 4. Docs, licenses and changelog
+- [x] 4. Docs, licenses and changelog
   Files: README.md (the "Read responses aloud" section), docs/settings.md (the "Response
   readback (Kokoro)" section), docs/install.md, docs/windows.md, THIRD_PARTY.md, CHANGELOG.md.
   Do: rewrite the README and settings sections around `tercet readback setup`, the data

@@ -38,6 +38,10 @@ avoid escaping each backslash.
 - Built-in automatic microphone discovery currently supports Linux/macOS. On Windows,
   `dictation.recorder` can configure a local recorder producing 16 kHz mono float32 PCM;
   `commands.dictation` remains available. Automatic Windows microphone setup is unverified.
+- Read aloud: `tercet readback setup` keeps the Kokoro files in `%LOCALAPPDATA%\tercet\kokoro`
+  (the venv's Python is `.venv\Scripts\python.exe`). Set `readback.home` or `KOKORO_HOME` to use
+  another folder; forward slashes are fine in settings. Setup and playback are tested with
+  Windows paths only, not on a real Windows machine.
 - Branch/PR/worktree operations use T3 server RPCs. Workspace paths are server paths, and must
   remain intact, including drive letters, spaces and UNC shares. Windows does not add GitHub
   credentials; set those up through T3 as usual.

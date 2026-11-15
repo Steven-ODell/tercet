@@ -35,4 +35,21 @@ contributor's notice, is in `node_modules/dictionary-en/license`.
 
 `@opentui/core` is not bundled; Bun installs it next to tercet as a normal dependency.
 
+## Read aloud (downloaded on request, not bundled)
+
+`tercet readback setup` downloads these at the user's request. tercet does not ship them, and
+nothing is fetched until the user runs that command and confirms.
+
+| Component     | Source                                                                   | License    |
+| ------------- | ------------------------------------------------------------------------ | ---------- |
+| Kokoro-82M    | the model, via the `model-files-v1.0` release of kokoro-onnx             | Apache-2.0 |
+| `kokoro-onnx` | [thewh1teagle/kokoro-onnx](https://github.com/thewh1teagle/kokoro-onnx)  | MIT        |
+
+The model files `kokoro-v1.0.onnx` and `voices-v1.0.bin` are the ONNX conversion of Kokoro-82M
+by [hexgrad](https://github.com/hexgrad/kokoro), which is Apache-2.0 licensed; `kokoro-onnx` is
+copyright (c) 2025 thewh1teagle. pip also installs the dependencies of `kokoro-onnx` into the
+venv, each under its own license, among them `onnxruntime` (MIT), `numpy` (BSD),
+`espeakng-loader` (MIT, loads the eSpeak NG library, GPL-3.0) and `phonemizer` (GPL-3.0 or
+later). tercet only starts the venv's Python as a separate process and links none of it.
+
 This project is a community client. It is not made or endorsed by T3 Tools Inc.
