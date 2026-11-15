@@ -35,6 +35,7 @@ export const USAGE = `Usage: tercet [options]
        tercet attach THREAD [options]
        tercet tmux [--watch] [--session NAME] [options]
        tercet upgrade [--check]
+       tercet readback setup|status [--yes] [--dry-run] [--home DIR]
 
 Options:
   --url ORIGIN        The T3 server, e.g. http://127.0.0.1:3773

@@ -47,9 +47,10 @@ import { theme } from "./client/theme";
 import { runKeys } from "./keys";
 import { attachWhenReady, runList, runTmux } from "./cli";
 import { runUpgrade } from "./upgrade";
+import { runReadback } from "./readback-setup";
 
 const args = process.argv.slice(2);
-if ((args.includes("--help") || args.includes("-h")) && !["list", "tmux", "upgrade"].includes(args[0] ?? "")) {
+if ((args.includes("--help") || args.includes("-h")) && !["list", "tmux", "upgrade", "readback"].includes(args[0] ?? "")) {
   console.log(USAGE);
   process.exit(0);
 }
@@ -62,6 +63,7 @@ if (process.argv[2] === "keys") process.exit(await runKeys());
 if (process.argv[2] === "upgrade") process.exit(await runUpgrade(process.argv.slice(3)));
 if (process.argv[2] === "list") process.exit(await runList(process.argv.slice(3)));
 if (process.argv[2] === "tmux") process.exit(await runTmux(process.argv.slice(3)));
+if (process.argv[2] === "readback") process.exit(await runReadback(process.argv.slice(3)));
 // `tercet attach THREAD [options]`: the app on one thread, without the thread list.
 const attachTo = process.argv[2] === "attach" ? process.argv[3] : undefined;
 if (process.argv[2] === "attach" && (!attachTo || attachTo.startsWith("-"))) {
