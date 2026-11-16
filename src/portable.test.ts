@@ -717,3 +717,43 @@ test("explicit clipboard commands and named targets own routing over SSH", async
   await fake.fail("own-copy");
   await expect(Promise.resolve(actions.copy("fail"))).rejects.toThrow("own-copy broke");
 });
+
+
+test("browser executable and profile override only URL opening", async () => {
+  const fake = await fakePath(["xdg-open", "browser"]);
+  const settings = settingsWith(JSON.stringify({ launchers: {
+    browser: [fake.dir + "/browser", "-P", "{profile}", "{url}"],
+    browserProfile: "Work Profile", browserLocation: "host",
+  }}));
+  const { actions } = build(fake.host, settings);
+  await actions.openUrl!("https://example.com/path?a=1&b=2");
+  await actions.openPath!("/tmp/file.txt");
+  expect(await fake.log()).toEqual([
+    "browser -P Work Profile https://example.com/path?a=1&b=2",
+    "xdg-open /tmp/file.txt",
+  ]);
+});
+
+test("client browser uses SSH with shell-quoted URL and profile arguments", async () => {
+  const fake = await fakePath(["ssh"]);
+  const settings = settingsWith(JSON.stringify({ launchers: {
+    browser: ["zen", "-P", "{profile}", "{url}"],
+    browserProfile: "Work Profile", browserLocation: "client",
+  }}));
+  const { actions } = build(fake.host, settings, { sshHost: async () => "100.1.2.3" });
+  await actions.openUrl!("https://example.com/?a=1&b=$(touch%20oops)");
+  expect(await fake.log()).toEqual([
+    "ssh -- 100.1.2.3 'zen' '-P' 'Work Profile' 'https://example.com/?a=1&b=$(touch%20oops)'",
+  ]);
+  await expect(actions.openUrl!("file:///etc/passwd")).rejects.toThrow("Unsupported URL");
+});
+
+
+test("missing SSH client copies the URL without opening on the host", async () => {
+  const fake = await fakePath(["xdg-open", "ssh"]);
+  const settings = settingsWith('{"launchers":{"browserLocation":"client"}}');
+  const { actions, terminal } = build(fake.host, settings, { sshHost: async () => undefined });
+  await expect(actions.openUrl!("https://example.com/")).rejects.toBeInstanceOf(LinkCopied);
+  expect(await fake.log()).toEqual([]);
+  expect(terminal.at(-1)).toContain(Buffer.from("https://example.com/").toString("base64"));
+});

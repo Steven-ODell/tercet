@@ -91,10 +91,12 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
 | `defaults.favorites`                                  | list of `{ provider, model }`                                   | `[]`                                       | now       |
 | `defaults.sidebarWorkingShelf`                        | boolean                                                         | `false`                                    | now       |
 | `defaults.hints`                                      | boolean                                                         | `true`                                     | now       |
-| `theme.preset`, `theme.accent`                        | a preset name or `auto` (see Theme); `#rrggbb`                  | `cyberdream`, its own accent               | now       |
+| `theme.preset`, `theme.accent`, `theme.link`                        | a preset name or `auto` (see Theme); `#rrggbb`                  | `cyberdream`, its own accent               | now       |
 | `keys`                                                | command name to key                                             | built-in keys                              | now       |
 | `icons`                                               | `nerd`, `unicode`, `ascii`                                      | `unicode`                                  | now       |
-| `launchers.terminal`, `.editor`, `.opener`, `.player`, `.picker` | command template                                                | see below                                  | now       |
+| `launchers.terminal`, `.editor`, `.opener`, `.browser`, `.player`, `.picker` | command template                                                | see below                                  | now       |
+| `launchers.browserLocation` | `host` or `client` | `host` | now |
+| `launchers.browserProfile` | existing browser profile name/directory | browser default | now |
 | `media.protocol`                                      | `auto`, `kitty`, `sixel`, `blocks`, `none`                      | `auto`                                     | now       |
 | `media.video`                                         | `player`, `terminal`                                            | `player`                                   | now       |
 | `media.pageShots`                                     | boolean                                                         | `true`                                     | now       |
@@ -623,3 +625,54 @@ or cancellation. Long responses are spoken sentence by sentence: the first piece
 as it is made while the next is generated. Beside **[read]** a spinner shows speech is being
 prepared and a play icon shows it is playing; clicking **[read]** again stops it. Limits: 30,000 characters, 64 MB audio per piece and two minutes to make any one piece.
 Generation errors appear beneath the transcript.
+
+
+## Transcript links and browser
+
+Markdown links, including links inside bold text and headings, and bare HTTP(S) URLs
+are clickable and underlined. Dragging selects text without opening a link; Shift-click
+also leaves it unopened. Set `theme.link` to a `#rrggbb` color to change their color.
+The default is the theme's blue, separate from assistant text and inline code.
+
+Configure these keys in your usual `settings.json`, then restart Tercet:
+
+```jsonc
+{
+  "theme": { "link": "#5ea1ff" },
+  "launchers": {
+    "browser": ["zen", "-P", "{profile}", "{url}"],
+    "browserProfile": "default",
+    "browserLocation": "host"
+  }
+}
+```
+
+`browser` is a command name, an executable's full path, or an argument array.
+For Firefox and Zen, `-P` selects an existing named profile; use the profile name you
+created in that browser. For Chromium, use
+`["chromium", "--profile-directory={profile}", "{url}"]` with a directory name such
+as `Default` or `Profile 1`. Omit the profile argument and `browserProfile` to let the
+browser choose its usual profile. Tercet does not enumerate browser profiles.
+
+`browserLocation` is `host` (default, the machine running Tercet) or `client`
+(the currently attached SSH/tmux client). `client` requires SSH access from the host
+back to that client, with an existing login setup and a working graphical session.
+The executable path and profile must exist on that destination machine. Tercet
+quotes each argument before passing it to the remote shell. No SSH client found or a
+failed launch leaves the URL on the clipboard with a notice; it does not silently
+open a browser on another machine. Without `browser`, client mode runs `xdg-open`;
+set `browser` to `open` for a macOS client.
+
+Browser templates accept `{url}`, `{profile}` and `{sshHost}`. A bare program name
+gets the URL appended. With placeholders, include `{url}` explicitly. Commands run
+without a local shell, so paths and profile names containing spaces stay one argument.
+
+If `browser` is unset in host mode, links use the existing `launchers.opener` and
+system opener fallback. File and image openers stay independent of `browser`.
+
+To try a local build without replacing your installed Tercet:
+
+```bash
+bun run build
+bun ./dist/tercet.js
+```

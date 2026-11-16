@@ -129,7 +129,7 @@ const Row = memo(function Row({
       bg={focused ? theme.highlight : undefined}
     >
       {painted.map((span, index) => (
-        <span key={index} fg={span.color} bg={span.bg} attributes={span.bold ? 1 : 0}>
+        <span key={index} fg={span.color} bg={span.bg} attributes={(span.bold ? 1 : 0) | (span.underline ? 8 : 0)}>
           {span.text}
         </span>
       ))}

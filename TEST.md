@@ -142,3 +142,17 @@ locking through close, read-only mutation gates and keyboard/mouse confirmation/
 No live GitHub writes. Alt+w opens Pull requests; Alt+g opens Branches/Worktrees.
 Full validation remains `bun run build` then `TERCET_SANDBOX_PORT=3776 bun run check`.
 Local comparison is explicitly labeled; remote full diff/history use the host URL.
+
+
+## Transcript links
+
+1. Start the local bundle with `bun ./dist/tercet.js`. Open a response containing
+   `**[Textual](https://github.com/Textualize/textual)**`, a heading containing a link,
+   and a bare URL. Each link should be blue and underlined; click its label or wrapped
+   continuation to open it. Drag over it to select without launching anything.
+2. Set `theme.link`, `launchers.browser`, `launchers.browserProfile` and
+   `launchers.browserLocation` as described in [settings](docs/settings.md#transcript-links-and-browser),
+   restart and click again. Confirm the chosen browser and profile receive the exact URL.
+3. Over SSH, choose `client` and confirm it launches on the attached client with reverse
+   SSH access configured. With no reachable client, confirm a copy notice appears. File
+   opening should continue using the ordinary opener.

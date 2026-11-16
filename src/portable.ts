@@ -737,7 +737,7 @@ export function hostActions(deps: HostDeps): Actions {
     };
     if (chain.read?.images) actions.pasteImage = () => readClipboard("image/png");
   }
-  if (opener) {
+  if (opener || launchers.browser || launchers.browserLocation === "client") {
     actions.openUrl = async (url) => {
       const parsed = new URL(url);
       if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("Unsupported URL");
@@ -745,12 +745,22 @@ export function hostActions(deps: HostDeps): Actions {
       try {
         const map = command("mapUrl");
         if (map) link = decode(await run(map, { url: link }, { capture: true })).trim() || link;
-        await open(link, { url: link });
+        if (launchers.browser || launchers.browserLocation === "client") {
+          const spec = launchers.browser ?? "xdg-open";
+          const argv = expand(spec, await vars(spec, { url: link, profile: launchers.browserProfile ?? "" }), [link]);
+          if (launchers.browserLocation === "client") {
+            const client = await deps.sshHost?.();
+            if (!client) throw new Error("No SSH client found for browserLocation client");
+            await runArgs(host, ["ssh", "--", client, argv.map(shellQuote).join(" ")], { graceMs: grace });
+          } else await runArgs(host, argv, { graceMs: grace });
+        } else await open(link, { url: link });
       } catch {
         copy(link);
         throw new LinkCopied();
       }
     };
+  }
+  if (opener) {
     actions.openPath = (path) => open(path, { url: path, path });
   }
   const picker = pickerChain(settings, host);

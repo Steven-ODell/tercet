@@ -18,7 +18,7 @@ export const SEND_SHORTCUTS = ["enter", "mod-enter-multiline", "mod-enter"] as c
 export { MEDIA_PROTOCOLS };
 
 /** Values a command template can name as `{name}`. */
-export const PLACEHOLDERS = ["cwd", "text", "path", "url", "sshHost", "mime"] as const;
+export const PLACEHOLDERS = ["cwd", "text", "path", "url", "sshHost", "mime", "profile"] as const;
 export type Placeholder = (typeof PLACEHOLDERS)[number];
 
 /**
@@ -51,6 +51,7 @@ export const LAUNCHER_PLACEHOLDERS = {
   terminal: ["cwd"],
   editor: ["cwd", "path"],
   opener: ["url", "path"],
+  browser: ["url", "profile"],
   player: ["path"],
   /** A file dialog that prints the picked paths, one per line. */
   picker: ["cwd"],
@@ -87,7 +88,7 @@ export interface Settings {
     /** Never draw the server warning banner (version outside the tested range, no version, other protocol). */
     hideWarning?: boolean;
   };
-  theme: { preset?: ThemeChoice; accent?: string };
+  theme: { preset?: ThemeChoice; accent?: string; link?: string };
   /** Command name to key, e.g. `"palette": "Ctrl+k"`; `"none"` unbinds. */
   keys: Record<string, string>;
   icons: IconMode;
@@ -108,6 +109,9 @@ export interface Settings {
     terminal?: CommandSpec;
     editor?: CommandSpec;
     opener?: CommandSpec;
+    browser?: CommandSpec;
+    browserLocation?: "host" | "client";
+    browserProfile?: string;
     player?: CommandSpec;
     picker?: CommandSpec;
   };
@@ -524,7 +528,7 @@ const schema = struct({
     ignoreVersion: bool,
     hideWarning: bool,
   }),
-  theme: struct({ preset: oneOf(THEME_CHOICES), accent: color }),
+  theme: struct({ preset: oneOf(THEME_CHOICES), accent: color, link: color }),
   keys: record(/^[A-Za-z][\w.-]*$/, "action names use letters, digits, ., _ and -", text),
   icons: oneOf(ICON_MODES),
   defaults: struct({
@@ -541,6 +545,8 @@ const schema = struct({
       Object.entries(LAUNCHER_PLACEHOLDERS).map(([name, vars]) => [name, withHost(vars)]),
     ),
     editorMode: oneOf(["terminal", "tmux", "direct"]),
+    browserLocation: oneOf(["host", "client"]),
+    browserProfile: text,
   }),
   media: struct({ protocol: oneOf(MEDIA_PROTOCOLS), video: oneOf(VIDEO_MODES), pageShots: bool }),
   commands: struct(

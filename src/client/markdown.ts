@@ -21,6 +21,7 @@ export interface Span {
   /** Background, set only while the cursor or a selection covers the text. */
   bg?: Color;
   bold?: boolean;
+  underline?: boolean;
 }
 export interface MarkdownRow {
   id: string;
@@ -155,17 +156,18 @@ function inline(text: string): Span[] {
     .split(/(`[^`]*`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\)|https?:\/\/[^\s<>`]+)/g)
     .filter(Boolean)
     .flatMap(bareUrl)
-    .map((part) =>
+    .flatMap((part): Span | Span[] =>
       typeof part !== "string"
         ? part
         : part.startsWith("`")
           ? { text: part.slice(1, -1), color: theme.cyan, target: inlineTarget(part.slice(1, -1)) }
           : part.startsWith("**")
-            ? { text: part.slice(2, -2), bold: true }
+            ? inline(part.slice(2, -2)).map((span) => ({ ...span, bold: true }))
             : part.startsWith("[")
               ? {
                   text: part.replace(/^\[([^\]]+)\]\(([^)]+)\)$/, "$1 ($2)"),
-                  color: theme.cyan,
+                  color: theme.link ?? theme.blue,
+                  underline: true,
                   target: linkTarget(part.slice(part.indexOf("](") + 2, -1)),
                 }
               : { text: part },
@@ -175,7 +177,7 @@ function inline(text: string): Span[] {
 function bareUrl(part: string): (string | Span)[] {
   if (!/^https?:\/\//.test(part)) return [part];
   const url = part.replace(/[.,;:!?'"\])}]+$/, "");
-  const link: Span = { text: url, color: theme.cyan, target: linkTarget(url) };
+  const link: Span = { text: url, color: theme.link ?? theme.blue, underline: true, target: linkTarget(url) };
   return url.length < part.length ? [link, { text: part.slice(url.length) }] : [link];
 }
 export function inlineTarget(text: string): Target {
@@ -454,7 +456,7 @@ export function measureMarkdown(
     } else if (lineIndex === 0)
       spans = [{ text: line, color: messageColor ?? theme.accent, bold: true }];
     else if (/^#{1,6}\s/.test(line))
-      spans = [{ text: line.replace(/^#{1,6}\s+/, ""), color: theme.accent, bold: true }];
+      spans = inline(line.replace(/^#{1,6}\s+/, "")).map((span) => ({ ...span, color: span.color ?? theme.accent, bold: true }));
     else spans = inline(line.replace(/^(\s*)[-*+]\s+/, "$1• "));
     let offset = 0;
     const framed = fence !== null;

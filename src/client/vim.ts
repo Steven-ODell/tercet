@@ -199,6 +199,7 @@ export function paint(
         last.target === span.target &&
         last.action === span.action &&
         last.bold === span.bold &&
+        last.underline === span.underline &&
         last.bg === style.bg &&
         last.color === (style.color ?? span.color)
       )

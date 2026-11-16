@@ -111,7 +111,7 @@ test("unknown keys are ignored and reported when loading, so a newer settings fi
   const loaded = await loadSettings("/home/u/.config/tercet", async () => text, "/home/u");
   expect(loaded.settings.theme.preset).toBe("cyberdream");
   expect(loaded.warnings).toEqual([
-    `${PATH}:2: theme.futureKnob: unknown key; theme takes preset, accent`,
+    `${PATH}:2: theme.futureKnob: unknown key; theme takes preset, accent, link`,
     expect.stringContaining(`${PATH}:3: readbackFuture: unknown key; the top level takes `),
     expect.stringContaining(`${PATH}:4: __proto__: unknown key`),
   ]);
@@ -126,7 +126,7 @@ test("unknown keys are ignored and reported when loading, so a newer settings fi
 
 test("schema errors name the file, line and key", () => {
   expect(failure('{\n  "theme": {\n    "colour": "#fff"\n  }\n}')).toBe(
-    `settings error in ${PATH}:3: theme.colour: unknown key; theme takes preset, accent`,
+    `settings error in ${PATH}:3: theme.colour: unknown key; theme takes preset, accent, link`,
   );
   expect(failure('{\n  "sever": {}\n}')).toBe(
     `settings error in ${PATH}:2: sever: unknown key; the top level takes server, theme, keys, icons, defaults, launchers, media, commands, targets, spell, readback, dictation`,
@@ -406,4 +406,17 @@ test("theme.preset takes every preset and auto, and names them when it is wrong"
   await expect(
     loadSettings("/home/u/.config/tercet", async () => '{"theme": {"preset": "neon"}}', "/home/u"),
   ).rejects.toThrow("theme.preset: expected one of");
+});
+
+
+test("browser destination, executable, profile and link color settings validate", () => {
+  const settings = parseSettings(JSON.stringify({
+    theme: { link: "#123abc" },
+    launchers: { browser: ["/opt/Zen Browser/zen", "-P", "{profile}", "{url}"], browserProfile: "Work", browserLocation: "client" },
+  }), PATH, { home: "/home/test", dir: "/config" });
+  expect(settings.theme.link).toBe("#123abc");
+  expect(settings.launchers.browserProfile).toBe("Work");
+  expect(settings.launchers.browserLocation).toBe("client");
+  expect(failure('{"launchers":{"browserLocation":"elsewhere"}}')).toContain("launchers.browserLocation");
+  expect(failure('{"theme":{"link":"invalid"}}')).toContain("theme.link");
 });

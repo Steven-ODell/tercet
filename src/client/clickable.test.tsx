@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { act } from "react";
 import { testRender } from "@opentui/react/test-utils";
+import { setTheme, theme } from "./theme";
 import { TranscriptViewport } from "./transcript-viewport";
 import {
   activeClientPid,
@@ -16,7 +17,7 @@ test("measured blocks retain exact commands and distinct inline/link targets thr
     {
       id: "a",
       kind: "assistant",
-      text: "```sh\n  echo hi\n pwd\n```\n`ls -al` [source](src/main.ts) [page](https://example.com)\n[open](tercet-page:page%2Fid)",
+      text: "```sh\n  echo hi\n pwd\n```\n`ls -al` [source](src/main.ts) **[page](https://example.com)**\n[open](tercet-page:page%2Fid)",
     },
     12,
   );
@@ -84,7 +85,7 @@ test("OpenTUI buttons and focused keys call fake Actions exactly; drag copies an
         {
           id: "a",
           kind: "assistant",
-          text: "hello world\n```sh\necho hi\n```\n`pwd`\n[file](src/main.ts)\n[page](https://example.com)\n[open](tercet-page:page%2Fid)",
+          text: "hello world\n```sh\necho hi\n```\n`pwd`\n[file](src/main.ts)\n**[page](https://example.com)**\n[open](tercet-page:page%2Fid)",
         },
       ]}
       width={100}
@@ -128,13 +129,13 @@ test("OpenTUI buttons and focused keys call fake Actions exactly; drag copies an
     await key("Y");
     expect(calls.at(-1)).toEqual([
       "copy",
-      "hello world\n```sh\necho hi\n```\n`pwd`\n[file](src/main.ts)\n[page](https://example.com)\n[open](tercet-page:page%2Fid)",
+      "hello world\n```sh\necho hi\n```\n`pwd`\n[file](src/main.ts)\n**[page](https://example.com)**\n[open](tercet-page:page%2Fid)",
     ]);
     await click("hello world");
     await click("[copy]");
     expect(calls.at(-1)).toEqual([
       "copy",
-      "hello world\n```sh\necho hi\n```\n`pwd`\n[file](src/main.ts)\n[page](https://example.com)\n[open](tercet-page:page%2Fid)",
+      "hello world\n```sh\necho hi\n```\n`pwd`\n[file](src/main.ts)\n**[page](https://example.com)**\n[open](tercet-page:page%2Fid)",
     ]);
     await click("echo hi");
     await click("[copy]");
@@ -326,4 +327,28 @@ test("holder buttons call the exact action, and a drag copies code without the b
   } finally {
     await act(async () => view.renderer.destroy());
   }
+});
+
+
+test("bold links and heading links retain targets, color and underline through wrapping", () => {
+  for (const text of ["**[Textual](https://github.com/Textualize/textual)**", "# [Textual](https://github.com/Textualize/textual)"]) {
+    const spans = measureMarkdown({ id: "links", kind: "assistant", text }, 14)
+      .flatMap((row) => row.spans).filter((span) => span.target?.kind === "url");
+    expect(spans.length).toBeGreaterThan(1);
+    expect(spans.every((span) => span.target?.text === "https://github.com/Textualize/textual" && span.bold && span.underline)).toBe(true);
+    expect(spans.map((span) => span.text).join("")).toBe("Textual (https://github.com/Textualize/textual)");
+  }
+});
+
+
+test("link color override applies to nested links independently of prose", () => {
+  const before = { ...theme };
+  try {
+    setTheme({ link: "#123abc" });
+    const spans = measureMarkdown({ id: "color", kind: "assistant", text: "plain **[link](https://example.com)**" }, 120).flatMap((row) => row.spans);
+    expect(spans.find((span) => span.target?.kind === "url")?.color).toBe("#123abc");
+    expect(spans.find((span) => span.text === "plain ")?.color).toBe(theme.assistant);
+    setTheme();
+    expect(theme.link).toBe(theme.blue);
+  } finally { Object.assign(theme, before); }
 });

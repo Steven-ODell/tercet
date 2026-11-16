@@ -25,6 +25,8 @@ export interface Theme {
   muted: Color;
   /** Focus, titles, buttons. */
   accent: Color;
+  /** Clickable transcript links, independent of prose and inline code. */
+  link?: Color;
   /** Unfocused pane borders. */
   border: Color;
   /** The selected row's background. */
@@ -589,11 +591,12 @@ export const theme: Theme = { ...cyberdream };
 
 /** Applies a preset and an optional accent override. Call before the first render. */
 export function setTheme(
-  settings: { preset?: string; accent?: string } = {},
+  settings: { preset?: string; accent?: string; link?: string } = {},
   appearance?: "dark" | "light" | null,
 ) {
   Object.assign(theme, PRESETS[resolvePreset(settings.preset, appearance)]);
   if (settings.accent) theme.accent = settings.accent;
+  theme.link = settings.link ?? theme.blue;
 }
 
 /** The color as 0-255 RGB, resolving palette indexes through xterm's default palette. */

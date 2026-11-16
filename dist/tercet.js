@@ -82224,6 +82224,7 @@ function setTheme(settings = {}, appearance) {
   Object.assign(theme, PRESETS[resolvePreset(settings.preset, appearance)]);
   if (settings.accent)
     theme.accent = settings.accent;
+  theme.link = settings.link ?? theme.blue;
 }
 
 // src/client/icons.ts
@@ -82811,6 +82812,7 @@ var LAUNCHER_PLACEHOLDERS = {
   terminal: ["cwd"],
   editor: ["cwd", "path"],
   opener: ["url", "path"],
+  browser: ["url", "profile"],
   player: ["path"],
   picker: ["cwd"]
 };
@@ -83107,7 +83109,7 @@ var schema = struct({
     ignoreVersion: bool,
     hideWarning: bool
   }),
-  theme: struct({ preset: oneOf(THEME_CHOICES), accent: color }),
+  theme: struct({ preset: oneOf(THEME_CHOICES), accent: color, link: color }),
   keys: record(/^[A-Za-z][\w.-]*$/, "action names use letters, digits, ., _ and -", text2),
   icons: oneOf(ICON_MODES),
   defaults: struct({
@@ -83121,7 +83123,9 @@ var schema = struct({
   }),
   launchers: struct({
     ...Object.fromEntries(Object.entries(LAUNCHER_PLACEHOLDERS).map(([name, vars]) => [name, withHost(vars)])),
-    editorMode: oneOf(["terminal", "tmux", "direct"])
+    editorMode: oneOf(["terminal", "tmux", "direct"]),
+    browserLocation: oneOf(["host", "client"]),
+    browserProfile: text2
   }),
   media: struct({ protocol: oneOf(MEDIA_PROTOCOLS), video: oneOf(VIDEO_MODES), pageShots: bool }),
   commands: struct(Object.fromEntries(Object.entries(COMMANDS2).map(([name, vars]) => [name, withHost(vars)]))),
@@ -83767,7 +83771,7 @@ function hostActions(deps) {
     if (chain.read?.images)
       actions.pasteImage = () => readClipboard("image/png");
   }
-  if (opener) {
+  if (opener || launchers.browser || launchers.browserLocation === "client") {
     actions.openUrl = async (url) => {
       const parsed = new URL(url);
       if (!["http:", "https:"].includes(parsed.protocol))
@@ -83777,12 +83781,25 @@ function hostActions(deps) {
         const map = command2("mapUrl");
         if (map)
           link = decode(await run(map, { url: link }, { capture: true })).trim() || link;
-        await open(link, { url: link });
+        if (launchers.browser || launchers.browserLocation === "client") {
+          const spec = launchers.browser ?? "xdg-open";
+          const argv = expand(spec, await vars(spec, { url: link, profile: launchers.browserProfile ?? "" }), [link]);
+          if (launchers.browserLocation === "client") {
+            const client = await deps.sshHost?.();
+            if (!client)
+              throw new Error("No SSH client found for browserLocation client");
+            await runArgs(host, ["ssh", "--", client, argv.map(shellQuote).join(" ")], { graceMs: grace });
+          } else
+            await runArgs(host, argv, { graceMs: grace });
+        } else
+          await open(link, { url: link });
       } catch {
         copy(link);
         throw new LinkCopied;
       }
     };
+  }
+  if (opener) {
     actions.openPath = (path) => open(path, { url: path, path });
   }
   const picker = pickerChain(settings, host);
@@ -151244,9 +151261,10 @@ function blockTop(language, block, width2, id2) {
   return rows;
 }
 function inline(text5) {
-  return text5.split(/(`[^`]*`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\)|https?:\/\/[^\s<>`]+)/g).filter(Boolean).flatMap(bareUrl).map((part) => typeof part !== "string" ? part : part.startsWith("`") ? { text: part.slice(1, -1), color: theme.cyan, target: inlineTarget(part.slice(1, -1)) } : part.startsWith("**") ? { text: part.slice(2, -2), bold: true } : part.startsWith("[") ? {
+  return text5.split(/(`[^`]*`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\)|https?:\/\/[^\s<>`]+)/g).filter(Boolean).flatMap(bareUrl).flatMap((part) => typeof part !== "string" ? part : part.startsWith("`") ? { text: part.slice(1, -1), color: theme.cyan, target: inlineTarget(part.slice(1, -1)) } : part.startsWith("**") ? inline(part.slice(2, -2)).map((span) => ({ ...span, bold: true })) : part.startsWith("[") ? {
     text: part.replace(/^\[([^\]]+)\]\(([^)]+)\)$/, "$1 ($2)"),
-    color: theme.cyan,
+    color: theme.link ?? theme.blue,
+    underline: true,
     target: linkTarget(part.slice(part.indexOf("](") + 2, -1))
   } : { text: part });
 }
@@ -151254,7 +151272,7 @@ function bareUrl(part) {
   if (!/^https?:\/\//.test(part))
     return [part];
   const url = part.replace(/[.,;:!?'"\])}]+$/, "");
-  const link2 = { text: url, color: theme.cyan, target: linkTarget(url) };
+  const link2 = { text: url, color: theme.link ?? theme.blue, underline: true, target: linkTarget(url) };
   return url.length < part.length ? [link2, { text: part.slice(url.length) }] : [link2];
 }
 function inlineTarget(text5) {
@@ -151469,7 +151487,7 @@ function measureMarkdown(item, width2, imageHeight = 12, offered = []) {
     } else if (lineIndex === 0)
       spans = [{ text: line, color: messageColor ?? theme.accent, bold: true }];
     else if (/^#{1,6}\s/.test(line))
-      spans = [{ text: line.replace(/^#{1,6}\s+/, ""), color: theme.accent, bold: true }];
+      spans = inline(line.replace(/^#{1,6}\s+/, "")).map((span) => ({ ...span, color: span.color ?? theme.accent, bold: true }));
     else
       spans = inline(line.replace(/^(\s*)[-*+]\s+/, "$1\u2022 "));
     let offset = 0;
@@ -159877,7 +159895,7 @@ function paint(spans, selected, cursor) {
     for (const { segment } of segmenter2.segment(span.text)) {
       const style = index3 === cursor ? { color: theme.cursorText, bg: theme.accent } : selected && index3 >= selected[0] && index3 < selected[1] ? { bg: theme.selection } : {};
       const last = out.at(-1);
-      if (last && last.target === span.target && last.action === span.action && last.bold === span.bold && last.bg === style.bg && last.color === (style.color ?? span.color))
+      if (last && last.target === span.target && last.action === span.action && last.bold === span.bold && last.underline === span.underline && last.bg === style.bg && last.color === (style.color ?? span.color))
         last.text += segment;
       else
         out.push({ ...span, ...style, color: style.color ?? span.color, text: segment });
@@ -159956,7 +159974,7 @@ var Row = import_react55.memo(function Row2({
     children: painted.map((span, index3) => /* @__PURE__ */ import_jsx_runtime.jsx("span", {
       fg: span.color,
       bg: span.bg,
-      attributes: span.bold ? 1 : 0,
+      attributes: (span.bold ? 1 : 0) | (span.underline ? 8 : 0),
       children: span.text
     }, index3))
   });
