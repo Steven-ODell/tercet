@@ -92,8 +92,22 @@ test("OpenTUI buttons and focused keys call fake Actions exactly; drag copies an
     />,
     { width: 100, height: 22 },
   );
+  // Wait for a frame containing `text`: an async update can land a pass or two after the click.
+  const frameWith = async (text: string) => {
+    const deadline = Date.now() + 2000;
+    for (;;) {
+      try {
+        return await view.waitForFrame((f) => f.includes(text));
+      } catch (error) {
+        if (Date.now() > deadline) throw error;
+      }
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    }
+  };
   const click = async (label: string) => {
-    const lines = view.captureCharFrame().split("\n");
+    const lines = (await frameWith(label)).split("\n");
     // Bottom up: the status row's buttons act on the current target.
     const y = lines.findLastIndex((l) => l.includes(label));
     expect(y).toBeGreaterThanOrEqual(0);
@@ -131,12 +145,12 @@ test("OpenTUI buttons and focused keys call fake Actions exactly; drag copies an
     expect(calls.at(-1)).toEqual(["copy", "echo hi"]);
     await key("T");
     expect(calls.at(-1)).toEqual(["tmux", { cwd: "/fixture", command: "echo hi" }]);
-    expect(view.captureCharFrame()).toContain("◌ tmux");
+    expect(await frameWith("◌ tmux")).toContain("◌ tmux");
     await act(async () => {
       finish!();
     });
     await view.flush();
-    expect(view.captureCharFrame()).toContain("✓ tmux");
+    expect(await frameWith("✓ tmux")).toContain("✓ tmux");
     await click("[tmux]");
     await act(async () => {
       finish!();
@@ -164,7 +178,7 @@ test("OpenTUI buttons and focused keys call fake Actions exactly; drag copies an
       throw new Error("private detail");
     };
     await click("[open]");
-    expect(view.captureCharFrame()).toContain("X open failed; retry");
+    expect(await frameWith("X open failed; retry")).toContain("X open failed; retry");
     expect(view.captureCharFrame()).not.toContain("private detail");
     await click("open (tercet-page:page%2Fid)");
     expect(calls.at(-1)).toEqual(["page", "page/id"]);
