@@ -25,10 +25,13 @@ describe("page sources", () => {
     expect(mediaKind(source)).toBe("image");
     expect(isPageSource("tercet-image:x")).toBe(false);
   });
-  test("only TERCET_PAGE_SHOTS=1 turns shots on", () => {
-    expect(pageShotsFromEnv({ TERCET_PAGE_SHOTS: "1" })).toBe(true);
+  test("shots are on unless TERCET_PAGE_SHOTS=0 or media.pageShots is false", () => {
+    expect(pageShotsFromEnv({})).toBe(true);
+    expect(pageShotsFromEnv({ TERCET_PAGE_SHOTS: "" })).toBe(true);
     expect(pageShotsFromEnv({ TERCET_PAGE_SHOTS: "0" })).toBe(false);
-    expect(pageShotsFromEnv({})).toBe(false);
+    expect(pageShotsFromEnv({}, false)).toBe(false);
+    expect(pageShotsFromEnv({ TERCET_PAGE_SHOTS: "1" }, false)).toBe(true);
+    expect(pageShotsFromEnv({ TERCET_PAGE_SHOTS: "0" }, true)).toBe(false);
   });
 });
 

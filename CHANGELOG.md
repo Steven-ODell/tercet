@@ -10,6 +10,8 @@ Works with T3 Code servers >=0.1.9 <0.2.0, tested on 0.1.9.
 - New setting `server.t3Command`: the full path (or command name) of `t3`, for installs it cannot
   find on its own. On Windows that is `t3.cmd`, usually in `%APPDATA%\npm`.
 - `tercet doctor` prints a `t3 command` row before the first token exists.
+- Rendered pages (T3's `html_render`) now show as a screenshot by default. Turn it off with
+  `"media": { "pageShots": false }` in the settings file, or `TERCET_PAGE_SHOTS=0` for one run.
 - README and `docs/settings.md` explain both ways past a missing `t3`: set `server.t3Command`, or
   issue a token yourself with `t3 auth session issue` and set `server.tokenFile`.
 

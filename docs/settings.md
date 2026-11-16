@@ -58,7 +58,7 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
     "editor": "nvim",
     "player": ["mpv"],
   },
-  "media": { "protocol": "auto", "video": "player" },
+  "media": { "protocol": "auto", "video": "player", "pageShots": true },
   // Optional actions. A command that is not here has no button, key or palette entry.
   "commands": {
     "tmux": ["tmux", "send-keys", "-t", "work", "-l", "{text}"],
@@ -97,6 +97,7 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
 | `launchers.terminal`, `.editor`, `.opener`, `.player`, `.picker` | command template                                                | see below                                  | now       |
 | `media.protocol`                                      | `auto`, `kitty`, `sixel`, `blocks`, `none`                      | `auto`                                     | now       |
 | `media.video`                                         | `player`, `terminal`                                            | `player`                                   | now       |
+| `media.pageShots`                                     | boolean                                                         | `true`                                     | now       |
 | `spell.enabled`                                       | boolean                                                         | `true`                                     | now       |
 | `spell.dictionary`                                    | path                                                            | `<settings dir>/dictionary.txt`            | now       |
 | `commands.<name>`                                     | command template                                                | none                                       | now       |
@@ -251,6 +252,12 @@ in `{path}` as before. The opener controls file transfer; this adds no streaming
 `"video": "terminal"` and `mpv` installed, tercet steps aside and mpv plays inside the terminal
 (`--vo=kitty`, `sixel`, or `tct` in tmux and on the blocks rung) until you quit it. Audio works
 the same way without a frame; other files open with the opener.
+
+A page the agent rendered (T3's `html_render`) shows as a screenshot, taken off-screen with
+headless `chromium`, instead of only an `[open]` link. Enter still opens the page itself in the
+browser. Shots are on by default and need an image rung other than `none`. `"pageShots": false`
+under `media` turns them off. The environment wins over the file: `TERCET_PAGE_SHOTS=0` turns
+them off for one run, `TERCET_PAGE_SHOTS=1` turns them on.
 
 ## Command templates
 

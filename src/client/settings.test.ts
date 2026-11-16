@@ -53,6 +53,7 @@ test("a missing settings file gives the defaults", async () => {
     hints: true,
   });
   expect(loaded.settings.media.protocol).toBe("auto");
+  expect(loaded.settings.media.pageShots).toBe(true);
   expect(parse("{}")).toEqual(defaultSettings());
   expect(parse("// nothing yet\n{ }\n")).toEqual(defaultSettings());
 });
@@ -73,7 +74,7 @@ test("JSONC with comments and trailing commas fills every section", () => {
     "hints": false,
   },
   "launchers": { "editor": "nvim", "opener": ["my-opener"], "player": ["mpv", "--no-terminal"] },
-  "media": { "protocol": "none" },
+  "media": { "protocol": "none", "pageShots": false },
   "commands": { "shell": ["tmux", "new-window", "-c", "{cwd}"], "send": "sender" },
   "targets": { "laptop": { "copy": ["ssh", "laptop", "remote-copy", "--type", "{mime}"], "key": "L" } },
 }`);
@@ -96,6 +97,7 @@ test("JSONC with comments and trailing commas fills every section", () => {
   });
   expect(settings.launchers.player).toEqual(["mpv", "--no-terminal"]);
   expect(settings.media.protocol).toBe("none");
+  expect(settings.media.pageShots).toBe(false);
   expect(Object.keys(settings.commands)).toEqual(["shell", "send"]);
   expect(settings.targets.laptop?.key).toBe("L");
   // A "//" inside a string is not a comment.

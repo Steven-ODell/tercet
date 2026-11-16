@@ -172,7 +172,8 @@ try {
       }),
       config.settings.media.video,
     );
-    setPageShots(pageShotsFromEnv(process.env) && media().rung !== "none");
+    setPageShots(
+      pageShotsFromEnv(process.env, config.settings.media.pageShots) && media().rung !== "none");
     const kittyImages = new Set<string>();
     const stdout = process.env.TMUX ? kittyStdout(kittyImages) : process.stdout;
     const renderer = await createCliRenderer({

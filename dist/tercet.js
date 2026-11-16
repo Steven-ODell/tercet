@@ -82825,7 +82825,7 @@ var defaultSettings = () => ({
   icons: "unicode",
   defaults: { sendShortcut: "enter", favorites: [], sidebarWorkingShelf: false, hints: true },
   launchers: {},
-  media: { protocol: "auto", video: "player" },
+  media: { protocol: "auto", video: "player", pageShots: true },
   commands: {},
   targets: {},
   spell: { enabled: true },
@@ -83123,7 +83123,7 @@ var schema = struct({
     ...Object.fromEntries(Object.entries(LAUNCHER_PLACEHOLDERS).map(([name, vars]) => [name, withHost(vars)])),
     editorMode: oneOf(["terminal", "tmux", "direct"])
   }),
-  media: struct({ protocol: oneOf(MEDIA_PROTOCOLS), video: oneOf(VIDEO_MODES) }),
+  media: struct({ protocol: oneOf(MEDIA_PROTOCOLS), video: oneOf(VIDEO_MODES), pageShots: bool }),
   commands: struct(Object.fromEntries(Object.entries(COMMANDS2).map(([name, vars]) => [name, withHost(vars)]))),
   targets,
   spell: struct({ enabled: bool, dictionary: text2 }),
@@ -84416,7 +84416,7 @@ var PAGE_SCHEME = "tercet-page:";
 var on = { value: false };
 var setPageShots = (value) => void (on.value = value);
 var pageShotsOn = () => on.value;
-var pageShotsFromEnv = (env) => env.TERCET_PAGE_SHOTS === "1";
+var pageShotsFromEnv = (env, setting = true) => env.TERCET_PAGE_SHOTS === "0" ? false : env.TERCET_PAGE_SHOTS === "1" ? true : setting;
 var pageSource = (id) => `${PAGE_SCHEME}${encodeURIComponent(id)}`;
 var isPageSource = (source) => source.startsWith(PAGE_SCHEME);
 var pageId = (source) => decodeURIComponent(source.slice(PAGE_SCHEME.length));
@@ -162787,7 +162787,7 @@ ${lines.join(`
       tmux: tmuxCapabilities,
       ascii: iconMode() === "ascii"
     }), config.settings.media.video);
-    setPageShots(pageShotsFromEnv(process.env) && media().rung !== "none");
+    setPageShots(pageShotsFromEnv(process.env, config.settings.media.pageShots) && media().rung !== "none");
     const kittyImages = new Set;
     const stdout = process.env.TMUX ? kittyStdout(kittyImages) : process.stdout;
     const renderer = await createCliRenderer({
