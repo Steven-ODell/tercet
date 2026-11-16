@@ -154918,14 +154918,15 @@ function TextContextMenu({
   root,
   screenWidth,
   screenHeight,
-  onPick
+  onPick,
+  containOrigin = false
 }) {
   const width2 = Math.min(screenWidth, Math.max(...menu.items.map((item) => item.label.length)) + 6);
   const height = Math.min(screenHeight, menu.items.length + 2);
   const origin2 = root.current ?? { x: 0, y: 0 };
   const above = menu.y - height >= 0;
-  const left = Math.max(0, Math.min(menu.x, screenWidth - width2)) - origin2.x;
-  const top = Math.max(0, Math.min(screenHeight - height, above ? menu.y - height : menu.y + 1)) - origin2.y;
+  const left = Math.max(containOrigin ? origin2.x : 0, Math.min(menu.x, screenWidth - width2)) - origin2.x;
+  const top = Math.max(containOrigin ? origin2.y : 0, Math.min(screenHeight - height, above ? menu.y - height : menu.y + 1)) - origin2.y;
   return /* @__PURE__ */ import_jsx_runtime.jsx("scrollbox", {
     scrollY: true,
     position: "absolute",
@@ -159817,6 +159818,14 @@ function TranscriptViewport({
   cwd,
   openFile
 }) {
+  const renderer = useRenderer();
+  const { width: screenWidth, height: screenHeight } = useTerminalDimensions();
+  const root = import_react55.useRef(null);
+  const [menu, setMenu] = import_react55.useState();
+  import_react55.useEffect(() => {
+    if (!enabled)
+      setMenu(undefined);
+  }, [enabled]);
   const [target2, setTarget] = import_react55.useState();
   const [hoveredImage, setHoveredImage] = import_react55.useState();
   const [feedback, setFeedback] = import_react55.useState("");
@@ -160014,10 +160023,46 @@ function TranscriptViewport({
     vim.current.mode = undefined;
     vim.current.anchor = undefined;
   };
+  const selectedText = () => {
+    const selection = renderer.getSelection();
+    if (nativeSelection.current || !selection?.selectedRenderables.length)
+      return "";
+    if (!selection.selectedRenderables.every((r) => r.id.startsWith("transcript-row-")))
+      return "";
+    return selection.getSelectedText();
+  };
+  const visualText = () => {
+    const v = vim.current;
+    const cursor = posOf(v.cursor);
+    const anchor2 = posOf(v.anchor);
+    return v.mode && cursor && anchor2 ? selectionText(rows, anchor2, cursor, v.mode) : "";
+  };
+  const chooseCopy = () => {
+    menu?.items[0]?.run();
+    setMenu(undefined);
+  };
   const targetActions = targetKeys(effects);
   useKeyboard((key5) => {
-    if (!enabled || !keyboardEnabled || key5.meta)
+    if (!enabled || !keyboardEnabled || key5.meta || key5.defaultPrevented)
       return;
+    if (menu) {
+      if (key5.name === "escape")
+        setMenu(undefined);
+      else if (key5.name === "return" || key5.name === "1")
+        chooseCopy();
+      else if (["up", "down", "tab"].includes(key5.name)) {} else
+        setMenu(undefined);
+      key5.preventDefault();
+      return;
+    }
+    if (key5.ctrl && key5.name === "c") {
+      const text5 = selectedText();
+      if (effects && text5) {
+        key5.preventDefault();
+        run3("copy", () => effects.copy(text5));
+      }
+      return;
+    }
     const v = vim.current;
     const half = Math.max(1, Math.floor(viewport / 2));
     if (key5.ctrl) {
@@ -160219,13 +160264,33 @@ function TranscriptViewport({
   const range2 = cursorAt && anchorAt && vim.current.mode ? selectionRange(rows, anchorAt, cursorAt, vim.current.mode) : undefined;
   const modeLabel = vim.current.mode === "line" ? "-- V-LINE -- " : vim.current.mode ? "-- VISUAL -- " : "";
   return /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
+    ref: root,
     width: width2,
     height,
     flexDirection: "column",
     onMouseDown: (event) => {
-      nativeSelection.current = event.modifiers.shift;
+      if (event.button === 2 && !event.modifiers.shift && enabled && effects) {
+        const text5 = selectedText() || visualText();
+        if (text5) {
+          event.preventDefault();
+          event.stopPropagation();
+          setMenu({
+            x: event.x,
+            y: event.y,
+            index: 0,
+            items: [{ label: "Copy", run: () => run3("copy", () => effects.copy(text5)) }]
+          });
+        }
+        return;
+      }
+      if (event.button === 0) {
+        nativeSelection.current = event.modifiers.shift;
+        setMenu(undefined);
+      }
     },
     onMouseScroll: (event) => {
+      if (menu)
+        return;
       if (enabled)
         scroll(event.scroll?.direction === "up" ? -3 : 3);
     },
@@ -160399,6 +160464,27 @@ function TranscriptViewport({
               fg: theme.accent,
               children: modeLabel + (anchor ? "[End Follow tail]" : "Following tail") + (actions.size ? " \xB7 {/} work \xB7 Enter expand" : "")
             })
+          })
+        ]
+      }),
+      menu && /* @__PURE__ */ import_jsx_runtime.jsxs(import_jsx_runtime.Fragment, {
+        children: [
+          /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+            position: "absolute",
+            left: -(root.current?.x ?? 0),
+            top: -(root.current?.y ?? 0),
+            width: screenWidth,
+            height: screenHeight,
+            zIndex: 19,
+            onMouseDown: () => setMenu(undefined)
+          }),
+          /* @__PURE__ */ import_jsx_runtime.jsx(TextContextMenu, {
+            menu,
+            root,
+            containOrigin: true,
+            screenWidth: Math.min(screenWidth, (root.current?.x ?? 0) + width2),
+            screenHeight: Math.min(screenHeight, (root.current?.y ?? 0) + height),
+            onPick: chooseCopy
           })
         ]
       })
@@ -161166,6 +161252,17 @@ function AppFrame({
     const command2 = found === "shell" && !effects?.shell || found === "dictation" && !hasDictation(effects) || found === "attach" && !effects?.pickFiles || found === "spell" && !effects?.spell || found === "dismissNotice" && !notice ? undefined : found;
     if (command2 === "quit" && focus === "composer" && renderer.currentFocusedEditor?.hasSelection()) {
       setQuitArmed(false);
+      return;
+    }
+    const selection = renderer.getSelection();
+    if (command2 === "quit" && !overlay && !(focus === "right" && (right === "terminal" || right === "editor")) && selection?.selectedRenderables.length && selection.selectedRenderables.every((r) => r.id.startsWith("transcript-row-")) && selection.getSelectedText()) {
+      setQuitArmed(false);
+      if (key5.defaultPrevented)
+        return;
+      key5.preventDefault();
+      const text5 = selection.getSelectedText();
+      if (effects)
+        Promise.resolve().then(() => effects.copy(text5)).catch(() => setActionError("Copy failed; retry"));
       return;
     }
     if (key5.defaultPrevented)

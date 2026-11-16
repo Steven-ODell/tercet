@@ -260,7 +260,9 @@ export function TextContextMenu({
   screenWidth,
   screenHeight,
   onPick,
+  containOrigin = false,
 }: {
+  containOrigin?: boolean;
   menu: TextMenu;
   root: RefObject<{ x: number; y: number } | null>;
   screenWidth: number;
@@ -272,9 +274,13 @@ export function TextContextMenu({
   const origin = root.current ?? { x: 0, y: 0 };
   // Above the word when there is room, so the word stays visible; else just below it.
   const above = menu.y - height >= 0;
-  const left = Math.max(0, Math.min(menu.x, screenWidth - width)) - origin.x;
+  const left =
+    Math.max(containOrigin ? origin.x : 0, Math.min(menu.x, screenWidth - width)) - origin.x;
   const top =
-    Math.max(0, Math.min(screenHeight - height, above ? menu.y - height : menu.y + 1)) - origin.y;
+    Math.max(
+      containOrigin ? origin.y : 0,
+      Math.min(screenHeight - height, above ? menu.y - height : menu.y + 1),
+    ) - origin.y;
   return (
     <scrollbox
       scrollY

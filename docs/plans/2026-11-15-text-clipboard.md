@@ -122,7 +122,7 @@ Do not install, push, tag, release, rename, or change Sao's desktop configuratio
   Physical PC/SSH laptop delivery remains unverified; no transcript changes yet.
   Done when integrated behavior is covered with headless UI tests and committed.
 
-- [ ] 3. Add transcript selection menu, verify integration, leave user-testable build.
+- [x] 3. Add transcript selection menu, verify integration, leave user-testable build.
   Files: src/client/transcript-viewport.tsx selection and Row mouse handling,
   src/client/transcript.test.tsx, src/client/vim.test.tsx,
   shared context-menu code from step 2, src/client/frame.tsx,
@@ -134,6 +134,15 @@ Do not install, push, tag, release, rename, or change Sao's desktop configuratio
   clipboard route everywhere. Document shortcuts and SSH/tmux paste limitations.
   Verify: `bun test src/client/transcript.test.tsx src/client/vim.test.tsx src/client/frame.test.tsx src/client/terminal.test.tsx`; exit 0.
   Baseline: `bun run build` then `bun run check`; both exit 0. Save logs.
+  Result (2026-11-15): shared right-click Copy preserves exact mouse/Vim selection;
+  menu stays inside the transcript pane and holds wheel scrolling while open.
+  Full-frame Ctrl+C copies once, never arms quit with selection; terminal interrupt retained.
+  Scoped headless tests 59 pass/1 skip; build exit 0; full check exit 0
+  (523 pass/20 skip, typecheck/test/bundle/sandbox acceptance all 0).
+  Logs: /tmp/tercet-step3-tests-final.vILLdP.log,
+  /tmp/tercet-step3-build-final.Ya79KK.log, /tmp/tercet-step3-check-final.2M3HJM.log.
+  Bundle rebuilt with Bun 1.4.0. Physical PC/SSH laptop checks remain manual;
+  clipboard routing/OSC52 tests are simulated, with no terminal acknowledgement.
   Done when bundle is built and committed, checks pass, manual trial commands and
   checklist are supplied to Sao (composer copy/cut/paste/select all, transcript
   drag/right-click, no-selection quit, PC vs SSH laptop clipboard). State which
