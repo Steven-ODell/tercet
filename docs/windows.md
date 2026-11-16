@@ -56,7 +56,7 @@ avoid escaping each backslash.
 3. Run Git workflow tests present in the checkout, including Windows/UNC workspace fixtures.
 4. Check the committed bundle and install a local staged package through `install.ps1`,
    then invoke the globally installed `tercet` executable.
-5. Download pinned stock T3 0.1.8, start it against a disposable repository/data directory,
+5. Download pinned stock T3 0.1.9, start it against a disposable repository/data directory,
    issue a test token and reach a live authenticated snapshot. No provider turns, PR posts
    or real repository changes are involved.
 

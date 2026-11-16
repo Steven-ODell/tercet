@@ -108885,11 +108885,12 @@ var PlanId = makeEntityId("PlanId");
 var ASSISTANT_CITATION_MAX_TEXT_LENGTH = 8000;
 var ASSISTANT_CITATION_MAX_COMMENT_LENGTH = 8000;
 var ASSISTANT_CITATION_CONTEXT_LENGTH = 32;
+var ASSISTANT_CITATION_MAX_ID_LENGTH = 4096;
 var AssistantCitation = Struct({
   version: Literal2(1),
-  environmentId: EnvironmentId.check(isMaxLength(512)),
-  threadId: ThreadId.check(isMaxLength(512)),
-  messageId: MessageId.check(isMaxLength(512)),
+  environmentId: EnvironmentId.check(isMaxLength(ASSISTANT_CITATION_MAX_ID_LENGTH)),
+  threadId: ThreadId.check(isMaxLength(ASSISTANT_CITATION_MAX_ID_LENGTH)),
+  messageId: MessageId.check(isMaxLength(ASSISTANT_CITATION_MAX_ID_LENGTH)),
   text: String6.check(isNonEmpty(), isMaxLength(ASSISTANT_CITATION_MAX_TEXT_LENGTH)),
   comment: optional2(String6.check(isMaxLength(ASSISTANT_CITATION_MAX_COMMENT_LENGTH))),
   start: NonNegativeInt.check(isLessThanOrEqualTo5(Number.MAX_SAFE_INTEGER)),
@@ -114878,6 +114879,7 @@ var ExecutionEnvironmentCapabilities = Struct({
   mcpModeLimitHeader: optionalKey2(Boolean3),
   linkFence: optionalKey2(Boolean3),
   mcpApprovalCodes: optionalKey2(Boolean3),
+  mcpHostedApproval: optionalKey2(Boolean3),
   triage: optionalKey2(Boolean3),
   oneTimeSchedules: optionalKey2(Boolean3),
   freshContext: optionalKey2(Boolean3),
@@ -116648,12 +116650,16 @@ var EnvironmentSpeechModel = Struct({
   supportsTranslation: Boolean3,
   active: Boolean3,
   state: EnvironmentSpeechModelState,
-  downloaded: optionalKey2(Finite)
+  downloaded: optionalKey2(Finite),
+  linkedFrom: optionalKey2(String6)
 });
 var EnvironmentSpeechModels = Struct({
   models: ArraySchema(EnvironmentSpeechModel)
 });
 var EnvironmentSpeechModelRequest = Struct({ modelId: SpeechModelId });
+var EnvironmentSpeechModelLinkRequest = Struct({
+  path: TrimmedNonEmptyString.check(isMaxLength(4096))
+});
 var EnvironmentSpeechState = Literals(["missing-model", "ready", "transcribing"]);
 var SupportedSpeechStatus = Struct({
   supported: Literal2(true),
@@ -116663,6 +116669,7 @@ var SupportedSpeechStatus = Struct({
   size: Finite,
   supportsStreaming: Boolean3,
   supportsBufferedStreaming: optionalKey2(Boolean3),
+  supportsModelLinking: optionalKey2(Boolean3),
   supportsTranslation: Boolean3,
   languages: optionalKey2(ArraySchema(String6)),
   supportsLanguageDetection: optionalKey2(Boolean3),
@@ -116995,7 +117002,8 @@ var PullRequestActor = Struct({
 });
 var PullRequestLabel = Struct({
   name: TrimmedNonEmptyString,
-  color: NullOr(String6)
+  color: NullOr(String6),
+  description: optional2(NullOr(String6))
 });
 var PullRequestCheckStatus = Literals([
   "pending",
@@ -117011,7 +117019,8 @@ var PullRequestCheck = Struct({
   status: PullRequestCheckStatus,
   description: NullOr(String6),
   url: NullOr(String6),
-  required: optional2(Boolean3)
+  required: optional2(Boolean3),
+  placeholder: optional2(Boolean3)
 });
 var PullRequestReactionContent = Literals([
   "thumbs-up",
@@ -117056,6 +117065,7 @@ var PullRequestThreadComment = Struct({
   createdAt: IsoDateTime,
   editedAt: optional2(NullOr(IsoDateTime)),
   url: NullOr(String6),
+  reviewUrl: optional2(NullOr(String6)),
   reactions: optional2(ArraySchema(PullRequestReaction)),
   canEdit: optional2(Boolean3)
 });
@@ -117668,6 +117678,8 @@ var ThreadPullRequestWatch = Struct({
   passed: Boolean3,
   passedChecks: ArraySchema(TrimmedNonEmptyString).pipe(withDecodingDefault(succeed7([]))),
   owedChecks: optional2(ArraySchema(TrimmedNonEmptyString)),
+  awaitingApproval: optional2(ArraySchema(TrimmedNonEmptyString)),
+  approvalAnnounced: optional2(Boolean3),
   remarksThrough: IsoDateTime,
   remarkIds: ArraySchema(TrimmedNonEmptyString),
   conflicting: Boolean3,
@@ -118329,6 +118341,7 @@ var OrchestrationV2ThreadCapabilities = Struct({
   exposesNativeThreadId: Boolean3
 });
 var OrchestrationV2TurnCapabilities = Struct({
+  supportsNativeGoals: optional2(Boolean3),
   exposesNativeTurnId: Boolean3,
   emitsTurnStarted: Boolean3,
   emitsTurnCompleted: Boolean3,
@@ -118791,6 +118804,9 @@ function kindUnionWithFallback(members, unknown2, fallback) {
   return Union2([...members, unknownKind]);
 }
 var PendingBackgroundTaskFields = {
+  command: optional2(String6),
+  itemId: optional2(TurnItemId),
+  sourceThreadId: optional2(ThreadId),
   taskId: TrimmedNonEmptyString,
   description: optional2(TrimmedNonEmptyString),
   parentTaskId: optional2(TrimmedNonEmptyString),
@@ -119679,6 +119695,7 @@ var OrchestrationV2ThreadShell = Struct({
   latestRunStartedAt: optional2(NullOr(DateTimeUtc)),
   latestRunCompletedAt: optional2(NullOr(DateTimeUtc)),
   latestRunStopRequested: optional2(Boolean3),
+  latestRunBackgroundWake: optional2(Boolean3),
   activeRunId: NullOr(RunId),
   activityRunStartedAt: optional2(NullOr(DateTimeUtc)),
   activityRunStatus: optional2(NullOr(Literals(["preparing", "starting", "running", "waiting"]))),
@@ -122758,10 +122775,12 @@ class EnvironmentMcpOAuthHttpApi extends make38("mcpOAuth").add(get10("protected
   success: AuthMcpRegisteredClient,
   error: AuthMcpRegistrationError
 })).add(get10("authorize", "/oauth/mcp/authorize")).add(post2("approval", "/oauth/mcp/approval", {
+  headers: OptionalBearerHeaders,
   payload: AuthMcpAuthorizationRequest,
   success: [AuthMcpApprovalDetails, AuthMcpApprovalRedirect],
   error: AuthMcpApprovalError
 })).add(post2("decision", "/oauth/mcp/decision", {
+  headers: OptionalBearerHeaders,
   payload: AuthMcpApprovalDecisionRequest,
   success: AuthMcpApprovalRedirect,
   error: AuthMcpApprovalError
@@ -122915,6 +122934,11 @@ class EnvironmentVoiceHttpApi extends make38("voice").add(get10("cloudKeys", "/a
 }).middleware(EnvironmentAuthenticatedAuth)).add(post2("removeModel", "/api/voice/models/remove", {
   headers: OptionalBearerHeaders,
   payload: EnvironmentSpeechModelRequest,
+  success: EnvironmentSpeechModels,
+  error: [...EnvironmentScopedOperationErrors, EnvironmentRequestInvalidError]
+}).middleware(EnvironmentAuthenticatedAuth)).add(post2("linkModels", "/api/voice/models/link", {
+  headers: OptionalBearerHeaders,
+  payload: EnvironmentSpeechModelLinkRequest,
   success: EnvironmentSpeechModels,
   error: [...EnvironmentScopedOperationErrors, EnvironmentRequestInvalidError]
 }).middleware(EnvironmentAuthenticatedAuth)).add(post2("updateAcceleration", "/api/voice/acceleration", {
@@ -123844,6 +123868,7 @@ var THREAD_KEYBINDING_COMMANDS = [
   "thread.copyReference",
   "thread.settle",
   "thread.pin",
+  "thread.regenerateTitle",
   "thread.undo",
   ...THREAD_JUMP_KEYBINDING_COMMANDS
 ];
@@ -124435,6 +124460,7 @@ var DiffColorScheme = Literals(["red-green", "blue-orange"]);
 var ChatWidth = Literals(["comfortable", "wide", "full"]);
 var EffortDisplay = Literals(["label", "bars"]);
 var ToolCallVisibility = Literals(["showAll", "hideSuccessful", "hideAll", "zen"]);
+var ScreenReaderAnnouncements = Literals(["status", "messages", "everything"]);
 var ModelFavorite = Struct({
   provider: ProviderInstanceId,
   model: TrimmedNonEmptyString
@@ -124513,6 +124539,7 @@ var ClientSettingsSchema = Struct({
   boringSidebarEnabled: Boolean3.pipe(withDecodingDefault(succeed7(false))),
   boringSidebarMultilineRows: Boolean3.pipe(withDecodingDefault(succeed7(false))),
   toolCallVisibility: ToolCallVisibility.pipe(withDecodingDefault(succeed7("showAll"))),
+  screenReaderAnnouncements: ScreenReaderAnnouncements.pipe(withDecodingDefault(succeed7("status"))),
   threadDetailsUsageEnabled: Boolean3.pipe(withDecodingDefault(succeed7(false))),
   threadDetailsItems: Record(String6, Boolean3).pipe(withDecodingDefault(succeed7({}))),
   sidebarWorkingShelfEnabled: Boolean3.pipe(withDecodingDefault(succeed7(true))),
@@ -125244,6 +125271,7 @@ var ClientSettingsPatch = Struct({
   boringSidebarEnabled: optionalKey2(Boolean3),
   boringSidebarMultilineRows: optionalKey2(Boolean3),
   toolCallVisibility: optionalKey2(ToolCallVisibility),
+  screenReaderAnnouncements: optionalKey2(ScreenReaderAnnouncements),
   threadDetailsUsageEnabled: optionalKey2(Boolean3),
   threadDetailsItems: optionalKey2(Record(String6, Boolean3)),
   sidebarWorkingShelfEnabled: optionalKey2(Boolean3),
@@ -125276,6 +125304,7 @@ var ClientSettingsPatch = Struct({
 var ContextMenuItemSchema = Struct({
   id: String6,
   label: String6,
+  detail: optionalKey2(String6),
   destructive: optionalKey2(Boolean3),
   disabled: optionalKey2(Boolean3),
   header: optionalKey2(Boolean3),
@@ -126322,10 +126351,18 @@ var ServerProviderUsageWindow = Struct({
   resetsAt: optional2(IsoDateTime),
   windowDurationMins: optional2(NonNegativeInt)
 });
+var ServerProviderResetCreditOption = Struct({
+  creditId: TrimmedNonEmptyString,
+  label: TrimmedNonEmptyString,
+  description: TrimmedNonEmptyString,
+  availableCount: NonNegativeInt,
+  expiresAt: optional2(IsoDateTime)
+});
 var ServerProviderResetCredits = Struct({
   availableCount: NonNegativeInt,
   nextExpiresAt: optional2(IsoDateTime),
-  nextCreditId: optional2(TrimmedNonEmptyString)
+  nextCreditId: optional2(TrimmedNonEmptyString),
+  options: optional2(ForwardCompatibleArray(ServerProviderResetCreditOption))
 });
 var ServerProviderUsageLimits = Struct({
   checkedAt: IsoDateTime,
@@ -126367,7 +126404,10 @@ var UsageLimitSourceConsumeResetCreditInput = Struct({
   creditId: TrimmedNonEmptyString
 });
 var ProviderConsumeResetCreditInput = Union2([
-  Struct({ instanceId: ProviderInstanceId }),
+  Struct({
+    instanceId: ProviderInstanceId,
+    creditId: optional2(TrimmedNonEmptyString)
+  }),
   UsageLimitSourceConsumeResetCreditInput
 ]);
 
@@ -129126,6 +129166,12 @@ class AgentSessionScanError extends TaggedError3()("AgentSessionScanError", {
 // vendor/t3/packages/contracts/src/assets.ts
 var ASSET_PATH_MAX_LENGTH = 1024;
 var SOURCE_CONTROL_MEDIA_ASSET = "github-media";
+var NativeAppIconReference = Union2([
+  ToolActivityNativeAppReference,
+  TaggedStruct("app-path", {
+    path: TrimmedNonEmptyString.check(isMaxLength(ASSET_PATH_MAX_LENGTH))
+  })
+]);
 var AssetResource = Union2([
   TaggedStruct("workspace-file", {
     threadId: ThreadId,
@@ -129157,7 +129203,7 @@ var AssetResource = Union2([
     path: optional2(ProjectFaviconPath)
   }),
   TaggedStruct("native-app-icon", {
-    app: ToolActivityNativeAppReference
+    app: NativeAppIconReference
   }),
   TaggedStruct(SOURCE_CONTROL_MEDIA_ASSET, {
     cwd: TrimmedNonEmptyString.check(isMaxLength(ASSET_PATH_MAX_LENGTH)),
@@ -144590,8 +144636,8 @@ function platform(config) {
 }
 
 // src/client/compat.ts
-var PINNED_SERVER_VERSION = "0.1.8";
-var supportedRange = ">=0.1.8 <0.2.0";
+var PINNED_SERVER_VERSION = "0.1.9";
+var supportedRange = ">=0.1.9 <0.2.0";
 function checkDescriptor(descriptor2) {
   const record3 = descriptor2 ?? {};
   const version = typeof record3.serverVersion === "string" && record3.serverVersion.trim() ? record3.serverVersion.trim() : null;
@@ -145588,6 +145634,16 @@ function parseChangeRequestPath(url, route) {
     repositoryUrl: `${url.origin}/${repository}`
   } : null;
 }
+function repositoryUrlFromPagePath(url, route) {
+  const repository = route.exec(url.pathname)?.[1];
+  if (!repository)
+    return null;
+  const repositoryUrl = new URL(url);
+  repositoryUrl.pathname = `/${repository}`;
+  repositoryUrl.search = "";
+  repositoryUrl.hash = "";
+  return repositoryUrl.href;
+}
 function changeRequestUrlBelow(webUrl, route) {
   return `${webUrl.replace(/\/+$/u, "")}/${route}`;
 }
@@ -145732,6 +145788,7 @@ function makeSourceControlDefinitionRegistry(definitions, options2) {
     }
     return;
   };
+  const remoteOwner = (remote2) => recognitionOrder.find((definition) => definition.recognizeRemote(remote2) !== null);
   const parseChangeRequestUrl = (value4) => {
     const url = httpUrl(value4);
     if (url === null)
@@ -145785,6 +145842,19 @@ function makeSourceControlDefinitionRegistry(definitions, options2) {
           return candidate;
       }
       return null;
+    },
+    repositoryUrlFromPage: (value4) => {
+      const url = httpUrl(value4);
+      if (url === null)
+        return null;
+      const remote2 = parseGitRemoteHost(value4);
+      const owner = remote2 === null ? undefined : remoteOwner(remote2);
+      if (owner)
+        return owner.repositoryUrlFromPage?.(url, true) ?? null;
+      if (url.pathname.replace(/\/$/u, "").endsWith(".git"))
+        return null;
+      const [repositoryUrl, ...others] = new Set(claimOrder.flatMap((definition) => definition.repositoryUrlFromPage?.(url, false) ?? []));
+      return repositoryUrl !== undefined && repositoryUrl !== url.href && others.length === 0 ? repositoryUrl : null;
     },
     recognizeRemote: (remoteUrl) => {
       const remote2 = parseGitRemoteHost(remoteUrl);
@@ -146128,6 +146198,7 @@ var safeShellArgument = /^[A-Za-z0-9._/@+=,-]+$/;
 var repositoryName = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
 var CHANGE_REQUEST_PATH2 = /^\/([^/]+\/[^/]+)\/pull-requests\/(\d+)(?:\/|$)/u;
 var COMMIT_PATH2 = /^\/([^/]+\/[^/]+)\/commits\/([0-9a-f]+)\/?$/iu;
+var REPOSITORY_PAGE_PATH = /^\/([^/]+\/[^/]+)\/src\/[^/]/u;
 var KIND2 = SourceControlProviderKind.make("bitbucket");
 function isBitbucketHost(hostname) {
   const host = hostname.toLowerCase();
@@ -146171,6 +146242,7 @@ var definition2 = defineSourceControl({
   parseChangeRequestUrl: (url) => isBitbucketHost(url.hostname) ? parseChangeRequestPath(url, CHANGE_REQUEST_PATH2) : null,
   commitUrl: (input) => buildCommitUrl(input, "commits"),
   parseCommitUrl: (url) => isBitbucketHost(url.hostname) ? parseCommitPath(url, COMMIT_PATH2) : null,
+  repositoryUrlFromPage: (url) => isBitbucketHost(url.hostname) ? repositoryUrlFromPagePath(url, REPOSITORY_PAGE_PATH) : null,
   changeRequestUrlFromReferenceAutolink: () => null,
   changeRequestActions: new Set(["merge", "close"]),
   checkoutCommand: ({ number: number3, headBranch, headRepositoryNameWithOwner }) => headRepositoryNameWithOwner && repositoryName.test(headRepositoryNameWithOwner) && safeShellArgument.test(headBranch) ? `git clone --single-branch --branch ${headBranch} https://bitbucket.org/${headRepositoryNameWithOwner}.git t3code-pr-${number3}` : null,
@@ -146282,6 +146354,7 @@ var CHECKOUT_COMMAND3 = /^tea\s+(?:pr|pulls)\s+checkout\s+(.+)$/i;
 var CHANGE_REQUEST_REFERENCE2 = /^https?:\/\/[^/\s]+\/(?:[^/\s]+\/)+[^/\s]+\/pulls\/(\d+)(?:[/?#].*)?$/i;
 var CHANGE_REQUEST_PATH4 = /^\/([^/]+(?:\/[^/]+)+)\/pulls\/(\d+)(?:\/|$)/u;
 var COMMIT_PATH3 = /^\/([^/]+(?:\/[^/]+)+)\/commit\/([0-9a-f]+)\/?$/iu;
+var REPOSITORY_PAGE_PATH2 = /^\/([^/]+(?:\/[^/]+)+?)\/src\/(?:branch|tag|commit)\/[^/]/u;
 var KIND4 = SourceControlProviderKind.make("forgejo");
 var changeRequestHeadRef = (number3) => `refs/pull/${number3}/head`;
 function resolvedWebUrl(identity3) {
@@ -146329,6 +146402,12 @@ var definition4 = defineSourceControl({
   changeRequestUrlFromReferenceAutolink: () => null,
   commitUrl: (input) => buildCommitUrl(input, "commit"),
   parseCommitUrl: (url) => parseCommitPath(url, COMMIT_PATH3),
+  repositoryUrlFromPage: (url, known) => {
+    if (url.pathname.replace(/\/$/u, "").endsWith(".git"))
+      return null;
+    const repositoryUrl = repositoryUrlFromPagePath(url, REPOSITORY_PAGE_PATH2);
+    return repositoryUrl === null || known ? repositoryUrl : url.href;
+  },
   changeRequestActions: new Set(["merge", "close", "reopen", "update-branch"]),
   checkoutCommand: ({ number: number3, repositoryUrl }) => repositoryUrl ? `git fetch '${repositoryUrl.replaceAll("'", "'\\''")}' ${changeRequestHeadRef(number3)} && git checkout -B pulls/${number3} FETCH_HEAD` : null,
   changeRequestCloseCommand: /\b(?:tea\s+(?:pr|pulls?)|fj\s+pr)\s+(?:merge|m|close)\b/u,
@@ -146372,6 +146451,7 @@ var icon6 = {
 var GITCAFE_HOSTS = new Set(["git.cafe", "staging.git.cafe"]);
 var CHANGE_REQUEST_PATH5 = /^\/([^/]+\/[^/]+)\/pulls?\/(\d+)(?:\/|$)/u;
 var COMMIT_PATH4 = /^\/([^/]+\/[^/]+)\/commit\/([0-9a-f]+)\/?$/iu;
+var REPOSITORY_PAGE_PATH3 = /^\/([^/]+\/[^/]+)\/(?:tree|blob)\/[^/]/u;
 function parseChangeRequestUrl2(url) {
   return GITCAFE_HOSTS.has(url.hostname.toLowerCase()) ? parseChangeRequestPath(url, CHANGE_REQUEST_PATH5) : null;
 }
@@ -146404,6 +146484,7 @@ var definition5 = defineSourceControl({
   parseChangeRequestUrl: parseChangeRequestUrl2,
   commitUrl: (input) => buildCommitUrl(input, "commit"),
   parseCommitUrl: (url) => GITCAFE_HOSTS.has(url.hostname.toLowerCase()) ? parseCommitPath(url, COMMIT_PATH4) : null,
+  repositoryUrlFromPage: (url) => GITCAFE_HOSTS.has(url.hostname.toLowerCase()) ? repositoryUrlFromPagePath(url, REPOSITORY_PAGE_PATH3) : null,
   changeRequestUrlFromReferenceAutolink: () => null,
   changeRequestActions: new Set([
     "ready",
@@ -146554,6 +146635,7 @@ var CHANGE_REQUEST_REFERENCE3 = /^https?:\/\/[^/?#\s]+\/[^/\s]+\/[^/\s]+\/pull\/
 var CHANGE_REQUEST_PATH6 = /^\/([^/]+\/[^/]+)\/pull\/(\d+)(?:\/|$)/u;
 var COMMIT_PATH5 = /^\/([^/]+\/[^/]+)\/(?:commit|pull\/\d+\/commits)\/([0-9a-f]+)\/?$/iu;
 var ISSUE_PATH = /^\/([^/]+\/[^/]+)\/issues\/(\d+)(?:\/|$)/u;
+var REPOSITORY_PAGE_PATH4 = /^\/([^/]+\/[^/]+)\/(?:tree|blob)\/[^/]/u;
 var KIND6 = SourceControlProviderKind.make("github");
 function isGitHubHost(hostname) {
   const host = hostname.toLowerCase();
@@ -146613,6 +146695,7 @@ var definition6 = defineSourceControl({
   commitUrl: (input) => isRepositoryPath(input.repository) ? buildCommitUrl(input, "commit") : null,
   parseCommitUrl: (url, known) => known || isGitHubHost(url.hostname) ? parseCommitPath(url, COMMIT_PATH5) : null,
   parseChangeRequestUrl: (url) => parseChangeRequestPath(url, CHANGE_REQUEST_PATH6),
+  repositoryUrlFromPage: (url) => isGitHubHost(url.hostname) ? repositoryUrlFromPagePath(url, REPOSITORY_PAGE_PATH4) : null,
   changeRequestUrlFromReferenceAutolink: (url) => {
     const match10 = isGitHubHost(url.hostname) ? ISSUE_PATH.exec(url.pathname) : null;
     if (match10?.[1] === undefined || match10[2] === undefined)
@@ -146760,6 +146843,7 @@ var CHECKOUT_COMMAND5 = /^glab\s+mr\s+checkout\s+(.+)$/i;
 var CHANGE_REQUEST_REFERENCE4 = /^https?:\/\/[^/?#\s]+\/[^/?#\s]+(?:\/[^/?#\s]+)+\/-\/merge_requests\/(\d+)(?:[/?#].*)?$/i;
 var CHANGE_REQUEST_PATH7 = /^\/([^/]+(?:\/[^/]+)+)\/-\/merge_requests\/(\d+)(?:\/|$)/u;
 var COMMIT_PATH6 = /^\/([^/]+(?:\/[^/]+)+)\/-\/commit\/([0-9a-f]+)\/?$/iu;
+var REPOSITORY_PAGE_PATH5 = /^\/([^/]+(?:\/[^/]+)+?)\/-\//u;
 var KIND7 = SourceControlProviderKind.make("gitlab");
 var definition7 = defineSourceControl({
   kind: KIND7,
@@ -146782,6 +146866,7 @@ var definition7 = defineSourceControl({
   parseChangeRequestUrl: (url) => parseChangeRequestPath(url, CHANGE_REQUEST_PATH7),
   commitUrl: (input) => buildCommitUrl(input, "-/commit"),
   parseCommitUrl: (url) => parseCommitPath(url, COMMIT_PATH6),
+  repositoryUrlFromPage: (url) => repositoryUrlFromPagePath(url, REPOSITORY_PAGE_PATH5),
   changeRequestUrlFromReferenceAutolink: (url) => CHANGE_REQUEST_PATH7.test(url.pathname) ? url.toString() : null,
   changeRequestActions: new Set([
     "merge",
@@ -146792,6 +146877,7 @@ var definition7 = defineSourceControl({
     "update-branch",
     "enable-auto-merge",
     "disable-auto-merge",
+    "revert",
     "delete-branch"
   ]),
   checkoutCommand: ({ number: number3 }) => `glab mr checkout ${number3}`,
@@ -155672,7 +155758,7 @@ var ADD_PROJECT_REMOTE_PROVIDER_SOURCES = sourceControlClients.definitions.map((
 // vendor/t3/packages/shared/src/assistantCitations.ts
 var CITATION_PROTOCOL = "t3-citation:";
 var CITATION_HREF_PREFIX = `${CITATION_PROTOCOL}//v1/`;
-var MAX_CITATION_HREF_LENGTH = 9 * (ASSISTANT_CITATION_MAX_TEXT_LENGTH + ASSISTANT_CITATION_MAX_COMMENT_LENGTH) + 16000;
+var MAX_CITATION_HREF_LENGTH = 9 * (ASSISTANT_CITATION_MAX_TEXT_LENGTH + ASSISTANT_CITATION_MAX_COMMENT_LENGTH + 3 * ASSISTANT_CITATION_MAX_ID_LENGTH + 2 * ASSISTANT_CITATION_CONTEXT_LENGTH) + 1000;
 var CITATION_LINK = new RegExp(String.raw`\[Assistant quote\]\((${CITATION_HREF_PREFIX}[^\s)]{1,${MAX_CITATION_HREF_LENGTH - CITATION_HREF_PREFIX.length}})\)`, "g");
 var decodeCitation = decodeUnknownOption2(AssistantCitation);
 function parseAssistantCitationHref(href) {

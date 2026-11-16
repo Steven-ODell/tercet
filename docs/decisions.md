@@ -13,7 +13,7 @@ for this repo stay out of it (see P10 below).
 ## Repo shape: vendor the import closure (P0, applied in P1)
 
 `vendor/t3/packages/<name>/` holds only the files tercet reaches from `src/` and `scripts/`
-(267 files, 2.5 MB at v0.1.8, 24 packages). Each package keeps its `@t3tools/*` name and export
+(263 files, 2.5 MB at v0.1.9, 24 packages). Each package keeps its `@t3tools/*` name and export
 map, so imports read the same as in the T3 monorepo. Whole packages would be 795 files and
 9.1 MB and drag in `three`, `jszip`, the remark stack and native `ffi-rs`; a submodule adds
 clone friction for no gain under 400 files. Details: `docs/compat-report.md`.
@@ -34,10 +34,11 @@ clone friction for no gain under 400 files. Details: `docs/compat-report.md`.
 
 ## Pins
 
-- Upstream T3 Code `v0.1.8` (`bf469bb1966`), the latest non-prerelease tag on 2026-11-10.
+- Upstream T3 Code `v0.1.9` (`24e77473ecf`), the latest non-prerelease tag on 2026-11-15 (moved
+  from `v0.1.8`, `bf469bb1966`, the pin from 2026-11-10).
 - `typescript` 7.0.2: upstream's catalog has none (it moved to `@effect/tsgo`); this is what the
   fork resolved.
-- `effect` 4.1.2 and `@noble/hashes` 1.8.0: upstream's catalog versions at v0.1.8.
+- `effect` 4.1.2 and `@noble/hashes` 1.8.0: upstream's catalog versions at v0.1.8 and v0.1.9.
   `@noble/hashes` is new as a direct dependency only because vendored `shared` imports it.
 
 ## Fork-only surface (P1)
@@ -65,8 +66,9 @@ sandboxes use port 3775 and up.
 
 ## Acceptance rig on the vanilla server (P2, 2026-11-10)
 
-- Server: npm `t3@0.1.8`. That package is only a launcher; it downloads the release binary and
-  checks it against the release's `SHA256SUMS`. `scripts/sandbox.sh` installs it once into
+- Server: npm `t3@0.1.9` (`T3_VERSION` in `scripts/sandbox.sh`; 0.1.8 until 2026-11-15). That
+  package is only a launcher; it downloads the release binary and checks it against the
+  release's `SHA256SUMS`. `scripts/sandbox.sh` installs it once into
   `~/.cache/tercet/server` (`T3CODE_HOME` pointed there, never `~/.t3`) and runs the binary
   directly. Not a project dependency: nothing in `package.json` loads it.
 - Each acceptance run gets a fresh `mktemp -d /tmp/tercet-sandbox.XXXXXX` that is HOME for both
@@ -106,7 +108,7 @@ sandboxes use port 3775 and up.
 - `tercet doctor` takes injected probes (env, PATH lookup, commands, file reads, the descriptor
   fetch), so its tests run on a made-up machine. It reports what the current code can do; the
   action list moves to settings with P4. "Supported" means the protocol matches and the server is
-  the pinned `0.1.8`; a matching protocol on another version is "untested".
+  the pinned `0.1.9`; a matching protocol on another version is "untested".
 
 ## Portable actions and command templates (P4, 2026-11-10)
 
@@ -221,7 +223,7 @@ sandboxes use port 3775 and up.
 
 ## Robustness (P7, 2026-11-11)
 
-- Server version: `supportedRange` (`src/client/compat.ts`) is `>=0.1.8 <0.2.0`, checked with
+- Server version: `supportedRange` (`src/client/compat.ts`) is `>=0.1.9 <0.2.0`, checked with
   `Bun.semver` (built in, no dependency). Patch releases of the pinned minor are admitted as
   "untested"; a new minor, another orchestration protocol or a version that does not parse is
   "unsupported". Startup and `tercet doctor` share `checkDescriptor`, so they cannot disagree.
@@ -359,7 +361,7 @@ sandboxes use port 3775 and up.
 - Only `unreachable` and `protocol` stop startup, plus `no-version`, because client-runtime's
   descriptor decode requires `serverVersion` and would sit on the retry screen anyway.
   `--ignore-version` passes `protocol` and `no-version`, never `unreachable`.
-- `out-of-range` opens the app with a one-line banner above the header, "Built for T3 0.1.8,
+- `out-of-range` opens the app with a one-line banner above the header, "Built for T3 0.1.9,
   you're on Y: some things may not work." `ServerGate` passes it to the frame through the
   `ServerNotice` context; `Alt+x` (`dismissNotice` in `COMMANDS`, `needs: "notice"`) or a click
   hides it for the session. The key exists, and `?` lists it, only while the banner shows. An

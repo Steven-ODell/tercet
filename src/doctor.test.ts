@@ -45,7 +45,7 @@ function machine(overrides: Partial<DoctorProbes> & { files?: Record<string, str
     },
     environment: async (origin) => {
       fetched.push(origin);
-      return { serverVersion: "0.1.8", orchestrationProtocolVersion: 2, label: "box" };
+      return { serverVersion: "0.1.9", orchestrationProtocolVersion: 2, label: "box" };
     },
     terminal: async () => null,
     ...overrides,
@@ -96,7 +96,7 @@ test("doctor reports a tmux machine with passthrough off and a supported server"
   expect(report.server).toMatchObject({
     url: "http://127.0.0.1:3775",
     reachable: true,
-    serverVersion: "0.1.8",
+    serverVersion: "0.1.9",
     protocolVersion: 2,
     supported: "yes",
     token: "issued on first start",
@@ -124,7 +124,7 @@ test("doctor reports a tmux machine with passthrough off and a supported server"
   const text = formatReport(report);
   expect(text).toContain("settings");
   expect(text).toMatch(/!! tmux +tmux 3\.5a, inside, allow-passthrough off; images need it/);
-  expect(text).toMatch(/ok server version +0\.1\.8, protocol 2: yes/);
+  expect(text).toMatch(/ok server version +0\.1\.9, protocol 2: yes/);
   expect(text).toMatch(/!! mpv +not found/);
   expect(text.split("\n").every((line) => /^(ok|!!|- ) /.test(line))).toBe(true);
 });
@@ -141,7 +141,7 @@ test("outside tmux on a kitty terminal with settings, a flagged URL and an untes
       "/opt/typer": "",
       "/tok": "secret",
     },
-    environment: async () => ({ serverVersion: "0.1.9", orchestrationProtocolVersion: 2 }),
+    environment: async () => ({ serverVersion: "0.1.10", orchestrationProtocolVersion: 2 }),
   });
   const report = await doctorReport(
     ["--json", "--url", "https://box:3773", "--token-file", "/tok"],

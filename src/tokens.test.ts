@@ -11,7 +11,7 @@ const tmux = Bun.which("tmux");
 const socket = `tercet-p7-tok-${process.pid}`;
 let dir = "";
 let seen: string[] = [];
-let version: string | undefined = "0.1.8";
+let version: string | undefined = "0.1.9";
 let protocol = 2;
 let server: ReturnType<typeof Bun.serve>;
 
@@ -83,7 +83,7 @@ async function tercet(...args: string[]) {
 const tokenFile = () => join(dir, "token");
 
 test("--dump-status against a server that echoes the token: rejected, and the token never printed", async () => {
-  version = "0.1.8";
+  version = "0.1.9";
   seen = [];
   const result = await tercet(
     "--dump-status",
@@ -140,7 +140,7 @@ test("version gate, version-less and unreachable paths never print the token", a
 }, 45_000);
 
 test("doctor, plain and --json, names the token file but never the token", async () => {
-  version = "0.1.8";
+  version = "0.1.9";
   for (const json of [[], ["--json"]]) {
     const result = await tercet(
       "doctor",
@@ -159,7 +159,7 @@ test("doctor, plain and --json, names the token file but never the token", async
 test.skipIf(!tmux)(
   "the TUI on a rejecting server: neither the screen nor the bytes written carry the token",
   async () => {
-    version = "0.1.8";
+    version = "0.1.9";
     seen = [];
     const run = async (...args: string[]) => {
       const child = Bun.spawn([tmux!, "-L", socket, ...args], { stdout: "pipe", stderr: "pipe" });

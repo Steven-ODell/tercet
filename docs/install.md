@@ -21,7 +21,7 @@ tercet doctor      # server, token, settings, terminal, images and host commands
 
 ```
 tercet 0.1.0
-T3 server: >=0.1.8 <0.2.0, tested on 0.1.8
+T3 server: >=0.1.9 <0.2.0, tested on 0.1.9
 ```
 
 ## 1. Prebuilt binary (no Bun)
