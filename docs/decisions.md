@@ -413,7 +413,7 @@ Read in the vendored v0.1.8 contracts and effect's RPC client, 2026-11-12:
 
 ## Native Windows support (2026-11-14)
 
-Sao expanded the original POSIX-only platform target to native Windows, including the Git/PR
+The maintainer expanded the original POSIX-only platform target to native Windows, including the Git/PR
 loop. Keep the existing Bun/OpenTUI stack: the pinned renderer ships Windows builds and Bun
 1.4.0 supports ConPTY. Native host adapters live in `src/windows.ts`; user values are encoded
 as JSON data, never interpolated into PowerShell code. No Wine dependency or WSL requirement.

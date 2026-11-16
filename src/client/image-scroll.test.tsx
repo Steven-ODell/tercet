@@ -61,7 +61,7 @@ function graphics(bytes: string) {
   return { placements, deletes };
 }
 
-// Behind tmux (Sao's setup) every frame goes through KittyPlacementOutput, as in main.tsx.
+// Behind tmux (the maintainer's setup) every frame goes through KittyPlacementOutput, as in main.tsx.
 test("a Kitty image behind tmux scrolls and crops row for row with the text around it", async () => {
   // 10x20 px cells. The card is 12 rows with a 10-row interior; 88x40 px fills 44x10 cells, so
   // one cell row is 4 source pixels.

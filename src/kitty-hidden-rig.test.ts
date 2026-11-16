@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // Real tmux, off-screen: an "outer" private tmux server stands in for ghostty. Its pane runs
-// `script`, which attaches a client of an "inner" private server (Sao's tmux: focus-events on,
+// `script`, which attaches a client of an "inner" private server (common tmux: focus-events on,
 // allow-passthrough on) and logs every byte that client's terminal receives. Inner session A runs a
 // stand-in for tercet that wires clearKittyWhenHidden to real focus events, real tmux and the
 // real client tty, and repaints with a passthrough placement. Switching the client away must put

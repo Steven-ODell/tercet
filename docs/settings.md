@@ -487,7 +487,7 @@ VISUAL/EDITOR accept quoted program paths and flags; they are split into argv wi
 evaluation. Shell substitutions and environment expansion inside those values are not run.
 A missing executable produces an error with instructions to link its full path.
 
-To opt into tmux sessions (Sao's preference):
+To opt into tmux sessions (the maintainer's setup):
 
 ```jsonc
 {

@@ -78,17 +78,17 @@ test("add teaches the word for good, its possessive too, and reads it back next 
   const personalFile = join(dir, "sub", "dictionary.txt");
   const first = createSpellChecker({ load, personalFile });
   await ready(first);
-  expect(first.check("Sao")).toHaveLength(1);
+  expect(first.check("Zorvik")).toHaveLength(1);
   let heard = 0;
   first.subscribe(() => heard++);
-  await first.add("Sao's");
+  await first.add("Zorvik's");
   expect(heard).toBe(1);
-  expect(first.check("Sao Sao's")).toEqual([]);
-  expect(await readFile(personalFile, "utf8")).toBe("Sao\n");
+  expect(first.check("Zorvik Zorvik's")).toEqual([]);
+  expect(await readFile(personalFile, "utf8")).toBe("Zorvik\n");
 
   const second = createSpellChecker({ load, personalFile });
   await ready(second);
-  expect(second.check("Sao")).toEqual([]);
+  expect(second.check("Zorvik")).toEqual([]);
 });
 
 test("ignore lasts for the session and writes nothing", async () => {
