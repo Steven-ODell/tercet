@@ -435,6 +435,25 @@ export function AppFrame({
       setQuitArmed(false);
       return;
     }
+    const selection = renderer.getSelection();
+    if (
+      command === "quit" &&
+      !overlay &&
+      !(focus === "right" && (right === "terminal" || right === "editor")) &&
+      selection?.selectedRenderables.length &&
+      selection.selectedRenderables.every((r) => r.id.startsWith("transcript-row-")) &&
+      selection.getSelectedText()
+    ) {
+      setQuitArmed(false);
+      if (key.defaultPrevented) return;
+      key.preventDefault();
+      const text = selection.getSelectedText();
+      if (effects)
+        void Promise.resolve()
+          .then(() => effects.copy(text))
+          .catch(() => setActionError("Copy failed; retry"));
+      return;
+    }
     if (key.defaultPrevented) return;
     // PR drafts and nested Back own Esc and review chords while this overlay is open.
     if (overlay === "pullRequests" && command !== "pullRequests" && command !== "quit") return;

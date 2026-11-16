@@ -1,3 +1,5 @@
+import type { BoxRenderable } from "@opentui/core";
+import { TextContextMenu, type TextMenu } from "./spell-ui";
 import { theme } from "./theme";
 import { ImagePreview } from "./image-preview";
 import { mediaKind } from "./media";
@@ -13,7 +15,12 @@ import {
   type Actions,
 } from "../actions";
 import type { BlockAction, Span, Target } from "./markdown";
-import { useSelectionHandler, useKeyboard } from "@opentui/react";
+import {
+  useSelectionHandler,
+  useKeyboard,
+  useRenderer,
+  useTerminalDimensions,
+} from "@opentui/react";
 import { FRAME_SIDE, MarkdownCache, anchorIndex, type MarkdownRow, type Message } from "./markdown";
 import {
   colAt,
@@ -165,6 +172,13 @@ export function TranscriptViewport({
   measuredCache?: MarkdownCache;
   anchorState?: { value: string | null; set: (value: string | null) => void };
 }) {
+  const renderer = useRenderer();
+  const { width: screenWidth, height: screenHeight } = useTerminalDimensions();
+  const root = useRef<BoxRenderable>(null);
+  const [menu, setMenu] = useState<TextMenu>();
+  useEffect(() => {
+    if (!enabled) setMenu(undefined);
+  }, [enabled]);
   const [target, setTarget] = useState<Target>();
   const [hoveredImage, setHoveredImage] = useState<Target>();
   const [feedback, setFeedback] = useState("");
@@ -377,9 +391,42 @@ export function TranscriptViewport({
     vim.current.mode = undefined;
     vim.current.anchor = undefined;
   };
+  const selectedText = () => {
+    const selection = renderer.getSelection();
+    if (nativeSelection.current || !selection?.selectedRenderables.length) return "";
+    if (!selection.selectedRenderables.every((r) => r.id.startsWith("transcript-row-"))) return "";
+    return selection.getSelectedText();
+  };
+  const visualText = () => {
+    const v = vim.current;
+    const cursor = posOf(v.cursor);
+    const anchor = posOf(v.anchor);
+    return v.mode && cursor && anchor ? selectionText(rows, anchor, cursor, v.mode) : "";
+  };
+  const chooseCopy = () => {
+    menu?.items[0]?.run();
+    setMenu(undefined);
+  };
   const targetActions = targetKeys(effects);
   useKeyboard((key) => {
-    if (!enabled || !keyboardEnabled || key.meta) return;
+    if (!enabled || !keyboardEnabled || key.meta || key.defaultPrevented) return;
+    if (menu) {
+      if (key.name === "escape") setMenu(undefined);
+      else if (key.name === "return" || key.name === "1") chooseCopy();
+      else if (["up", "down", "tab"].includes(key.name)) {
+        /* One choice. */
+      } else setMenu(undefined);
+      key.preventDefault();
+      return;
+    }
+    if (key.ctrl && key.name === "c") {
+      const text = selectedText();
+      if (effects && text) {
+        key.preventDefault();
+        run("copy", () => effects.copy(text));
+      }
+      return;
+    }
     const v = vim.current;
     const half = Math.max(1, Math.floor(viewport / 2));
     if (key.ctrl) {
@@ -593,13 +640,32 @@ export function TranscriptViewport({
     vim.current.mode === "line" ? "-- V-LINE -- " : vim.current.mode ? "-- VISUAL -- " : "";
   return (
     <box
+      ref={root}
       width={width}
       height={height}
       flexDirection="column"
       onMouseDown={(event) => {
-        nativeSelection.current = event.modifiers.shift;
+        if (event.button === 2 && !event.modifiers.shift && enabled && effects) {
+          const text = selectedText() || visualText();
+          if (text) {
+            event.preventDefault();
+            event.stopPropagation();
+            setMenu({
+              x: event.x,
+              y: event.y,
+              index: 0,
+              items: [{ label: "Copy", run: () => run("copy", () => effects.copy(text)) }],
+            });
+          }
+          return;
+        }
+        if (event.button === 0) {
+          nativeSelection.current = event.modifiers.shift;
+          setMenu(undefined);
+        }
       }}
       onMouseScroll={(event) => {
+        if (menu) return;
         if (enabled) scroll(event.scroll?.direction === "up" ? -3 : 3);
       }}
     >
@@ -785,6 +851,27 @@ export function TranscriptViewport({
           </text>
         </box>
       </box>
+      {menu && (
+        <>
+          <box
+            position="absolute"
+            left={-(root.current?.x ?? 0)}
+            top={-(root.current?.y ?? 0)}
+            width={screenWidth}
+            height={screenHeight}
+            zIndex={19}
+            onMouseDown={() => setMenu(undefined)}
+          />
+          <TextContextMenu
+            menu={menu}
+            root={root}
+            containOrigin
+            screenWidth={Math.min(screenWidth, (root.current?.x ?? 0) + width)}
+            screenHeight={Math.min(screenHeight, (root.current?.y ?? 0) + height)}
+            onPick={chooseCopy}
+          />
+        </>
+      )}
     </box>
   );
 }

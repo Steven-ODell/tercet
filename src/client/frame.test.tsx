@@ -253,3 +253,74 @@ test("narrow resize collapses sidebar, allows key/mouse reopening and recovers w
     await client.dispose();
   }
 });
+
+test("transcript selection Copy in the full frame never arms quit", async () => {
+  const { TranscriptViewport } = await import("./transcript-viewport");
+  const copied: string[] = [];
+  const effects = {
+    copy: (text: string) => {
+      copied.push(text);
+    },
+  };
+  let quits = 0;
+  const client = createClient(
+    {
+      readToken: () => Effect.succeed("fake"),
+      issueToken: () => Effect.die("unused"),
+      wake: () => Effect.void,
+      pause: () => Effect.never,
+      follow: () => Effect.never,
+    },
+    false,
+  );
+  client.registry.set(client.status, "live");
+  const view = await testRender(
+    <AppFrame
+      client={client}
+      effects={effects}
+      onQuit={() => quits++}
+      content={{
+        transcript: (
+          <TranscriptViewport
+            effects={effects}
+            width={60}
+            height={15}
+            items={[{ id: "a", kind: "assistant", text: "alpha beta gamma" }]}
+          />
+        ),
+      }}
+    />,
+    { width: 100, height: 30, kittyKeyboard: true, exitOnCtrlC: false },
+  );
+  const key = async (name: string, ctrl = false) => {
+    await act(async () => view.mockInput.pressKey(name, { ctrl }));
+    await view.flush();
+  };
+  try {
+    await view.flush();
+    let lines = view.captureCharFrame().split("\n");
+    const y = lines.findIndex((line) => line.includes("alpha beta"));
+    const x = lines[y]!.indexOf("alpha beta");
+    await act(async () => view.mockMouse.drag(x, y, x + 4, y));
+    await view.flush();
+    expect(view.renderer.getSelection()!.getSelectedText()).toBe("alpha");
+    await key("c", true);
+    await key("c", true);
+    expect(copied).toEqual(["alpha", "alpha", "alpha"]);
+    expect(quits).toBe(0);
+    expect(view.captureCharFrame()).not.toContain("again to quit");
+    await act(async () => view.mockMouse.click(x + 8, y, 2));
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("1 Copy");
+    await key("ESCAPE");
+    expect(view.captureCharFrame()).not.toContain("1 Copy");
+    await act(async () => view.renderer.clearSelection());
+    await key("c", true);
+    expect(view.captureCharFrame()).toContain("again to quit");
+    await key("c", true);
+    expect(quits).toBe(1);
+  } finally {
+    await act(async () => view.renderer.destroy());
+    await client.dispose();
+  }
+});

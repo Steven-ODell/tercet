@@ -307,6 +307,16 @@ For a local terminal, without `commands.copy` and `commands.paste`, tercet uses 
 3. `pbcopy`/`pbpaste` on macOS (text only)
 4. Windows PowerShell with the native Windows clipboard (text and images)
 
+Composer right-click offers editing actions and spelling suggestions; transcript drag-selection
+and right-click offers Copy of exactly the highlighted text. Drag completion still auto-copies.
+Right-click preserves selection, including Vim visual selections. The transcript pauses wheel
+scrolling while its menu is open so its selected rows stay mounted; dismiss with Escape or a
+click outside the menu before scrolling. Shift mouse selection belongs to the terminal.
+Ctrl+C copies a mouse-selected transcript or composer selection without arming quit; without
+selection, two presses quit. Vim `y`/`yy` remain selection/line yank. The embedded terminal
+retains Ctrl+C interrupt. Copy errors are reported; OSC 52 success means emitted, with no
+terminal acknowledgement of clipboard delivery.
+
 Default text Copy writes OSC 52 to the terminal, including over SSH, when the terminal
 allows clipboard writes. A local desktop tool is also used only when the active client is
 confirmed local. Inside tmux this is checked on every action using the most recently active
