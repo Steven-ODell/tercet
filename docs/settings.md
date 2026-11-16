@@ -28,6 +28,9 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
     "url": "http://127.0.0.1:3773",
     // "~/" is your home; other relative paths are relative to this directory.
     "tokenFile": "~/.config/tercet/token",
+    // The t3 command tercet runs to issue the first token. Only needed when it is not on PATH;
+    // on Windows this is t3.cmd, often %APPDATA%\npm\t3.cmd.
+    "t3Command": "t3",
     "baseDir": "~/.t3",
     // Start on a server with another protocol or no version (same as --ignore-version).
     "ignoreVersion": false,
@@ -55,7 +58,7 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
     "editor": "nvim",
     "player": ["mpv"],
   },
-  "media": { "protocol": "auto", "video": "player" },
+  "media": { "protocol": "auto", "video": "player", "pageShots": true },
   // Optional actions. A command that is not here has no button, key or palette entry.
   "commands": {
     "tmux": ["tmux", "send-keys", "-t", "work", "-l", "{text}"],
@@ -77,6 +80,7 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
 | ----------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------ | --------- |
 | `server.url`                                          | http(s) origin                                                  | runtime file, then `http://127.0.0.1:3773` | now       |
 | `server.tokenFile`                                    | path                                                            | `<settings dir>/token`                     | now       |
+| `server.t3Command`                                    | path or command name                                            | `t3` from PATH, then usual folders         | now       |
 | `server.baseDir`                                      | path                                                            | `~/.t3`                                    | now       |
 | `server.ignoreVersion`                                | true or false                                                   | `false`                                    | now       |
 | `server.hideWarning`                                  | true or false                                                   | `false`                                    | now       |
@@ -93,6 +97,7 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
 | `launchers.terminal`, `.editor`, `.opener`, `.player`, `.picker` | command template                                                | see below                                  | now       |
 | `media.protocol`                                      | `auto`, `kitty`, `sixel`, `blocks`, `none`                      | `auto`                                     | now       |
 | `media.video`                                         | `player`, `terminal`                                            | `player`                                   | now       |
+| `media.pageShots`                                     | boolean                                                         | `true`                                     | now       |
 | `spell.enabled`                                       | boolean                                                         | `true`                                     | now       |
 | `spell.dictionary`                                    | path                                                            | `<settings dir>/dictionary.txt`            | now       |
 | `commands.<name>`                                     | command template                                                | none                                       | now       |
@@ -100,6 +105,12 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
 
 "Read from" is the build step that starts using a key. Keys for later steps are already checked,
 so a wrong value shows up now rather than later.
+
+If tercet says it cannot find `t3`, set `server.t3Command` to its full path (`npm root -g` shows where
+npm puts it; on Windows look for `t3.cmd` in `%APPDATA%\npm`). Without the setting tercet looks on PATH,
+then in the usual npm, bun, pnpm, mise and Homebrew folders. In the settings file write Windows paths with forward slashes
+(`C:/Users/you/AppData/Roaming/npm/t3.cmd`) or doubled backslashes. `tercet doctor` prints a `t3 command`
+row before the first token exists.
 
 A token file you name in `server.tokenFile` or `--token-file` is yours: tercet reads it but never
 issues a new token into it or changes its permissions.
@@ -241,6 +252,12 @@ in `{path}` as before. The opener controls file transfer; this adds no streaming
 `"video": "terminal"` and `mpv` installed, tercet steps aside and mpv plays inside the terminal
 (`--vo=kitty`, `sixel`, or `tct` in tmux and on the blocks rung) until you quit it. Audio works
 the same way without a frame; other files open with the opener.
+
+A page the agent rendered (T3's `html_render`) shows as a screenshot, taken off-screen with
+headless `chromium`, instead of only an `[open]` link. Enter still opens the page itself in the
+browser. Shots are on by default and need an image rung other than `none`. `"pageShots": false`
+under `media` turns them off. The environment wins over the file: `TERCET_PAGE_SHOTS=0` turns
+them off for one run, `TERCET_PAGE_SHOTS=1` turns them on.
 
 ## Command templates
 

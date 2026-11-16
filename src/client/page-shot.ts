@@ -3,15 +3,15 @@ import { join } from "node:path";
 
 /**
  * Rendered pages (T3's html_render) drawn as a picture in the transcript: the page is shot with
- * headless chromium and the PNG goes through the image rungs like a photo. Off unless
- * TERCET_PAGE_SHOTS=1.
+ * headless chromium and the PNG goes through the image rungs like a photo. On by default;
+ * `media.pageShots: false` turns them off, and TERCET_PAGE_SHOTS=0 or =1 wins over the file.
  */
 export const PAGE_SCHEME = "tercet-page:";
 const on = { value: false };
 export const setPageShots = (value: boolean) => void (on.value = value);
 export const pageShotsOn = () => on.value;
-export const pageShotsFromEnv = (env: Record<string, string | undefined>) =>
-  env.TERCET_PAGE_SHOTS === "1";
+export const pageShotsFromEnv = (env: Record<string, string | undefined>, setting = true) =>
+  env.TERCET_PAGE_SHOTS === "0" ? false : env.TERCET_PAGE_SHOTS === "1" ? true : setting;
 
 export const pageSource = (id: string) => `${PAGE_SCHEME}${encodeURIComponent(id)}`;
 export const isPageSource = (source: string) => source.startsWith(PAGE_SCHEME);

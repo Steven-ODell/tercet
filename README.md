@@ -49,7 +49,10 @@ Updating (`tercet upgrade` for the binary), removing and every install option: [
 
 tercet talks to `http://127.0.0.1:3773` by default, the address `t3` serves on. On first start
 it asks the local `t3` command for a session token (`t3 auth session issue`) and keeps it in
-`~/.config/tercet/token`, so the `t3` command must be on PATH.
+`~/.config/tercet/token`, so tercet must find the `t3` command. It checks PATH and the usual
+install folders; if it still cannot (common on Windows), set `server.t3Command` to the full path
+of `t3` (`t3.cmd` on Windows) in your settings file, or issue a token yourself with
+`t3 auth session issue` and set `server.tokenFile`. `tercet doctor` shows which one applies.
 
 tercet works with the projects and agents your server already has. Add a project in the web
 app or with `t3 project add <folder>`, and set up at least one provider (Codex, Claude and so

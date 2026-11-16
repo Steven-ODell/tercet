@@ -80,6 +80,8 @@ export interface Settings {
   server: {
     url?: string;
     tokenFile?: string;
+    /** The `t3` command used to issue a token: a path, or a name on PATH. Empty means search. */
+    t3Command?: string;
     baseDir?: string;
     ignoreVersion?: boolean;
     /** Never draw the server warning banner (version outside the tested range, no version, other protocol). */
@@ -109,8 +111,11 @@ export interface Settings {
     player?: CommandSpec;
     picker?: CommandSpec;
   };
-  /** How images draw (`auto` asks the terminal) and where Enter plays a video. */
-  media: { protocol: MediaProtocol; video: VideoMode };
+  /**
+   * How images draw (`auto` asks the terminal), where Enter plays a video, and whether rendered
+   * pages show as a screenshot.
+   */
+  media: { protocol: MediaProtocol; video: VideoMode; pageShots: boolean };
   /** Optional action templates; an absent one means the action and its buttons are hidden. */
   commands: Partial<Record<CommandName, CommandSpec>>;
   /** Named clipboards (another machine, say) offered next to "copy", in file order. */
@@ -138,7 +143,7 @@ export const defaultSettings = (): Settings => ({
   icons: "unicode",
   defaults: { sendShortcut: "enter", favorites: [], sidebarWorkingShelf: false, hints: true },
   launchers: {},
-  media: { protocol: "auto", video: "player" },
+  media: { protocol: "auto", video: "player", pageShots: true },
   commands: {},
   targets: {},
   spell: { enabled: true },
@@ -514,6 +519,7 @@ const schema = struct({
   server: struct({
     url: origin,
     tokenFile: text,
+    t3Command: text,
     baseDir: text,
     ignoreVersion: bool,
     hideWarning: bool,
@@ -536,7 +542,7 @@ const schema = struct({
     ),
     editorMode: oneOf(["terminal", "tmux", "direct"]),
   }),
-  media: struct({ protocol: oneOf(MEDIA_PROTOCOLS), video: oneOf(VIDEO_MODES) }),
+  media: struct({ protocol: oneOf(MEDIA_PROTOCOLS), video: oneOf(VIDEO_MODES), pageShots: bool }),
   commands: struct(
     Object.fromEntries(Object.entries(COMMANDS).map(([name, vars]) => [name, withHost(vars)])),
   ),
@@ -616,6 +622,8 @@ export function parseSettings(
   }
   if (settings.server.tokenFile)
     settings.server.tokenFile = expandPath(settings.server.tokenFile, where.home, where.dir);
+  if (settings.server.t3Command && /^~|[\\/]/.test(settings.server.t3Command))
+    settings.server.t3Command = expandPath(settings.server.t3Command, where.home, where.dir);
   if (settings.server.baseDir)
     settings.server.baseDir = expandPath(settings.server.baseDir, where.home, where.dir);
   if (settings.spell.dictionary)
