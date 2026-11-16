@@ -156225,7 +156225,7 @@ function Editor({
           composer.attach(id2, value4.bytes);
         else if (editor2.current) {
           editor2.current.insertText(value4.text);
-          composer.setDraft(id2, editor2.current.plainText);
+          publish2(editor2.current.plainText);
         }
       } else if (kind === "files") {
         if (!effects?.pickFiles)
@@ -156258,10 +156258,15 @@ function Editor({
   useClientAtom(client, client.transcripts);
   const snapshot2 = useClientAtom(client, client.snapshot);
   const editor2 = import_react52.useRef(null);
+  const published = import_react52.useRef(client.registry.get(composer.drafts)[id2] ?? "");
+  const publish2 = (value4) => {
+    published.current = value4;
+    composer.setDraft(id2, value4);
+  };
   import_react52.useEffect(() => dictation.register(id2, (value4) => {
     if (editor2.current) {
       editor2.current.insertText(value4);
-      composer.setDraft(id2, editor2.current.plainText);
+      publish2(editor2.current.plainText);
     }
   }), [dictation, composer, id2]);
   const [edit, setEdit] = import_react52.useState();
@@ -156283,7 +156288,7 @@ function Editor({
       editor2.current?.replaceText(next2);
       if (editor2.current)
         editor2.current.cursorOffset = caret;
-      composer.setDraft(id2, next2);
+      publish2(next2);
     }
   });
   const thread = snapshot2?.threads.find((thread2) => thread2.id === id2);
@@ -156291,9 +156296,13 @@ function Editor({
   const instanceId = thread?.modelSelection.instanceId;
   const cwd = thread?.worktreePath ?? project2?.workspaceRoot;
   import_react52.useEffect(() => {
-    if (editor2.current && editor2.current.plainText !== text5)
-      editor2.current.setText(text5);
-  }, [text5]);
+    const latest = client.registry.get(composer.drafts)[id2] ?? "";
+    if (latest === published.current)
+      return;
+    published.current = latest;
+    if (editor2.current && editor2.current.plainText !== latest)
+      editor2.current.setText(latest);
+  }, [client, composer, id2, text5]);
   import_react52.useEffect(() => {
     let cancelled = false;
     const trigger = completionTrigger(text5, cursor);
@@ -156334,7 +156343,7 @@ function Editor({
       return;
     const inserted = trigger.prefix === ":" ? value4.split(" ")[0] : value4;
     const next2 = text5.slice(0, trigger.start) + inserted + " " + text5.slice(trigger.end);
-    composer.setDraft(id2, next2);
+    publish2(next2);
     target2.setText(next2);
     target2.cursorOffset = trigger.start + inserted.length + 1;
     setChoices([]);
@@ -156360,7 +156369,7 @@ function Editor({
       return;
     event.preventDefault();
     editor2.current.insertText(decodePasteBytes4(event.bytes));
-    composer.setDraft(id2, editor2.current.plainText);
+    publish2(editor2.current.plainText);
     onInputFocus?.();
   });
   useKeyboard((key5) => {
@@ -156651,7 +156660,7 @@ function Editor({
         onContentChange: () => {
           if (editor2.current) {
             if (editor2.current.plainText !== text5) {
-              composer.setDraft(id2, editor2.current.plainText);
+              publish2(editor2.current.plainText);
               if (enabled && collapsed && editor2.current.plainText)
                 onInputFocus?.();
             }

@@ -150,7 +150,7 @@ function Editor({
         if (value.type === "image") composer.attach(id, value.bytes);
         else if (editor.current) {
           editor.current.insertText(value.text);
-          composer.setDraft(id, editor.current.plainText);
+          publish(editor.current.plainText);
         }
       } else if (kind === "files") {
         if (!effects?.pickFiles) throw new Error("unavailable");
@@ -184,10 +184,16 @@ function Editor({
   useClientAtom(client, client.transcripts);
   const snapshot = useClientAtom(client, client.snapshot);
   const editor = useRef<TextareaRenderable>(null);
+  /** The last draft the editor itself stored; see the sync effect below. */
+  const published = useRef(client.registry.get(composer.drafts)[id] ?? "");
+  const publish = (value: string) => {
+    published.current = value;
+    composer.setDraft(id, value);
+  };
   useEffect(() => dictation.register(id, (value) => {
     if (editor.current) {
       editor.current.insertText(value);
-      composer.setDraft(id, editor.current.plainText);
+      publish(editor.current.plainText);
     }
   }), [dictation, composer, id]);
   const [edit, setEdit] = useState<RunId>();
@@ -211,7 +217,7 @@ function Editor({
     replaceDraft: (next, caret) => {
       editor.current?.replaceText(next);
       if (editor.current) editor.current.cursorOffset = caret;
-      composer.setDraft(id, next);
+      publish(next);
     },
   });
   const thread = snapshot?.threads.find((thread) => thread.id === id);
@@ -219,8 +225,15 @@ function Editor({
   const instanceId = thread?.modelSelection.instanceId;
   const cwd = thread?.worktreePath ?? project?.workspaceRoot;
   useEffect(() => {
-    if (editor.current && editor.current.plainText !== text) editor.current.setText(text);
-  }, [text]);
+    // The editor reports its changes a tick late, and keys that arrive in a burst (dictation typed
+    // by voxtype) outrun both that report and React's render. Writing such a stale draft back into
+    // the editor resets its caret and scroll to the top and drops the newest characters. Only a
+    // draft the editor did not write itself (a queued edit, a send clearing it) replaces its text.
+    const latest = client.registry.get(composer.drafts)[id] ?? "";
+    if (latest === published.current) return;
+    published.current = latest;
+    if (editor.current && editor.current.plainText !== latest) editor.current.setText(latest);
+  }, [client, composer, id, text]);
   useEffect(() => {
     let cancelled = false;
     const trigger = completionTrigger(text, cursor);
@@ -265,7 +278,7 @@ function Editor({
     // An emoji choice reads "🔥 fire"; only the character goes in the draft.
     const inserted = trigger.prefix === ":" ? value.split(" ")[0]! : value;
     const next = text.slice(0, trigger.start) + inserted + " " + text.slice(trigger.end);
-    composer.setDraft(id, next);
+    publish(next);
     target.setText(next);
     target.cursorOffset = trigger.start + inserted.length + 1;
     setChoices([]);
@@ -291,7 +304,7 @@ function Editor({
     if (!pasteFromPane || !editor.current) return;
     event.preventDefault();
     editor.current.insertText(decodePasteBytes(event.bytes));
-    composer.setDraft(id, editor.current.plainText);
+    publish(editor.current.plainText);
     onInputFocus?.();
   });
   useKeyboard((key) => {
@@ -565,7 +578,7 @@ function Editor({
         onContentChange={() => {
           if (editor.current) {
             if (editor.current.plainText !== text) {
-              composer.setDraft(id, editor.current.plainText);
+              publish(editor.current.plainText);
               if (enabled && collapsed && editor.current.plainText) onInputFocus?.();
             }
             setCursor(editor.current.cursorOffset);
