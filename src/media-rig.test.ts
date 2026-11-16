@@ -131,7 +131,8 @@ test.skipIf(!tmux)(
       ["--video", join(dir, "demo.mp4")],
       [`PATH=${join(dir, "bin")}`],
     );
-    const text = await rig.waitFor((text) => text.includes("[video demo]"));
+    // File metadata loads after the card first mounts; wait for the detail we assert.
+    const text = await rig.waitFor((text) => text.includes("[video demo] 3 KB"));
     expect(text).toContain(`[image starlit-shore] 4x4, ${PNG.length} B`);
     expect(text).toContain("[video demo] 3 KB");
     expect(await rig.bytes()).not.toContain("_G");

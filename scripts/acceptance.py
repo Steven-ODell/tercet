@@ -71,10 +71,12 @@ def mouse(button, x, y, release=False):
 
 def normalized(text):
     """Mask what changes between runs without moving columns: the sandbox dir's random
-    suffix, the spinner frame and the sidebar's relative age (a slow run shows "1m")."""
+    suffix, spinner frame, sidebar age and live provider token counts.
+    The context percentage, bar and limit still have to match."""
     text = SANDBOX_PATH.sub("/tmp/tercet-sandbox.XXXXXX", text)
     text = SPINNER.sub("\u280b", text)
-    return SIDEBAR_AGE.sub(lambda m: "now".rjust(len(m.group(0))), text)
+    text = SIDEBAR_AGE.sub(lambda m: "now".rjust(len(m.group(0))), text)
+    return re.sub(r" +Context (\d+% [▰▱]+) [\d.]+[kM]? /", r" Context \1 <live> /", text)
 
 
 def save(name):
