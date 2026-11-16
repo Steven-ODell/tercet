@@ -1,5 +1,21 @@
 # Changelog
 
+## tercet 0.1.6 (2026-11-16)
+
+Works with T3 Code servers >=0.1.9 <0.2.0, tested on 0.1.9.
+
+- Links inside bold text and headings stay clickable, including wrapped links.
+- Transcript links are underlined and use a separate color, configurable with `theme.link`.
+- `launchers.browser` selects a browser executable and arguments independently of file openers.
+- `launchers.browserProfile` selects an existing browser profile through `{profile}`.
+- `launchers.browserLocation` opens links on the host or the attached SSH client. Remote
+  browser arguments are shell-quoted, and failed launches copy the URL with a notice.
+- Stabilized media metadata checks and acceptance snapshots for live provider token counts.
+
+Validation: 531 tests passed, 20 skipped; typecheck, bundle freshness and Linux standalone
+binary smoke checks passed. A completed live acceptance run matches all 11 refreshed
+snapshots. A subsequent fresh live run was blocked by OpenCode's free usage limit.
+
 ## tercet 0.1.5 (2026-11-16)
 
 Works with T3 Code servers >=0.1.9 <0.2.0, tested on 0.1.9.
