@@ -68,6 +68,57 @@ test("a long draft wraps inside the composer and keeps the caret beside the text
   }
 });
 
+test("keys typed in bursts (voxtype) keep every character and the caret at the end", async () => {
+  const h = await composerFixture();
+  const png = Uint8Array.from(
+    Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      "base64",
+    ),
+  );
+  const view = await testRender(
+    <AppFrame client={h.client} effects={{ copy() {}, pasteImage: async () => png }} />,
+    { width: 174, height: 22, kittyKeyboard: true, exitOnCtrlC: false },
+  );
+  const findEditor = (node: Renderable): TextareaRenderable | undefined =>
+    node instanceof TextareaRenderable
+      ? node
+      : node.getChildren().map(findEditor).find(Boolean);
+  const sentence =
+    "Can we make it so that it also has these features as well where it shows the color of the assistant is blue and it says assistant above it and then the color of mine is green and it says user above mine. Also, can we make it so that there's more themes to choose from please ";
+  const dictated = sentence.repeat(3);
+  try {
+    await view.waitForFrame((frame) => frame.includes("Focus: sidebar"));
+    await act(async () => view.mockInput.pasteBracketedText("hi "));
+    await view.flush();
+    // The image leaves the textarea two rows tall, so a long dictation has to scroll.
+    await act(async () => view.mockInput.pressKey("p", { meta: true }));
+    await view.flush();
+    const editor = findEditor(view.renderer.root)!;
+    let sent = 0;
+    for (const char of dictated) {
+      view.mockInput.typeText(char);
+      // Between keys, React gets a turn; every fifth key the event loop does too.
+      await Promise.resolve();
+      if (++sent % 5 === 0) await Bun.sleep(1);
+    }
+    let previous = -1;
+    while (previous !== editor.plainText.length) {
+      previous = editor.plainText.length;
+      await Bun.sleep(150);
+    }
+    await view.flush();
+    expect(editor.plainText).toBe("hi " + dictated);
+    expect(editor.cursorOffset).toBe(editor.plainText.length);
+    const row = view.renderer.getCursorState().y - 1;
+    expect(row).toBeGreaterThanOrEqual(editor.y);
+    expect(row).toBeLessThan(editor.y + editor.height);
+  } finally {
+    await act(async () => view.renderer.destroy());
+    await h.client.dispose();
+  }
+});
+
 test.each(["typing", "dictation", "clipboard"])(
   "%s opens the composer when it still has focus after a send",
   async (input) => {
