@@ -159844,9 +159844,10 @@ var Row = import_react55.memo(function Row2({
       if (value4)
         point?.(value4, false);
     },
-    onMouseOver: () => {
-      if (row.target)
-        point?.(row.target, false);
+    onMouseOver: (e) => {
+      const value4 = spanAt(row, e.x - (e.currentTarget?.x ?? 0))?.target ?? row.target;
+      if (value4)
+        point?.(value4, false);
     },
     onMouseUp: (event) => {
       if (event.button !== 0 || event.modifiers.shift || !down.current || down.current.x !== event.x || down.current.y !== event.y)

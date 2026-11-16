@@ -182,6 +182,18 @@ test("OpenTUI buttons and focused keys call fake Actions exactly; drag copies an
     expect(view.captureCharFrame()).not.toContain("private detail");
     await click("open (tercet-page:page%2Fid)");
     expect(calls.at(-1)).toEqual(["page", "page/id"]);
+    // A re-render can make opentui resend "over" with the pointer still on the link; the
+    // link must stay the target (this raced under full-suite load before).
+    await act(async () => {
+      const renderer = view.renderer as unknown as {
+        lastOverRenderable?: unknown;
+        recheckHoverState(): void;
+      };
+      renderer.lastOverRenderable = undefined;
+      renderer.recheckHoverState();
+    });
+    await view.flush();
+    expect(await frameWith("[open]")).toContain("[open]");
     await click("[open]");
     expect(calls.at(-1)).toEqual(["page", "page/id"]);
     await act(async () => {
