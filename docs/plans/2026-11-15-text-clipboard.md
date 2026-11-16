@@ -96,7 +96,7 @@ Do not install, push, tag, release, rename, or change Sao's desktop configuratio
   Done when routing has regression tests, supported remote path is concrete,
   unsupported paste is honest/actionable, bundle is current, changes committed.
 
-- [ ] 2. Add composer text context menu and safe selection copying.
+- [x] 2. Add composer text context menu and safe selection copying.
   Files: src/client/composer.tsx Editor, src/client/spell-ui.tsx,
   src/client/spell-ui.test.tsx, src/client/composer.test.tsx,
   src/client/media.test.tsx, src/client/frame.tsx quit dispatch,
@@ -111,6 +111,15 @@ Do not install, push, tag, release, rename, or change Sao's desktop configuratio
   selected text copy/cut/paste, draft preservation, spell actions and quit behavior.
   Verify: `bun test src/client/composer.test.tsx src/client/spell-ui.test.tsx src/client/media.test.tsx src/client/frame.test.tsx src/client/terminal.test.tsx`; exit 0.
   Baseline: `bun run build` then `bun run check`; both exit 0. Save logs.
+  Result (2026-11-15): right-click editing actions share the spelling menu;
+  native selection/history APIs enable actions, menu presses preserve selection.
+  Awaited Cut checks draft/selection before deletion; Ctrl+C selection bypasses quit.
+  Headless scoped tests 59 pass (including delayed/rejected Cut and concurrent typing);
+  build exit 0; full check exit 0 (521 pass/20 skip, all four stages 0).
+  Logs: /tmp/tercet-step2-tests-complete.Yx9g4s.log,
+  /tmp/tercet-step2-build-final.86c4d2.log, /tmp/tercet-step2-check-final.airIE2.log.
+  TextContextMenu/TextMenu/TextMenuItem exported from spell-ui.tsx for step 3 reuse.
+  Physical PC/SSH laptop delivery remains unverified; no transcript changes yet.
   Done when integrated behavior is covered with headless UI tests and committed.
 
 - [ ] 3. Add transcript selection menu, verify integration, leave user-testable build.

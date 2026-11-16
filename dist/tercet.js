@@ -154747,7 +154747,9 @@ function createDictation(client, effects, notice = () => {}, messageMs = MESSAGE
 var import_react52 = __toESM(require_react(), 1);
 
 // src/client/spell-ui.tsx
-import { SyntaxStyle } from "@opentui/core";
+import {
+  SyntaxStyle
+} from "@opentui/core";
 var import_react51 = __toESM(require_react(), 1);
 var HIGHLIGHT_REF = 4242;
 var MAX_SUGGESTIONS = 5;
@@ -154760,10 +154762,11 @@ function useSpellCheck({
   root,
   text: text5,
   caret,
-  replaceDraft
+  replaceDraft,
+  textActions
 }) {
   const renderer = useRenderer();
-  const { width: screenWidth } = useTerminalDimensions();
+  const { width: screenWidth, height: screenHeight } = useTerminalDimensions();
   const [version2, setVersion] = import_react51.useState(0);
   const [menu, setMenu] = import_react51.useState();
   const [notice, setNotice] = import_react51.useState("");
@@ -154796,34 +154799,36 @@ function useSpellCheck({
     setMenu(undefined);
     setNotice("");
   }, [text5]);
-  const show = import_react51.useCallback((m, x, y) => {
-    if (!spell)
-      return;
+  const show = import_react51.useCallback((m, x, y, editing = false) => {
     const replace = (value4) => {
-      if (editor2.current?.plainText.slice(m.start, m.end) !== m.word)
+      if (!m || editor2.current?.plainText.slice(m.start, m.end) !== m.word)
         return;
       const current2 = editor2.current.plainText;
       replaceDraft(current2.slice(0, m.start) + value4 + current2.slice(m.end), m.start + value4.length);
     };
-    const suggestions = spell.suggest(m.word).slice(0, MAX_SUGGESTIONS);
+    const suggestions = m && spell ? spell.suggest(m.word).slice(0, MAX_SUGGESTIONS) : [];
+    const actions = editing ? textActions?.() ?? [] : [];
     setMenu({
       x,
       y,
-      index: suggestions.length ? 0 : 1,
+      index: m ? suggestions.length ? 0 : 1 : Math.max(0, actions.findIndex((item) => !item.note)),
       items: [
-        ...suggestions.map((value4) => ({ label: value4, run: () => replace(value4) })),
-        ...suggestions.length ? [] : [{ label: "No suggestions", run: () => {}, note: true }],
-        {
-          label: "Add to dictionary",
-          run: () => void spell.add(m.word).catch((error2) => {
-            const code2 = error2?.code;
-            setNotice(`Could not save "${m.word}" to the dictionary${typeof code2 === "string" ? ` (${code2})` : ""}; ` + "it is known until tercet exits.");
-          })
-        },
-        { label: "Ignore", run: () => spell.ignore(m.word) }
+        ...m && spell ? [
+          ...suggestions.map((value4) => ({ label: value4, run: () => replace(value4) })),
+          ...suggestions.length ? [] : [{ label: "No suggestions", run: () => {}, note: true }],
+          {
+            label: "Add to dictionary",
+            run: () => void spell.add(m.word).catch((error2) => {
+              const code2 = error2?.code;
+              setNotice(`Could not save "${m.word}" to the dictionary${typeof code2 === "string" ? ` (${code2})` : ""}; ` + "it is known until tercet exits.");
+            })
+          },
+          { label: "Ignore", run: () => spell.ignore(m.word) }
+        ] : [],
+        ...actions
       ]
     });
-  }, [spell, editor2, replaceDraft]);
+  }, [spell, editor2, replaceDraft, textActions]);
   const choose = (index3) => {
     const item = menu?.items[index3];
     if (!item || item.note)
@@ -154836,17 +154841,16 @@ function useSpellCheck({
     notice,
     onMouseUp(event) {
       setMenu(undefined);
-      if (event.button !== 2 || !spell || !editor2.current)
+      if (event.button !== 2 || !editor2.current)
         return;
       const target2 = editor2.current;
-      const localX = Math.max(0, event.x - target2.x);
-      const localY = Math.max(0, event.y - target2.y);
-      target2.editorView.setLocalSelection(localX, localY, localX, localY, undefined, undefined, true, false);
-      target2.editorView.resetLocalSelection();
+      if (!target2.hasSelection()) {
+        target2.editorView.setLocalSelection(Math.max(0, event.x - target2.x), Math.max(0, event.y - target2.y), Math.max(0, event.x - target2.x), Math.max(0, event.y - target2.y), undefined, undefined, true, false);
+        target2.editorView.resetLocalSelection();
+      }
       const at = target2.cursorOffset;
       const m = found.find((word) => word.start <= at && at <= word.end);
-      if (m)
-        show(m, event.x, event.y);
+      show(m, event.x, event.y, true);
     },
     openAtCaret() {
       const target2 = editor2.current;
@@ -154866,7 +154870,7 @@ function useSpellCheck({
         let index3 = menu.index;
         do
           index3 = (index3 + by + count) % count;
-        while (menu.items[index3]?.note);
+        while (menu.items[index3]?.note && index3 !== menu.index);
         setMenu({ ...menu, index: index3 });
       };
       const choices = menu.items.flatMap((item, at) => item.note ? [] : [at]);
@@ -154887,27 +154891,43 @@ function useSpellCheck({
       key5.preventDefault();
       return true;
     },
-    node: menu && /* @__PURE__ */ import_jsx_runtime.jsx(SpellMenu, {
-      menu,
-      root,
-      screenWidth,
-      onPick: choose
+    node: menu && /* @__PURE__ */ import_jsx_runtime.jsxs(import_jsx_runtime.Fragment, {
+      children: [
+        /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+          position: "absolute",
+          left: -(root.current?.x ?? 0),
+          top: -(root.current?.y ?? 0),
+          width: screenWidth,
+          height: screenHeight,
+          zIndex: 19,
+          onMouseDown: () => setMenu(undefined)
+        }),
+        /* @__PURE__ */ import_jsx_runtime.jsx(TextContextMenu, {
+          menu,
+          root,
+          screenWidth,
+          screenHeight,
+          onPick: choose
+        })
+      ]
     })
   };
 }
-function SpellMenu({
+function TextContextMenu({
   menu,
   root,
   screenWidth,
+  screenHeight,
   onPick
 }) {
-  const width2 = Math.max(...menu.items.map((item) => item.label.length)) + 6;
-  const height = menu.items.length + 2;
+  const width2 = Math.min(screenWidth, Math.max(...menu.items.map((item) => item.label.length)) + 6);
+  const height = Math.min(screenHeight, menu.items.length + 2);
   const origin2 = root.current ?? { x: 0, y: 0 };
   const above = menu.y - height >= 0;
   const left = Math.max(0, Math.min(menu.x, screenWidth - width2)) - origin2.x;
-  const top = (above ? menu.y - height : menu.y + 1) - origin2.y;
-  return /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+  const top = Math.max(0, Math.min(screenHeight - height, above ? menu.y - height : menu.y + 1)) - origin2.y;
+  return /* @__PURE__ */ import_jsx_runtime.jsx("scrollbox", {
+    scrollY: true,
     position: "absolute",
     left,
     top,
@@ -154919,6 +154939,10 @@ function SpellMenu({
     backgroundColor: theme.canvas,
     flexDirection: "column",
     zIndex: 20,
+    onMouseDown: (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    },
     children: menu.items.map((item, i) => {
       const number3 = menu.items.slice(0, i).filter((other) => !other.note).length + 1;
       return /* @__PURE__ */ import_jsx_runtime.jsx("text", {
@@ -156317,6 +156341,50 @@ function Editor({
     root,
     text: text5,
     caret: cursor,
+    textActions: () => {
+      const target2 = editor2.current;
+      const update4 = (action) => {
+        action();
+        if (target2)
+          publish2(target2.plainText);
+      };
+      const selected = target2?.getSelectedText() ?? "";
+      const selection = target2?.editorView.getSelection();
+      const original = target2?.plainText;
+      const copy3 = async (cut) => {
+        try {
+          await effects.copy(selected);
+          const current2 = target2?.editorView.getSelection();
+          if (cut && target2 && target2.plainText === original && current2?.start === selection?.start && current2?.end === selection?.end) {
+            update4(() => {
+              target2.deleteSelection();
+            });
+          }
+        } catch (error3) {
+          setMediaStatus(`Copy failed: ${error3 instanceof Error ? error3.message : String(error3)}`);
+        }
+      };
+      return [
+        { label: "Copy", note: !selected || !effects?.copy, run: () => {
+          copy3(false);
+        } },
+        { label: "Cut", note: !selected || !effects?.copy || busy, run: () => {
+          copy3(true);
+        } },
+        { label: "Paste", note: !effects?.pasteClipboard || busy || mediaBusy, run: () => {
+          media3("clipboard");
+        } },
+        { label: "Select all", note: !target2?.plainText, run: () => {
+          target2?.selectAll();
+        } },
+        { label: "Undo", note: busy || !target2?.editBuffer.canUndo(), run: () => update4(() => {
+          target2?.undo();
+        }) },
+        { label: "Redo", note: busy || !target2?.editBuffer.canRedo(), run: () => update4(() => {
+          target2?.redo();
+        }) }
+      ];
+    },
     replaceDraft: (next2, caret) => {
       editor2.current?.replaceText(next2);
       if (editor2.current)
@@ -156421,6 +156489,12 @@ function Editor({
     }
     if (!enabled)
       return;
+    if (key5.ctrl && key5.name === "c" && editor2.current?.hasSelection()) {
+      key5.preventDefault();
+      const selected = editor2.current.getSelectedText();
+      Promise.resolve().then(() => effects?.copy(selected)).catch((error3) => setMediaStatus(`Copy failed: ${error3 instanceof Error ? error3.message : String(error3)}`));
+      return;
+    }
     if (spell.onKey(key5))
       return;
     if (commandForKey(key5) === "spell" && effects?.spell) {
@@ -161090,6 +161164,10 @@ function AppFrame({
   useKeyboard((key5) => {
     const found = commandForKey(key5);
     const command2 = found === "shell" && !effects?.shell || found === "dictation" && !hasDictation(effects) || found === "attach" && !effects?.pickFiles || found === "spell" && !effects?.spell || found === "dismissNotice" && !notice ? undefined : found;
+    if (command2 === "quit" && focus === "composer" && renderer.currentFocusedEditor?.hasSelection()) {
+      setQuitArmed(false);
+      return;
+    }
     if (key5.defaultPrevented)
       return;
     if (overlay === "pullRequests" && command2 !== "pullRequests" && command2 !== "quit")
