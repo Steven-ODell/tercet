@@ -1,13 +1,13 @@
 import { ORCHESTRATION_PROTOCOL_VERSION } from "@t3tools/contracts";
 
 /** The T3 server release tercet is built and tested against (`vendor/t3/UPSTREAM`; a test checks). */
-export const PINNED_SERVER_VERSION = "0.1.8";
+export const PINNED_SERVER_VERSION = "0.1.9";
 /**
  * Server versions tercet treats as tested (Bun.semver syntax): patch releases of the pinned minor
  * keep the wire format. A version outside it still starts, under a warning banner; only another
  * orchestration protocol stops startup.
  */
-export const supportedRange = ">=0.1.8 <0.2.0";
+export const supportedRange = ">=0.1.9 <0.2.0";
 
 export type ServerCheck =
   /** Inside `supportedRange`; `tested` when it is the pinned release itself. */

@@ -25,9 +25,9 @@ const descriptor = (serverVersion: unknown, orchestrationProtocolVersion: unknow
 
 test("each verdict: tested, in range, out of range, other protocol, no version", () => {
   expect(Bun.semver.satisfies(PINNED_SERVER_VERSION, supportedRange)).toBe(true);
-  expect(checkDescriptor(descriptor("0.1.8"))).toEqual({
+  expect(checkDescriptor(descriptor("0.1.9"))).toEqual({
     kind: "ok",
-    version: "0.1.8",
+    version: "0.1.9",
     tested: true,
   });
   expect(checkDescriptor(descriptor("0.1.12"))).toEqual({
@@ -36,20 +36,20 @@ test("each verdict: tested, in range, out of range, other protocol, no version",
     tested: false,
   });
   // Outside the range on the same protocol: starts, under a warning.
-  for (const version of ["0.2.0", "0.1.7", "1.0.0", "0.1.9-nightly.3", "banana"])
+  for (const version of ["0.2.0", "0.1.8", "1.0.0", "0.1.10-nightly.3", "banana"])
     expect(checkDescriptor(descriptor(version))).toEqual({
       kind: "out-of-range",
       version,
       protocol: 2,
     });
   // The right version on another protocol stops; old servers default to 1.
-  expect(checkDescriptor(descriptor("0.1.8", 3))).toEqual({
+  expect(checkDescriptor(descriptor("0.1.9", 3))).toEqual({
     kind: "protocol",
-    version: "0.1.8",
+    version: "0.1.9",
     protocol: 3,
   });
   expect(checkDescriptor(descriptor("0.3.0", 3)).kind).toBe("protocol");
-  expect(checkDescriptor({ serverVersion: "0.1.8" })).toMatchObject({
+  expect(checkDescriptor({ serverVersion: "0.1.9" })).toMatchObject({
     kind: "protocol",
     protocol: 1,
   });
@@ -59,13 +59,13 @@ test("each verdict: tested, in range, out of range, other protocol, no version",
 });
 
 test("only ok and the pinned release go without a warning", () => {
-  expect(compatWarning(checkDescriptor(descriptor("0.1.8")))).toBeNull();
+  expect(compatWarning(checkDescriptor(descriptor("0.1.9")))).toBeNull();
   expect(compatWarning(checkDescriptor(descriptor("0.1.12")))).toBeNull();
   expect(compatWarning({ kind: "unreachable", error: "x" })).toBeNull();
   expect(compatWarning(checkDescriptor(descriptor("0.2.0")))).toBe(
     `Built for T3 ${PINNED_SERVER_VERSION}, you're on 0.2.0: some things may not work.`,
   );
-  expect(compatWarning(checkDescriptor(descriptor("0.1.8", 3)))).toContain("protocol 2");
+  expect(compatWarning(checkDescriptor(descriptor("0.1.9", 3)))).toContain("protocol 2");
   expect(compatWarning(checkDescriptor(descriptor(undefined)))).toContain("no version");
 });
 
@@ -97,13 +97,13 @@ test("unreachable servers: refused, HTTP errors, timeouts and non-JSON all get o
 
 test("only an unreachable server or another protocol stops; --ignore-version passes the protocol", () => {
   const newer = checkDescriptor(descriptor("0.3.0"));
-  const protocol = checkDescriptor(descriptor("0.1.8", 3));
+  const protocol = checkDescriptor(descriptor("0.1.9", 3));
   const missing = checkDescriptor(descriptor(undefined));
   const down: ServerCheck = { kind: "unreachable", error: "connection refused" };
   const all = [newer, protocol, missing, down];
   expect(all.map((c) => blocksStart(c, false))).toEqual([false, true, true, true]);
   expect(all.map((c) => blocksStart(c, true))).toEqual([false, false, false, true]);
-  expect(blocksStart(checkDescriptor(descriptor("0.1.8")), false)).toBe(false);
+  expect(blocksStart(checkDescriptor(descriptor("0.1.9")), false)).toBe(false);
 });
 
 test("each message names what was found, what is supported and what to do, in ASCII", () => {
@@ -167,7 +167,7 @@ test("the gate draws full screen, quits on q, and opens the app once the server 
       initial={{ kind: "unreachable", error: "connection refused" }}
       check={async () =>
         up
-          ? checkDescriptor(descriptor("0.1.8"))
+          ? checkDescriptor(descriptor("0.1.9"))
           : { kind: "unreachable", error: "connection refused" }
       }
       ignoreVersion={false}

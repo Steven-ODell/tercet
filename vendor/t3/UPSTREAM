@@ -1,5 +1,5 @@
 # Written by scripts/sync-upstream. Source: https://github.com/pingdotgg/t3code
-tag=v0.1.8
-commit=bf469bb19669671d0df2efda74ed73867a7137c0
-files=268
-bytes=2509897
+tag=v0.1.9
+commit=24e77473ecf41bc1f7142529c7911c1c1aae1d76
+files=263
+bytes=2502719

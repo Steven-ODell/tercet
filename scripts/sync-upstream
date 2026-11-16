@@ -2,7 +2,7 @@
 // Vendors the files tercet imports from upstream T3 Code (pingdotgg/t3code) into vendor/t3.
 //
 //   scripts/sync-upstream                 re-vendor the pinned tag (vendor/t3/UPSTREAM)
-//   scripts/sync-upstream v0.1.9          move the pin to another tag
+//   scripts/sync-upstream v0.1.10         move the pin to another tag
 //   scripts/sync-upstream --from <dir>    use a local checkout of that tag instead of cloning
 //   scripts/sync-upstream --check         print the pinned tag and exit
 //
@@ -68,7 +68,7 @@ for (let i = 0; i < args.length; i++) {
   } else if (arg.startsWith("-")) fail(`unknown flag ${arg}`);
   else tag = arg;
 }
-tag ??= pinned()?.tag ?? fail("no pinned tag; pass one, e.g. scripts/sync-upstream v0.1.8");
+tag ??= pinned()?.tag ?? fail("no pinned tag; pass one, e.g. scripts/sync-upstream v0.1.9");
 
 // A local checkout must sit exactly on the tag with clean packages; otherwise clone the tag.
 let source: string;

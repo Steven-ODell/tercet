@@ -98,8 +98,11 @@ const Row = memo(function Row({
         const value = spanAt(row, e.x - (e.currentTarget?.x ?? 0))?.target ?? row.target;
         if (value) point?.(value, false);
       }}
-      onMouseOver={() => {
-        if (row.target) point?.(row.target, false);
+      // opentui also sends "over" after a re-render with the pointer still, so pick the span
+      // under the pointer here too, or a link's target falls back to the whole message.
+      onMouseOver={(e) => {
+        const value = spanAt(row, e.x - (e.currentTarget?.x ?? 0))?.target ?? row.target;
+        if (value) point?.(value, false);
       }}
       onMouseUp={(event) => {
         if (

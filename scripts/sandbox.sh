@@ -10,7 +10,7 @@
 # TERCET_SANDBOX_JOB names the bgrun job (default tercet-sandbox). acceptance.sh sources this file.
 set -euo pipefail
 
-T3_VERSION=0.1.8
+T3_VERSION=0.1.9
 SANDBOX_PORT=${TERCET_SANDBOX_PORT:-3775}
 case "$SANDBOX_PORT" in
   3775|3776) ;;

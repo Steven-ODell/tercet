@@ -1,5 +1,24 @@
 # Changelog
 
+## tercet 0.1.4 (2026-11-16)
+
+Works with T3 Code servers >=0.1.9 <0.2.0, tested on 0.1.9.
+
+- T3 support moves to 0.1.9: the supported range is now >=0.1.9 <0.2.0, so a 0.1.8 server shows
+  the version warning banner.
+- Fixed: after clicking a link, its [open] button could vanish when the screen re-rendered under
+  a still pointer. This was also the cause of the flaky clickable test.
+- Internal planning docs (docs/plans) are no longer published; spike code and raw logs are gone
+  from the tree.
+
+Changes since v0.1.3:
+
+- step 4b: keep a link targeted when opentui resends hover after a render (5435d7c)
+- step 5: move the vendored T3 pin from v0.1.8 to v0.1.9 (83de3bd)
+- step 4: wait for the label's frame in the clickable test (c992f2b)
+- step 2: remove spike code and raw logs from the public tree (c5f06cd)
+- step 1: stop publishing internal handoff plans (32447c8)
+
 ## tercet 0.1.3 (2026-11-15)
 
 Works with T3 Code servers >=0.1.8 <0.2.0, tested on 0.1.8.

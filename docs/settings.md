@@ -370,8 +370,8 @@ paths are read on this machine.
 tercet checks the server before it opens. Only two things stop it: a server it cannot reach (it
 checks again every 2 s) and a server on another orchestration protocol, which client-runtime would
 refuse anyway. A server that reports no version also stops, because client-runtime cannot read
-its descriptor. A version outside the tested range (now `>=0.1.8 <0.2.0`, tested on 0.1.8) starts
-normally under a one-line banner, "Built for T3 0.1.8, you're on 0.2.0: some things may not
+its descriptor. A version outside the tested range (now `>=0.1.9 <0.2.0`, tested on 0.1.9) starts
+normally under a one-line banner, "Built for T3 0.1.9, you're on 0.2.0: some things may not
 work." `Alt+x` (the `dismissNotice` key) or a click hides it for the session. `--ignore-version`,
 or `"ignoreVersion": true` under `server`, gets past a protocol mismatch or a missing version at
 your own risk. `"hideWarning": true` under `server` never draws the banner; a server tercet

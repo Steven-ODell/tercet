@@ -32,7 +32,7 @@ Windows (PowerShell): `irm https://raw.githubusercontent.com/Steven-ODell/tercet
 Binaries for Linux and macOS (x64 and arm64) and Windows (x64) are also on the
 [releases page](https://github.com/Steven-ODell/tercet/releases), each release listing the T3
 Code versions it was tested against. You need a T3 Code server on the same machine; tercet is built
-and tested against T3 0.1.8, and other versions start under a warning banner. The Bun and clone
+and tested against T3 0.1.9, and other versions start under a warning banner. The Bun and clone
 routes need [Bun](https://bun.com) (tested with 1.4.0); the install script's `--bun` flag checks
 for it first.
 
@@ -244,7 +244,7 @@ terminal](docs/settings.md#keys-that-depend-on-the-terminal).
 - **A terminal that claims more than it can do.** Some terminals answer the image queries and
   then draw nothing, or draw garbage. Set `"media": { "protocol": "blocks" }`, or `"none"` for
   placeholders.
-- **"Built for T3 0.1.8, you're on ..." banner.** Your T3 server is a version tercet was not
+- **"Built for T3 0.1.9, you're on ..." banner.** Your T3 server is a version tercet was not
   tested on. It still works, but screens or actions T3 added since may be missing or broken.
   `Alt+x` or a click hides the banner for the session; `"hideWarning": true` under `server` in
   the settings file never draws it. Update tercet when a release for your T3 version is out.

@@ -6,7 +6,7 @@ import {
 import type { PendingSubagentRequest } from "@t3tools/client-runtime/state/models";
 
 // Copied from upstream packages/client-runtime/src/state/threadShell.ts (module-private at
-// v0.1.8). Keep in step with that file when bumping the pinned tag.
+// v0.1.9). Keep in step with that file when bumping the pinned tag.
 
 const EMPTY_SUBAGENT_REQUESTS: ReadonlyMap<ThreadId, PendingSubagentRequest> = new Map();
 
