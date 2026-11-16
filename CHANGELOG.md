@@ -1,5 +1,18 @@
 # Changelog
 
+## tercet 0.1.5 (2026-11-16)
+
+Works with T3 Code servers >=0.1.9 <0.2.0, tested on 0.1.9.
+
+- Fixed: tercet needed `t3` on PATH to issue its first token, which Windows installs often lack.
+  It now looks on PATH, then in the usual npm, bun, pnpm, mise and Homebrew folders, and when it
+  still cannot find `t3` it says what it tried instead of "check t3 CLI".
+- New setting `server.t3Command`: the full path (or command name) of `t3`, for installs it cannot
+  find on its own. On Windows that is `t3.cmd`, usually in `%APPDATA%\npm`.
+- `tercet doctor` prints a `t3 command` row before the first token exists.
+- README and `docs/settings.md` explain both ways past a missing `t3`: set `server.t3Command`, or
+  issue a token yourself with `t3 auth session issue` and set `server.tokenFile`.
+
 ## tercet 0.1.4 (2026-11-16)
 
 Works with T3 Code servers >=0.1.9 <0.2.0, tested on 0.1.9.

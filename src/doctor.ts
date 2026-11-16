@@ -4,6 +4,7 @@ import { recorderStatus } from "./dictation";
 import { READBACK_NOT_SET_UP, readbackPieces, readbackStatus } from "./readback";
 import { connectionConfig, isLoopback, type Config } from "./client/config";
 import { readOptional } from "./client/platform";
+import { findT3, t3Candidates } from "./client/t3-command";
 import {
   SettingsError,
   defaultSettings,
@@ -88,6 +89,8 @@ export interface DoctorReport {
     detail: string;
     tokenFile: string;
     token: "present" | "missing" | "issued on first start";
+    /** Only when tercet must run `t3` to issue the token: where it found it, or why it cannot. */
+    t3?: { ok: boolean; detail: string };
   };
   actions: { name: string; available: boolean | null; detail: string }[];
   look: {
@@ -185,6 +188,22 @@ const imagesReport = (
   setting: string,
 ): DoctorReport["images"] => ({ protocol: rung, setting, ...decision });
 
+/** Can tercet run `t3` to issue its first token? Checked through the probes, nothing is run. */
+async function t3Row(config: Config, probes: DoctorProbes): Promise<{ ok: boolean; detail: string }> {
+  const base = {
+    platform: probes.platform,
+    env: probes.env,
+    home: probes.home,
+    which: probes.which,
+  };
+  const setting = config.settings.server.t3Command;
+  const present = new Set<string>();
+  const paths = [setting, ...t3Candidates({ ...base, exists: () => false })];
+  for (const path of paths) if (path && (await probes.exists(path))) present.add(path);
+  const found = findT3(setting, { ...base, exists: (path) => present.has(path) });
+  return found.found ? { ok: true, detail: `${found.path} (${found.via})` } : { ok: false, detail: found.message };
+}
+
 async function serverReport(config: Config, probes: DoctorProbes): Promise<DoctorReport["server"]> {
   const tokenPresent = await probes.exists(config.tokenFile);
   const local = isLoopback(new URL(config.url).hostname);
@@ -193,7 +212,8 @@ async function serverReport(config: Config, probes: DoctorProbes): Promise<Docto
     : config.managedToken && local
       ? "issued on first start"
       : "missing";
-  const base = { url: config.url, tokenFile: config.tokenFile, token } as const;
+  const t3 = token === "issued on first start" ? await t3Row(config, probes) : undefined;
+  const base = { url: config.url, tokenFile: config.tokenFile, token, ...(t3 && { t3 }) } as const;
   let descriptor: unknown;
   try {
     descriptor = await probes.environment(config.url);
@@ -571,6 +591,7 @@ export function formatReport(report: DoctorReport) {
       `${server.serverVersion ?? "unknown"}, protocol ${server.protocolVersion}: ${server.supported} (${server.detail})`,
     );
   row(server.token !== "missing", "token", `${server.tokenFile} (${server.token})`);
+  if (server.t3) row(server.t3.ok, "t3 command", server.t3.detail);
   for (const action of report.actions)
     row(action.available, `action: ${action.name}`, action.detail);
   const width = Math.max(...rows.map(([, label]) => label.length));

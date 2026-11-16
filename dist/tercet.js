@@ -83102,6 +83102,7 @@ var schema = struct({
   server: struct({
     url: origin,
     tokenFile: text2,
+    t3Command: text2,
     baseDir: text2,
     ignoreVersion: bool,
     hideWarning: bool
@@ -83186,6 +83187,8 @@ function parseSettings(source, path, where, warnings) {
   }
   if (settings.server.tokenFile)
     settings.server.tokenFile = expandPath(settings.server.tokenFile, where.home, where.dir);
+  if (settings.server.t3Command && /^~|[\\/]/.test(settings.server.t3Command))
+    settings.server.t3Command = expandPath(settings.server.t3Command, where.home, where.dir);
   if (settings.server.baseDir)
     settings.server.baseDir = expandPath(settings.server.baseDir, where.home, where.dir);
   if (settings.spell.dictionary)
@@ -84462,7 +84465,7 @@ function cachedShots(shoot) {
 
 // src/main.tsx
 import { appendFile as appendFile2 } from "fs/promises";
-import { homedir as homedir6 } from "os";
+import { homedir as homedir7 } from "os";
 import { join as join9 } from "path";
 
 // src/terminal-lifecycle.ts
@@ -92012,7 +92015,7 @@ async function connectionConfig(args2, read, home = homedir2(), env = process.en
 
 // src/doctor.ts
 import { access } from "fs/promises";
-import { homedir as homedir3, release } from "os";
+import { homedir as homedir4, release } from "os";
 
 // src/client/read-only.ts
 var READ_ONLY_POLICY = {
@@ -132649,6 +132652,66 @@ function clientRpcRequiredScopes(method, input) {
 import { chmod, mkdir as mkdir4, readFile as readFile4, rename, writeFile as writeFile3 } from "fs/promises";
 import { dirname as dirname3 } from "path";
 
+// src/client/t3-command.ts
+import { existsSync } from "fs";
+import { homedir as homedir3 } from "os";
+import { posix, win32 as win323 } from "path";
+function t3Folders(host) {
+  const { env, home } = host;
+  const join7 = host.platform === "win32" ? win323.join : posix.join;
+  if (host.platform === "win32") {
+    return [
+      env.APPDATA && join7(env.APPDATA, "npm"),
+      env.LOCALAPPDATA && join7(env.LOCALAPPDATA, "pnpm"),
+      env.LOCALAPPDATA && join7(env.LOCALAPPDATA, "Programs", "t3"),
+      join7(home, ".bun", "bin")
+    ].filter((folder2) => !!folder2);
+  }
+  return [
+    join7(home, ".local", "bin"),
+    join7(home, ".bun", "bin"),
+    join7(home, ".npm-global", "bin"),
+    join7(home, ".local", "share", "mise", "shims"),
+    join7(home, ".local", "share", "pnpm"),
+    "/opt/homebrew/bin",
+    "/usr/local/bin"
+  ];
+}
+function t3Candidates(host) {
+  const join7 = host.platform === "win32" ? win323.join : posix.join;
+  const names = host.platform === "win32" ? ["t3.cmd", "t3.exe"] : ["t3"];
+  return t3Folders(host).flatMap((folder2) => names.map((name) => join7(folder2, name)));
+}
+function findT3(setting, host) {
+  if (setting) {
+    const path = /[\\/]/.test(setting) ? host.exists(setting) ? setting : null : host.which(setting);
+    return path ? { found: true, path, via: "setting" } : {
+      found: false,
+      message: `server.t3Command is "${setting}", but that is not ${/[\\/]/.test(setting) ? "a file" : "on PATH"}. Point it at your t3 file (on Windows it is t3.cmd, often in %APPDATA%\\npm).`
+    };
+  }
+  const onPath = host.which("t3");
+  if (onPath)
+    return { found: true, path: onPath, via: "PATH" };
+  const usual = t3Candidates(host).find((path) => host.exists(path));
+  if (usual)
+    return { found: true, path: usual, via: "usual folder" };
+  return {
+    found: false,
+    message: `tercet could not find the t3 command, which it uses to issue a token. Install T3 (npm i -g t3), ` + `or set server.t3Command in your settings file to the full path of t3` + `${host.platform === "win32" ? " (t3.cmd)" : ""}. Looked on PATH and in ${t3Folders(host).join(", ")}.` + ` To skip this, issue a token yourself and set server.tokenFile.`
+  };
+}
+function systemT3Host() {
+  const env = process.env;
+  return {
+    platform: process.platform,
+    env,
+    home: homedir3(),
+    which: (program) => Bun.which(program, { PATH: env.PATH ?? "" }),
+    exists: existsSync
+  };
+}
+
 // vendor/t3/packages/shared/src/speech.ts
 var decodeOptions = decodeUnknownSync2(fromJsonString2(SpeechTranscriptionOptions));
 var encodeOptions = encodeSync2(fromJsonString2(SpeechTranscriptionOptions));
@@ -144570,7 +144633,10 @@ function platform(config) {
         throw new Error("Supply a fresh --token-file");
       if (!isLoopback(new URL(config.url).hostname))
         throw new Error("Remote servers require --token-file");
-      const child = Bun.spawn(["t3", ...tokenIssueArgs(config)], {
+      const t3 = findT3(config.settings.server.t3Command, systemT3Host());
+      if (!t3.found)
+        throw new Error(t3.message);
+      const child = Bun.spawn([t3.path, ...tokenIssueArgs(config)], {
         stdout: "pipe",
         stderr: "pipe"
       });
@@ -144580,7 +144646,7 @@ function platform(config) {
         child.exited
       ]);
       if (exit3 !== 0 || !token.trim())
-        throw new Error("Token issuance failed; check t3 CLI and --base-dir");
+        throw new Error(`Token issuance failed (${t3.path}); check that t3 runs and --base-dir`);
       const credential = issuedToken(token);
       await mkdir4(dirname3(config.tokenFile), { recursive: true, mode: 448 });
       const temporary = `${config.tokenFile}.${process.pid}.tmp`;
@@ -144799,7 +144865,7 @@ async function detectAppearance(input, output, env) {
   return fromEnv ? { appearance: fromEnv, source: "COLORFGBG" } : { appearance: null, source: "no answer from the terminal" };
 }
 // package.json
-var version = "0.1.4";
+var version = "0.1.5";
 
 // src/doctor.ts
 var TERCET_VERSION = version;
@@ -144868,11 +144934,28 @@ async function tmuxReport(probes, tmuxPath) {
   };
 }
 var imagesReport = ({ rung, ...decision }, setting) => ({ protocol: rung, setting, ...decision });
+async function t3Row(config, probes) {
+  const base = {
+    platform: probes.platform,
+    env: probes.env,
+    home: probes.home,
+    which: probes.which
+  };
+  const setting = config.settings.server.t3Command;
+  const present3 = new Set;
+  const paths = [setting, ...t3Candidates({ ...base, exists: () => false })];
+  for (const path of paths)
+    if (path && await probes.exists(path))
+      present3.add(path);
+  const found = findT3(setting, { ...base, exists: (path) => present3.has(path) });
+  return found.found ? { ok: true, detail: `${found.path} (${found.via})` } : { ok: false, detail: found.message };
+}
 async function serverReport(config, probes) {
   const tokenPresent = await probes.exists(config.tokenFile);
   const local = isLoopback(new URL(config.url).hostname);
   const token = tokenPresent ? "present" : config.managedToken && local ? "issued on first start" : "missing";
-  const base = { url: config.url, tokenFile: config.tokenFile, token };
+  const t3 = token === "issued on first start" ? await t3Row(config, probes) : undefined;
+  const base = { url: config.url, tokenFile: config.tokenFile, token, ...t3 && { t3 } };
   let descriptor2;
   try {
     descriptor2 = await probes.environment(config.url);
@@ -145099,6 +145182,8 @@ function formatReport(report) {
   if (server2.reachable)
     row(server2.supported === "yes" ? true : server2.supported === "no" ? false : null, "server version", `${server2.serverVersion ?? "unknown"}, protocol ${server2.protocolVersion}: ${server2.supported} (${server2.detail})`);
   row(server2.token !== "missing", "token", `${server2.tokenFile} (${server2.token})`);
+  if (server2.t3)
+    row(server2.t3.ok, "t3 command", server2.t3.detail);
   for (const action of report.actions)
     row(action.available, `action: ${action.name}`, action.detail);
   const width2 = Math.max(...rows.map(([, label]) => label.length));
@@ -145108,7 +145193,7 @@ function formatReport(report) {
 function systemProbes() {
   return {
     env: process.env,
-    home: homedir3(),
+    home: homedir4(),
     platform: process.platform,
     release: release(),
     arch: process.arch,
@@ -161820,8 +161905,8 @@ function applyLook(settings5, appearance) {
 }
 
 // src/keys.ts
-import { homedir as homedir4 } from "os";
-async function runKeys(env = process.env, home = homedir4()) {
+import { homedir as homedir5 } from "os";
+async function runKeys(env = process.env, home = homedir5()) {
   try {
     const { settings: settings5 } = await loadSettings(settingsDir(env, home), readOptional, home);
     applyLook(settings5);
@@ -162199,7 +162284,7 @@ ${found.rows.slice(0, 8).map((row) => `  ${row.shortId}  ${row.title}`).join(`
 }
 
 // src/upgrade.ts
-import { chmodSync, existsSync, renameSync as renameSync2, rmSync, writeFileSync } from "fs";
+import { chmodSync, existsSync as existsSync2, renameSync as renameSync2, rmSync, writeFileSync } from "fs";
 import { dirname as dirname4, join as join7 } from "path";
 var REPO = "Steven-ODell/tercet";
 function assetName(platform2 = process.platform, arch = process.arch) {
@@ -162291,7 +162376,7 @@ async function runUpgrade(args2, fetcher = fetch, self2 = process.execPath) {
       renameSync2(self2, old);
     }
     renameSync2(next2, self2);
-    if (existsSync(old))
+    if (existsSync2(old))
       rmSync(old, { force: true });
     console.log(`Updated ${self2} to ${release2.tag_name}.`);
     console.log(`T3 server: ${supportedRange}, tested on ${PINNED_SERVER_VERSION} (for the old build; run tercet --version for the new).`);
@@ -162307,8 +162392,8 @@ import { spawn as spawn4 } from "child_process";
 import { createHash } from "crypto";
 import { createReadStream, statSync as statSync2 } from "fs";
 import { mkdir as mkdir5, open as open2, rename as rename2, rm as rm3 } from "fs/promises";
-import { homedir as homedir5 } from "os";
-import { join as join8, win32 as win323 } from "path";
+import { homedir as homedir6 } from "os";
+import { join as join8, win32 as win324 } from "path";
 import { createInterface } from "readline";
 var KOKORO_RELEASE_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0";
 var KOKORO_FILES = [
@@ -162333,7 +162418,7 @@ status prints ready, or what is missing, and exits 1 when read aloud is not read
 var megabytes = (bytes2) => `${Math.round(bytes2 / 1e6)} MB`;
 async function runSetup(options2, deps, signal) {
   const win = deps.platform === "win32";
-  const at = win ? win323.join : join8;
+  const at = win ? win324.join : join8;
   const { home } = options2;
   const venvDir = at(home, ".venv");
   const ownVenv = !deps.env.KOKORO_PYTHON;
@@ -162563,7 +162648,7 @@ async function runReadback(args2, deps = systemDeps()) {
     deps.error(`tercet readback ${sub}: ${error2.message}`);
     return 2;
   }
-  const user = homedir5();
+  const user = homedir6();
   let settingsHome = "";
   let engine2 = "local";
   try {
@@ -162610,7 +162695,7 @@ if ((args2.includes("--help") || args2.includes("-h")) && !["list", "tmux", "upg
   console.log(USAGE);
   process.exit(0);
 }
-var migrated = args2.includes("--version") ? undefined : migrateLegacyDir(process.env, homedir6());
+var migrated = args2.includes("--version") ? undefined : migrateLegacyDir(process.env, homedir7());
 if (migrated)
   process.stderr.write(`${migrated}
 `);
@@ -162748,7 +162833,7 @@ ${lines.join(`
       clipboardPassthrough: ["on", "all"].includes(tmuxCapabilities.passthrough ?? ""),
       sshHost: sshHostLookup(process.env, output, (path) => Bun.file(path).text()),
       loadImage,
-      personalDictionary: join9(settingsDir(process.env, homedir6()), "dictionary.txt")
+      personalDictionary: join9(settingsDir(process.env, homedir7()), "dictionary.txt")
     });
     const repaint = () => {
       const { columns, rows } = process.stdout;

@@ -11,6 +11,7 @@ import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { AuthStandardClientScopes } from "@t3tools/contracts";
 import { isLoopback, type Config } from "./config";
+import { findT3, systemT3Host } from "./t3-command";
 import { speechStatus, transcribeSpeech } from "./speech";
 import {
   listPreviews,
@@ -187,7 +188,9 @@ export function platform(config: Config) {
         if (!config.managedToken) throw new Error("Supply a fresh --token-file");
         if (!isLoopback(new URL(config.url).hostname))
           throw new Error("Remote servers require --token-file");
-        const child = Bun.spawn(["t3", ...tokenIssueArgs(config)], {
+        const t3 = findT3(config.settings.server.t3Command, systemT3Host());
+        if (!t3.found) throw new Error(t3.message);
+        const child = Bun.spawn([t3.path, ...tokenIssueArgs(config)], {
           stdout: "pipe",
           stderr: "pipe",
         });
@@ -197,7 +200,7 @@ export function platform(config: Config) {
           child.exited,
         ]);
         if (exit !== 0 || !token.trim())
-          throw new Error("Token issuance failed; check t3 CLI and --base-dir");
+          throw new Error(`Token issuance failed (${t3.path}); check that t3 runs and --base-dir`);
         const credential = issuedToken(token);
         await mkdir(dirname(config.tokenFile), { recursive: true, mode: 0o700 });
         const temporary = `${config.tokenFile}.${process.pid}.tmp`;

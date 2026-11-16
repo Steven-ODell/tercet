@@ -28,6 +28,9 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
     "url": "http://127.0.0.1:3773",
     // "~/" is your home; other relative paths are relative to this directory.
     "tokenFile": "~/.config/tercet/token",
+    // The t3 command tercet runs to issue the first token. Only needed when it is not on PATH;
+    // on Windows this is t3.cmd, often %APPDATA%\npm\t3.cmd.
+    "t3Command": "t3",
     "baseDir": "~/.t3",
     // Start on a server with another protocol or no version (same as --ignore-version).
     "ignoreVersion": false,
@@ -77,6 +80,7 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
 | ----------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------ | --------- |
 | `server.url`                                          | http(s) origin                                                  | runtime file, then `http://127.0.0.1:3773` | now       |
 | `server.tokenFile`                                    | path                                                            | `<settings dir>/token`                     | now       |
+| `server.t3Command`                                    | path or command name                                            | `t3` from PATH, then usual folders         | now       |
 | `server.baseDir`                                      | path                                                            | `~/.t3`                                    | now       |
 | `server.ignoreVersion`                                | true or false                                                   | `false`                                    | now       |
 | `server.hideWarning`                                  | true or false                                                   | `false`                                    | now       |
@@ -100,6 +104,12 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
 
 "Read from" is the build step that starts using a key. Keys for later steps are already checked,
 so a wrong value shows up now rather than later.
+
+If tercet says it cannot find `t3`, set `server.t3Command` to its full path (`npm root -g` shows where
+npm puts it; on Windows look for `t3.cmd` in `%APPDATA%\npm`). Without the setting tercet looks on PATH,
+then in the usual npm, bun, pnpm, mise and Homebrew folders. In the settings file write Windows paths with forward slashes
+(`C:/Users/you/AppData/Roaming/npm/t3.cmd`) or doubled backslashes. `tercet doctor` prints a `t3 command`
+row before the first token exists.
 
 A token file you name in `server.tokenFile` or `--token-file` is yours: tercet reads it but never
 issues a new token into it or changes its permissions.

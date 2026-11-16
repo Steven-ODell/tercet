@@ -80,6 +80,8 @@ export interface Settings {
   server: {
     url?: string;
     tokenFile?: string;
+    /** The `t3` command used to issue a token: a path, or a name on PATH. Empty means search. */
+    t3Command?: string;
     baseDir?: string;
     ignoreVersion?: boolean;
     /** Never draw the server warning banner (version outside the tested range, no version, other protocol). */
@@ -514,6 +516,7 @@ const schema = struct({
   server: struct({
     url: origin,
     tokenFile: text,
+    t3Command: text,
     baseDir: text,
     ignoreVersion: bool,
     hideWarning: bool,
@@ -616,6 +619,8 @@ export function parseSettings(
   }
   if (settings.server.tokenFile)
     settings.server.tokenFile = expandPath(settings.server.tokenFile, where.home, where.dir);
+  if (settings.server.t3Command && /^~|[\\/]/.test(settings.server.t3Command))
+    settings.server.t3Command = expandPath(settings.server.t3Command, where.home, where.dir);
   if (settings.server.baseDir)
     settings.server.baseDir = expandPath(settings.server.baseDir, where.home, where.dir);
   if (settings.spell.dictionary)
