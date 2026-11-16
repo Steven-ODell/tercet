@@ -13,7 +13,7 @@ import {
   type Status,
 } from "./runtime";
 import { platform, readOptional, tokenIssueArgs, issuedToken } from "./platform";
-import { sandboxUrl, tokenPath } from "../spikes/connect";
+import { sandboxUrl, tokenPath } from "../sandbox";
 
 const empty: OrchestrationV2ShellSnapshot = {
   schemaVersion: 1,

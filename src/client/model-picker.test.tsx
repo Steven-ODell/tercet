@@ -17,7 +17,7 @@ import { catalogRows, selectionFor } from "./model-picker";
 import { allThreads, createThreadActions } from "./thread-actions";
 import { platform } from "./platform";
 import { connectionConfig } from "./config";
-import { sandboxUrl, tokenPath } from "../spikes/connect";
+import { sandboxUrl, tokenPath } from "../sandbox";
 
 const provider = {
   ...claude([]),

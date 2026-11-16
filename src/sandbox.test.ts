@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import * as Effect from "effect/Effect";
-import { assertSandboxUrl, listThreads, sandboxUrl, withSandbox } from "./connect";
+import { assertSandboxUrl, listThreads, sandboxUrl, withSandbox } from "./sandbox";
 
-test("spike refuses live, remote and ambiguous sandbox destinations before I/O", () => {
+test("sandbox gate refuses live, remote and ambiguous sandbox destinations before I/O", () => {
   for (const url of [
     "http://127.0.0.1:3773",
     "http://localhost:3775",
@@ -10,7 +10,7 @@ test("spike refuses live, remote and ambiguous sandbox destinations before I/O",
     "https://example.com",
     `${sandboxUrl}/`,
   ]) {
-    expect(() => assertSandboxUrl(url)).toThrow("Sandbox spike only accepts");
+    expect(() => assertSandboxUrl(url)).toThrow("Sandbox gate only accepts");
   }
   expect(() => assertSandboxUrl(sandboxUrl)).not.toThrow();
 });

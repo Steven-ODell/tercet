@@ -14,7 +14,7 @@ import { workMessages, type WorkRow } from "./work-log";
 import { createClient, waitForLive, type Boundary } from "./runtime";
 import { platform } from "./platform";
 import { connectionConfig } from "./config";
-import { sandboxUrl, tokenPath } from "../spikes/connect";
+import { sandboxUrl, tokenPath } from "../sandbox";
 
 const plain = (rows: ReturnType<typeof measureMarkdown>) =>
   rows.map((row) => row.spans.map((span) => span.text).join(""));

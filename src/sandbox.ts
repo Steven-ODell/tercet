@@ -21,11 +21,11 @@ export const sandboxUrl = `http://127.0.0.1:${sandboxPort}`;
 // scripts/sandbox.sh writes the token into its sandbox dir and exports TERCET_SANDBOX_DIR.
 export const tokenPath = process.env.TERCET_SANDBOX_DIR
   ? join(process.env.TERCET_SANDBOX_DIR, "token")
-  : fileURLToPath(new URL("../../.t3/sandbox/token", import.meta.url));
+  : fileURLToPath(new URL("../.t3/sandbox/token", import.meta.url));
 
-// This gate spike must never accidentally reach the live environment.
+// The sandbox gate must never accidentally reach the live environment.
 export function assertSandboxUrl(url: string) {
-  if (url !== sandboxUrl) throw new Error(`Sandbox spike only accepts ${sandboxUrl}`);
+  if (url !== sandboxUrl) throw new Error(`Sandbox gate only accepts ${sandboxUrl}`);
 }
 
 export function connectSandbox(token: string, url = sandboxUrl) {

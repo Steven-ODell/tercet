@@ -7,7 +7,7 @@ import { connectionConfig } from "./config";
 import type { TerminalOp } from "./connection";
 import { platform } from "./platform";
 import { createClient, waitForLive } from "./runtime";
-import { sandboxUrl, tokenPath } from "../spikes/connect";
+import { sandboxUrl, tokenPath } from "../sandbox";
 
 test.skipIf(process.env.TERCET_SANDBOX_TEST !== "1")(
   "sandbox shell: typed command runs on the server and its output reaches the emulator",

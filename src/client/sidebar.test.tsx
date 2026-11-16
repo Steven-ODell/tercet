@@ -41,7 +41,7 @@ import { createClient, waitForLive } from "./runtime";
 import { AppFrame } from "./frame";
 import { platform, readOptional } from "./platform";
 import { connectionConfig } from "./config";
-import { sandboxUrl, tokenPath } from "../spikes/connect";
+import { sandboxUrl, tokenPath } from "../sandbox";
 
 const projectId = Schema.decodeUnknownSync(ProjectId);
 const threadId = Schema.decodeUnknownSync(ThreadId);

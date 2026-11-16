@@ -8,7 +8,7 @@ import {
   WS_METHODS,
   ORCHESTRATION_V2_WS_METHODS as RPC,
 } from "@t3tools/contracts";
-import { withSandbox, sandboxUrl, tokenPath } from "../spikes/connect";
+import { withSandbox, sandboxUrl, tokenPath } from "../sandbox";
 import { connectionConfig } from "./config";
 import { platform } from "./platform";
 import { createClient, waitForLive } from "./runtime";

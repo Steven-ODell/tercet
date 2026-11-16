@@ -9,7 +9,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
-import { withSandbox, sandboxUrl, tokenPath } from "../spikes/connect";
+import { withSandbox, sandboxUrl, tokenPath } from "../sandbox";
 import { createClient, waitForLive, type Client } from "./runtime";
 import { platform } from "./platform";
 import { connectionConfig } from "./config";

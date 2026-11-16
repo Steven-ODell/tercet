@@ -15,7 +15,7 @@ import {
   ORCHESTRATION_V2_WS_METHODS as RPC,
 } from "@t3tools/contracts";
 import * as Stream from "effect/Stream";
-import { withSandbox, sandboxUrl, tokenPath } from "../src/spikes/connect";
+import { withSandbox, sandboxUrl, tokenPath } from "../src/sandbox";
 import { connectionConfig } from "../src/client/config";
 import { platform, readOptional } from "../src/client/platform";
 import { createClient, waitForLive } from "../src/client/runtime";

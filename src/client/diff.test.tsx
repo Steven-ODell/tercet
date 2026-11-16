@@ -13,7 +13,7 @@ import * as Stream from "effect/Stream";
 import { createClient } from "./runtime";
 import { emptyTranscript } from "./transcript-state";
 import { DiffPanel, diffFiles } from "./diff";
-import { withSandbox, listThreads } from "../spikes/connect";
+import { withSandbox, listThreads } from "../sandbox";
 
 const id = ThreadId.make("fixture");
 const patch =

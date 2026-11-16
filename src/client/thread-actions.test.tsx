@@ -15,7 +15,7 @@ import { createClient, waitForLive, type Client } from "./runtime";
 import { allThreads, createThreadActions, fuzzyScore } from "./thread-actions";
 import { platform } from "./platform";
 import { connectionConfig } from "./config";
-import { sandboxUrl, tokenPath } from "../spikes/connect";
+import { sandboxUrl, tokenPath } from "../sandbox";
 import { AppFrame } from "./frame";
 
 const at = DateTime.makeUnsafe("2026-11-08T12:00:00Z");

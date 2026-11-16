@@ -5,7 +5,7 @@ Measured 2026-11-10 (step P0). Source: `apps/tui` from the `tui` worktree workin
 `v0.1.8` (`bf469bb1966`, the latest non-prerelease tag). The fork is based on upstream
 `81493efb71e` (Oct 15, `v0.0.46-nightly.20261015.3176`), so the gap is about four weeks.
 
-Raw material in `docs/compat-p0/`: both typecheck logs, the closure script and its output.
+Raw material in `docs/compat-p0/`: the closure script and its output (the raw typecheck logs are not kept).
 
 ## Headline
 
@@ -29,7 +29,7 @@ Raw material in `docs/compat-p0/`: both typecheck logs, the closure script and i
 | A3 | Fork-only shell field | `OrchestrationV2ShellContextUsage`; fork's `thread.contextUsage` shape | `usage.ts`, `frame.tsx` | Upstream now has `contextUsage` as `ThreadTokenUsageSnapshot`; read that |
 | A4 | Fork-only client-runtime export | `secretRequestCopy` (`secret-request`) | `requests.tsx` (blocks 7 test files) | Copy into `src/ext/` |
 | B | `hostAction` | t3t's own `Boundary.hostAction` (`runtime.ts:65`, `main.tsx:147-152`) wraps the A2 RPCs. Not an upstream method | `runtime.ts`, `main.tsx`, `read-only.test.ts` | Make optional; return "not available" |
-| C1 | Subpath exports the fork added | `rpc/session`, `state/shell-reducer`, `state/thread-shell` (files exist upstream, not exported); renamed upstream: `state/projection` to `state/orchestration-v2-projection`, `state/history-merge` to `state/thread-history-merge`, `state/threadCheckpoints` to `state/thread-checkpoints`, `diffCount` to `diff-count` | `agents.ts`, `connection.ts`, `diff.tsx`, `runtime.ts`, `sidebar.tsx`, `transcript-state.ts`, `spikes/connect.ts` + 17 cascade files | Rename 4 imports; add the 3 missing entries to the vendored export map (one patch file) |
+| C1 | Subpath exports the fork added | `rpc/session`, `state/shell-reducer`, `state/thread-shell` (files exist upstream, not exported); renamed upstream: `state/projection` to `state/orchestration-v2-projection`, `state/history-merge` to `state/thread-history-merge`, `state/threadCheckpoints` to `state/thread-checkpoints`, `diffCount` to `diff-count` | `agents.ts`, `connection.ts`, `diff.tsx`, `runtime.ts`, `sidebar.tsx`, `transcript-state.ts`, `sandbox.ts` (then `spikes/connect.ts`) + 17 cascade files | Rename 4 imports; add the 3 missing entries to the vendored export map (one patch file) |
 | C2 | Not exported upstream | `subagentRequest`, `pendingSubagentRequestsByThread` (`threadShell.ts`; the tui worktree's uncommitted edit exports the first), `providersWithLimits` (`shared/usageLimits`, exported in the fork base, local now) | `agents.ts`, `sidebar.tsx`, `usage.ts` | Copy the small functions into `src/ext/` |
 | C3 | Removed upstream RPCs | `orchestration.subscribeArchivedShell` + `OrchestrationV2ArchivedShellStreamItem` (now `getArchivedShellSnapshot`); `terminal.restart` (now open/attach/observe/write/resize/clear/close) | `connection.ts`, `runtime.ts` | Port to the snapshot RPC; restart = close + open |
 | C4 | Changed upstream shapes | `ShellStreamEvent` union (`runtime.ts:217`); image attachment type (`composer-state.ts:146`); `thread.stop` command (`media-sandbox.test.tsx:33`) | 3 files | Adapt to new types |

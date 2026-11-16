@@ -216,7 +216,7 @@ test.skipIf(process.platform === "win32" || process.env.TERCET_GIT_LIVE !== "1")
   const { platform } = await import("./platform");
   const { createClient, waitForLive } = await import("./runtime");
   const { createThreadActions } = await import("./thread-actions");
-  const { withSandbox } = await import("../spikes/connect");
+  const { withSandbox } = await import("../sandbox");
   const { ORCHESTRATION_V2_WS_METHODS: RPC, ProviderInstanceId } = await import("@t3tools/contracts");
   const Effect = await import("effect/Effect");
   const Stream = await import("effect/Stream");

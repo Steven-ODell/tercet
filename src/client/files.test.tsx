@@ -10,7 +10,7 @@ import { fileIcon } from "./icons";
 const shut = fileIcon("x", "directory").glyph;
 const open = fileIcon("x", "directory", true).glyph;
 import { fileMethods } from "./connection";
-import { sandboxUrl, tokenPath } from "../spikes/connect";
+import { sandboxUrl, tokenPath } from "../sandbox";
 
 async function exercise(source: FilesApi, cwd: string) {
   const pending = new Set<Promise<unknown>>();
