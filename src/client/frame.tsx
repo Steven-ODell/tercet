@@ -430,6 +430,11 @@ export function AppFrame({
       (found === "dismissNotice" && !notice)
         ? undefined
         : found;
+    // The frame may receive the key before the composer hook. Let its selection own Copy.
+    if (command === "quit" && focus === "composer" && renderer.currentFocusedEditor?.hasSelection()) {
+      setQuitArmed(false);
+      return;
+    }
     if (key.defaultPrevented) return;
     // PR drafts and nested Back own Esc and review chords while this overlay is open.
     if (overlay === "pullRequests" && command !== "pullRequests" && command !== "quit") return;
