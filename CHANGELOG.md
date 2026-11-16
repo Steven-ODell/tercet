@@ -1,5 +1,13 @@
 # Changelog
 
+## tercet 0.1.2 (2026-11-15)
+
+Works with T3 Code servers >=0.1.8 <0.2.0, tested on 0.1.8.
+
+Changes since v0.1.1:
+
+- fix: keep dictated text and caret when keys arrive in bursts (91f5a35)
+
 ## tercet 0.1.1 (2026-11-15)
 
 Works with T3 Code servers >=0.1.8 <0.2.0, tested on 0.1.8.
