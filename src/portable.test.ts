@@ -661,3 +661,59 @@ test("missing custom editor commands also explain how to link an executable", as
     build(fake.host, settings).actions.editor!({ cwd: fake.dir, path: "file" }),
   ).rejects.toThrow("full executable path");
 });
+
+test("SSH never uses desktop clipboard tools, even with inherited displays on Linux/macOS", async () => {
+  for (const platform of ["linux", "darwin", "win32"]) {
+    const fake = await fakePath(["wl-copy", "wl-paste", "pbcopy", "pbpaste", "powershell.exe"], {
+      SSH_CONNECTION: "10.0.0.2 1 10.0.0.1 22", WAYLAND_DISPLAY: "w", DISPLAY: ":0",
+    });
+    const host = { ...fake.host, platform };
+    expect(clipboardChain(defaultSettings(), host)).toEqual({ write: undefined, read: undefined });
+    const { actions, terminal } = build(host);
+    await actions.copy("remote");
+    expect(terminal).toEqual(["\x1b]52;c;cmVtb3Rl\x07"]);
+    await expect(actions.pasteClipboard!()).rejects.toThrow("Ctrl+Shift+V or Cmd+V");
+    expect(await fake.log()).toEqual([]);
+  }
+});
+
+test("tmux actions follow local/remote client switches and wrap terminal writes when allowed", async () => {
+  const fake = await fakePath(["wl-copy", "wl-paste"], { TMUX: "tmux", WAYLAND_DISPLAY: "w" });
+  let local = false;
+  const { actions, terminal } = build(fake.host, defaultSettings(), {
+    clipboardLocal: async () => local, clipboardPassthrough: true,
+    loadImage: async () => PNG,
+  });
+  await actions.copy("remote");
+  expect(terminal).toEqual(["\x1bPtmux;\x1b\x1b]52;c;cmVtb3Rl\x07\x1b\\"]);
+  await expect(actions.pasteClipboard!()).rejects.toThrow("Terminal clipboard reading is unavailable");
+  await expect(actions.copyImage!("x")).rejects.toThrow("No clipboard tool");
+  expect(await fake.log()).toEqual([]);
+  local = true;
+  await actions.copy("local");
+  expect(await fake.input("wl-copy")).toBe("local");
+  await fake.output("wl-paste", "text/plain\n");
+  expect((await actions.pasteClipboard!()).type).toBe("text");
+  const before = await fake.log();
+  local = false;
+  await expect(actions.pasteClipboard!()).rejects.toThrow("Terminal clipboard reading is unavailable");
+  expect(await fake.log()).toEqual(before);
+});
+
+test("explicit clipboard commands and named targets own routing over SSH", async () => {
+  const fake = await fakePath(["own-copy", "own-paste", "pc"], { SSH_TTY: "ssh" });
+  const settings = settingsWith(JSON.stringify({
+    commands: { copy: ["own-copy", "{mime}"], paste: ["own-paste", "{mime}"] },
+    targets: { pc: { copy: ["pc", "{mime}"] } },
+  }));
+  const { actions, terminal } = build(fake.host, settings);
+  await actions.copy("configured");
+  expect(await fake.input("own-copy")).toBe("configured");
+  expect(terminal).toEqual([]);
+  await actions.copyTo!("pc", "named");
+  expect(await fake.input("pc")).toBe("named");
+  await fake.output("own-paste", "remote text");
+  expect(await actions.pasteClipboard!()).toEqual({ type: "text", text: "remote text" });
+  await fake.fail("own-copy");
+  await expect(Promise.resolve(actions.copy("fail"))).rejects.toThrow("own-copy broke");
+});

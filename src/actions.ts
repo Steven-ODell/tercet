@@ -35,8 +35,8 @@ export interface Actions {
   spell?: import("./client/spell").SpellChecker;
   embeddedEditor?(input: { cwd: string; path: string }): Promise<import("./embedded-editor").EditorSession>;
   editor?(input: { cwd: string; path: string }): Promise<unknown>;
-  /** OSC 52, plus the local clipboard tool when there is one. */
-  copy(text: string): void;
+  /** Default terminal copy, or the explicit command. Await before destructive edits like Cut. */
+  copy(text: string): void | Promise<void>;
   /** Named clipboards from settings `targets`, in file order. */
   targets?: readonly { name: string; key?: string }[];
   copyTo?(target: string, text: string): Promise<unknown>;
@@ -174,6 +174,29 @@ export function sshHostLookup(
       return sshHostFromEnviron(await read(`/proc/${activeClientPid(clients)}/environ`));
     } catch {
       return sshClientHost(env.SSH_CONNECTION);
+    }
+  };
+}
+
+/** Clipboard access must fail closed when the active tmux client's environment is unknown. */
+export function clipboardLocalLookup(
+  env: Record<string, string | undefined>,
+  output: (args: string[]) => Promise<string>,
+  read: (path: string) => Promise<string>,
+) {
+  const local = (values: Record<string, string | undefined>) =>
+    !values.SSH_CONNECTION && !values.SSH_CLIENT && !values.SSH_TTY;
+  return async () => {
+    if (!env.TMUX) return local(env);
+    try {
+      const pid = activeClientPid(
+        await output(["tmux", "list-clients", "-F", "#{client_activity} #{client_pid}"]),
+      );
+      if (!pid || !/^\d+$/.test(pid)) return false;
+      const environ = await read(`/proc/${pid}/environ`);
+      return !environ.split("\0").some((entry) => /^SSH_(CONNECTION|CLIENT|TTY)=.+/.test(entry));
+    } catch {
+      return false;
     }
   };
 }

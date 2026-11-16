@@ -80745,6 +80745,22 @@ function sshHostLookup(env, output, read) {
     }
   };
 }
+function clipboardLocalLookup(env, output, read) {
+  const local = (values) => !values.SSH_CONNECTION && !values.SSH_CLIENT && !values.SSH_TTY;
+  return async () => {
+    if (!env.TMUX)
+      return local(env);
+    try {
+      const pid = activeClientPid(await output(["tmux", "list-clients", "-F", "#{client_activity} #{client_pid}"]));
+      if (!pid || !/^\d+$/.test(pid))
+        return false;
+      const environ = await read(`/proc/${pid}/environ`);
+      return !environ.split("\x00").some((entry) => /^SSH_(CONNECTION|CLIENT|TTY)=.+/.test(entry));
+    } catch {
+      return false;
+    }
+  };
+}
 var shellQuote = (value) => "'" + value.replaceAll("'", "'\\''") + "'";
 function threadWebUrl(origin, environmentId, threadId) {
   return new URL(`/${encodeURIComponent(environmentId)}/${encodeURIComponent(threadId)}`, origin).href;
@@ -83243,7 +83259,8 @@ function clipboardChain(settings, host) {
     const run = (mime, vars) => expand(spec, { ...vars, mime });
     return { name: `commands.${name}`, images: true, write: run, read: run };
   };
-  const builtin = (program) => CLIPBOARD_TOOLS.find((tool) => tool.usable(host) && host.which(tool[program]));
+  const local = !host.env.TMUX && !host.env.SSH_CONNECTION && !host.env.SSH_CLIENT && !host.env.SSH_TTY;
+  const builtin = (program) => local ? CLIPBOARD_TOOLS.find((tool) => tool.usable(host) && host.which(tool[program])) : undefined;
   return {
     write: configured("copy") ?? builtin("writer"),
     read: configured("paste") ?? builtin("reader")
@@ -83648,6 +83665,13 @@ function hostActions(deps) {
   const { commands, launchers } = settings;
   const grace = deps.graceMs ?? 1000;
   const chain = clipboardChain(settings, host);
+  const clipboard = async () => {
+    const local = deps.clipboardLocal ? await deps.clipboardLocal().catch(() => false) : !host.env.TMUX && !host.env.SSH_CONNECTION && !host.env.SSH_CLIENT && !host.env.SSH_TTY;
+    return clipboardChain(settings, {
+      ...host,
+      env: local ? { ...host.env, TMUX: undefined, SSH_CONNECTION: undefined, SSH_CLIENT: undefined, SSH_TTY: undefined } : { ...host.env, SSH_TTY: "remote-or-unknown" }
+    });
+  };
   const opener = openerChain(settings, host);
   const vars = async (spec, own) => ({
     ...own,
@@ -83655,25 +83679,34 @@ function hostActions(deps) {
   });
   const command2 = (name) => commands[name];
   const run = async (spec, own, options = {}) => runArgs(host, expand(spec, await vars(spec, own)), options);
-  const osc52 = (text3) => deps.writeTerminal(`\x1B]52;c;${Buffer.from(text3).toString("base64")}\x07`);
+  const osc52 = (text3) => {
+    const bytes = `\x1B]52;c;${Buffer.from(text3).toString("base64")}\x07`;
+    deps.writeTerminal(host.env.TMUX && deps.clipboardPassthrough ? `\x1BPtmux;${bytes.replaceAll("\x1B", "\x1B\x1B")}\x1B\\` : bytes);
+  };
   const writeClipboard = async (data, mime) => {
-    const tool = chain.write;
+    const tool = (await clipboard()).write;
     if (!tool)
       throw new Error("No clipboard tool");
     const spec = settings.commands.copy;
     await runArgs(host, tool.write(mime, await vars(spec, {})), { stdin: data, timeoutMs: 15000 });
   };
+  const requireReader = (tool) => {
+    if (!tool)
+      throw new Error("Terminal clipboard reading is unavailable; use your terminal's Paste (usually Ctrl+Shift+V or Cmd+V), or configure commands.paste");
+    return tool;
+  };
   const readClipboard = async (mime) => {
-    const tool = chain.read;
+    const tool = requireReader((await clipboard()).read);
     return runArgs(host, tool.read(mime, await vars(settings.commands.paste, {})), {
       capture: true,
       timeoutMs: 15000
     });
   };
   const copy = (text3) => {
+    if (commands.copy)
+      return writeClipboard(text3, TEXT);
     osc52(text3);
-    if (chain.write)
-      writeClipboard(text3, TEXT).catch(() => {});
+    return writeClipboard(text3, TEXT).catch(() => {});
   };
   const targets2 = Object.entries(settings.targets).map(([name, target2]) => ({
     name,
@@ -83700,7 +83733,7 @@ function hostActions(deps) {
     actions.targets = targets2.map(({ name, key }) => ({ name, key }));
     actions.copyTo = async (name, text3) => run(targetSpec(name), { mime: TEXT }, { stdin: text3, timeoutMs: 15000 });
   }
-  if (chain.write?.images && deps.loadImage)
+  if ((chain.write?.images || host.env.TMUX) && deps.loadImage)
     actions.copyImage = async (source, cwd) => {
       const bytes = await deps.loadImage(source, cwd);
       await writeClipboard(bytes, imageMime(bytes));
@@ -83710,11 +83743,11 @@ function hostActions(deps) {
       const bytes = await deps.loadImage(source, cwd);
       await run(targetSpec(name), { mime: imageMime(bytes) }, { stdin: bytes, timeoutMs: 30000 });
     };
-  if (chain.read) {
-    const tool = chain.read;
+  if (chain.read || host.env.TMUX || host.env.SSH_CONNECTION || host.env.SSH_CLIENT || host.env.SSH_TTY) {
     actions.pasteClipboard = async () => {
+      const tool = requireReader((await clipboard()).read);
       if (tool.types) {
-        const types = decode(await runArgs(host, tool.types, { capture: true })).split(/\r?\n/);
+        const types = decode(await runArgs(host, tool.types, { capture: true, timeoutMs: 15000 })).split(/\r?\n/);
         if (tool.images && types.includes("image/png"))
           return { type: "image", bytes: await readClipboard("image/png") };
         if (!types.some(isText))
@@ -83728,7 +83761,7 @@ function hostActions(deps) {
       }
       return { type: "text", text: decode(await readClipboard(TEXT)) };
     };
-    if (tool.images)
+    if (chain.read?.images)
       actions.pasteImage = () => readClipboard("image/png");
   }
   if (opener) {
@@ -144855,7 +144888,7 @@ async function actionsReport(settings2, host, probes, readOnly2) {
     const { program, ok } = await programOf(spec, probes);
     add4(name, ok, ok ? `${key5}: ${program}` : `${key5}: ${program} not found`);
   };
-  add4("copy text", true, `OSC 52 (the terminal must allow clipboard writes)${chain.write ? ` and ${toolName(chain.write, "writer")}` : ""}`);
+  add4("copy text", true, settings2.commands.copy ? toolName(chain.write, "writer") : `OSC 52 (the terminal must allow clipboard writes)${chain.write ? ` and ${toolName(chain.write, "writer")}` : ""}`);
   add4("paste text", !!chain.read, chain.read ? toolName(chain.read, "reader") : "no clipboard reader found");
   add4("paste image", !!chain.read?.images, chain.read?.images ? toolName(chain.read, "reader") : chain.read ? `${toolName(chain.read, "reader")} is text only` : "no clipboard reader found");
   add4("copy image", !!chain.write?.images, chain.write?.images ? toolName(chain.write, "writer") : chain.write ? `${toolName(chain.write, "writer")} is text only` : "no clipboard writer found");
@@ -144969,7 +145002,7 @@ async function doctorReport(args2, probes) {
       poster: !!found("ffmpeg")
     },
     clipboard: {
-      write: ["OSC 52", ...chain.write ? [toolName(chain.write, "writer")] : []],
+      write: [...config.settings.commands.copy ? [] : ["OSC 52"], ...chain.write ? [toolName(chain.write, "writer")] : []],
       read: chain.read ? [toolName(chain.read, "reader")] : [],
       images: !!(chain.write?.images && chain.read?.images)
     },
@@ -162399,11 +162432,12 @@ ${lines.join(`
     };
     const inTmux = !!process.env.TMUX;
     const setting = config.settings.media.protocol;
+    const tmuxCapabilities = inTmux ? await tmuxMedia(probe).catch(() => ({ inside: true, passthrough: null, client: null })) : { inside: false, passthrough: null, client: null };
     setMedia(decideMedia({
       setting,
       env: process.env,
       replies: setting === "auto" && !inTmux ? await queryTerminal(process.stdin, process.stdout) : null,
-      tmux: inTmux ? await tmuxMedia(probe).catch(() => ({ inside: true, passthrough: null, client: null })) : { inside: false, passthrough: null, client: null },
+      tmux: tmuxCapabilities,
       ascii: iconMode() === "ascii"
     }), config.settings.media.video);
     setPageShots(pageShotsFromEnv(process.env) && media().rung !== "none");
@@ -162432,7 +162466,7 @@ ${lines.join(`
       await client?.dispose();
     }, kittyReset);
     const output = async (args3) => {
-      const child = Bun.spawn(args3, { stdout: "pipe", stderr: "ignore" });
+      const child = Bun.spawn(args3, { stdout: "pipe", stderr: "ignore", timeout: 3000 });
       const text5 = await new Response(child.stdout).text();
       if (await child.exited !== 0)
         throw new Error(`${args3[0]} failed`);
@@ -162448,6 +162482,8 @@ ${lines.join(`
       host: systemHost(),
       localWorkspace: isLoopback(new URL(config.url).hostname),
       writeTerminal: (bytes2) => process.stdout.write(bytes2),
+      clipboardLocal: clipboardLocalLookup(process.env, output, (path) => Bun.file(path).text()),
+      clipboardPassthrough: ["on", "all"].includes(tmuxCapabilities.passthrough ?? ""),
       sshHost: sshHostLookup(process.env, output, (path) => Bun.file(path).text()),
       loadImage,
       personalDictionary: join9(settingsDir(process.env, homedir6()), "dictionary.txt")

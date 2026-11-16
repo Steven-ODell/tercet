@@ -6,7 +6,7 @@ import { Hello, sample } from "./hello";
 
 test("mouse click, wheel, drag selection and keyboard equivalents", async () => {
   const copies: string[] = [];
-  const view = await testRender(<Hello actions={{ copy: (text) => copies.push(text) }} />, {
+  const view = await testRender(<Hello actions={{ copy: (text) => { copies.push(text); } }} />, {
     width: 120,
     height: 40,
   });

@@ -34,7 +34,7 @@ import { terminalLifecycle } from "./terminal-lifecycle";
 import { createCliRenderer } from "@opentui/core";
 import * as Effect from "effect/Effect";
 import { createRoot } from "@opentui/react";
-import { sshHostLookup, terminalActions } from "./actions";
+import { clipboardLocalLookup, sshHostLookup, terminalActions } from "./actions";
 import { hostActions, systemHost } from "./portable";
 import { Hello } from "./hello";
 import { ConfigError, USAGE, connectionConfig, isLoopback } from "./client/config";
@@ -158,15 +158,16 @@ try {
     };
     const inTmux = !!process.env.TMUX;
     const setting = config.settings.media.protocol;
+    const tmuxCapabilities = inTmux
+      ? await tmuxMedia(probe).catch(() => ({ inside: true, passthrough: null, client: null }))
+      : { inside: false, passthrough: null, client: null };
     setMedia(
       decideMedia({
         setting,
         env: process.env,
         replies:
           setting === "auto" && !inTmux ? await queryTerminal(process.stdin, process.stdout) : null,
-        tmux: inTmux
-          ? await tmuxMedia(probe).catch(() => ({ inside: true, passthrough: null, client: null }))
-          : { inside: false, passthrough: null, client: null },
+        tmux: tmuxCapabilities,
         ascii: iconMode() === "ascii",
       }),
       config.settings.media.video,
@@ -208,7 +209,7 @@ try {
       kittyReset,
     );
     const output = async (args: string[]) => {
-      const child = Bun.spawn(args, { stdout: "pipe", stderr: "ignore" });
+      const child = Bun.spawn(args, { stdout: "pipe", stderr: "ignore", timeout: 3000 });
       const text = await new Response(child.stdout).text();
       if ((await child.exited) !== 0) throw new Error(`${args[0]} failed`);
       return text;
@@ -228,6 +229,8 @@ try {
       host: systemHost(),
       localWorkspace: isLoopback(new URL(config.url).hostname),
       writeTerminal: (bytes) => process.stdout.write(bytes),
+      clipboardLocal: clipboardLocalLookup(process.env, output, (path) => Bun.file(path).text()),
+      clipboardPassthrough: ["on", "all"].includes(tmuxCapabilities.passthrough ?? ""),
       sshHost: sshHostLookup(process.env, output, (path) => Bun.file(path).text()),
       loadImage,
       personalDictionary: join(settingsDir(process.env, homedir()), "dictionary.txt"),
