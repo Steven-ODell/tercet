@@ -87,9 +87,9 @@ test("doctor reports a tmux machine with passthrough off and a supported server"
     hint: "images need it: add `set -g allow-passthrough on` to tmux.conf",
   });
   expect(report.clipboard).toEqual({
-    write: ["OSC 52", "wl-copy"],
-    read: ["wl-paste"],
-    images: true,
+    write: ["OSC 52"],
+    read: [],
+    images: false,
   });
   expect(report.opener).toEqual({ configured: null, found: "xdg-open" });
   expect(report.tools).toEqual({ tmux: "/usr/bin/tmux", ffmpeg: "/usr/bin/ffmpeg", mpv: null });
@@ -105,9 +105,9 @@ test("doctor reports a tmux machine with passthrough off and a supported server"
   expect(action("copy text")).toEqual({
     name: "copy text",
     available: true,
-    detail: "OSC 52 (the terminal must allow clipboard writes) and wl-copy",
+    detail: "OSC 52 (the terminal must allow clipboard writes)",
   });
-  expect(action("paste image")?.available).toBe(true);
+  expect(action("paste image")?.available).toBe(false);
   expect(action("open links and files")?.detail).toBe("xdg-open");
   // Nothing personal is built in: without settings these are off and say how to turn them on.
   expect(action("shell")).toEqual({

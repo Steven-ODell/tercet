@@ -292,7 +292,9 @@ async function actionsReport(
   add(
     "copy text",
     true,
-    `OSC 52 (the terminal must allow clipboard writes)${chain.write ? ` and ${toolName(chain.write, "writer")}` : ""}`,
+    settings.commands.copy
+      ? toolName(chain.write!, "writer")
+      : `OSC 52 (the terminal must allow clipboard writes)${chain.write ? ` and ${toolName(chain.write, "writer")}` : ""}`,
   );
   add(
     "paste text",
@@ -468,7 +470,7 @@ export async function doctorReport(args: string[], probes: DoctorProbes): Promis
       poster: !!found("ffmpeg"),
     },
     clipboard: {
-      write: ["OSC 52", ...(chain.write ? [toolName(chain.write, "writer")] : [])],
+      write: [...(config.settings.commands.copy ? [] : ["OSC 52"]), ...(chain.write ? [toolName(chain.write, "writer")] : [])],
       read: chain.read ? [toolName(chain.read, "reader")] : [],
       images: !!(chain.write?.images && chain.read?.images),
     },

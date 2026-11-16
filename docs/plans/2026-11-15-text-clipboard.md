@@ -75,15 +75,24 @@ Do not install, push, tag, release, rename, or change Sao's desktop configuratio
 
 ## Steps
 
-- [ ] 1. Route default clipboard actions to the current terminal machine.
+- [x] 1. Route default clipboard actions to the current terminal machine.
   Files: src/portable.ts clipboardChain/hostActions, src/portable.test.ts,
   src/actions.ts SSH/tmux helpers, src/main.tsx hostActions initialization,
-  src/client/media.ts tmux capability handling, docs/settings.md clipboard sections.
+  src/client/media.ts tmux capability handling, docs/settings.md clipboard sections,
+  src/actions.test.ts, src/doctor.ts and src/doctor.test.ts clipboard reporting,
+  src/hello.test.tsx copy callback type, acceptance/*.txt Paste affordance.
   Implement and test local vs SSH/tmux routing, OSC52 transport and remote-paste
   behavior. Honor configured commands/targets intentionally; avoid server fallback
   on remote clipboard reads. Expand these Files if discovery requires it.
   Verify: `bun test src/portable.test.ts src/actions.test.ts`; exit 0.
   Baseline: `bun run build` then `bun run check`; both exit 0. Save logs.
+  Result (2026-11-15): OSC52 with tmux passthrough; desktop tools gated by the
+  active client's environment per action; explicit commands/targets own routing.
+  Remote paste gives terminal shortcut/configuration guidance without a query.
+  Scoped tests 31 pass; full check 519 pass/20 skip, typecheck/bundle/acceptance 0.
+  Logs: /tmp/tercet-step1-tests-final.hnBFcv.log,
+  /tmp/tercet-step1-build-final.d9vXWH.log, /tmp/tercet-step1-check-final.kv2Uw0.log.
+  Physical PC/laptop clipboard delivery remains a manual check.
   Done when routing has regression tests, supported remote path is concrete,
   unsupported paste is honest/actionable, bundle is current, changes committed.
 

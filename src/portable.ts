@@ -141,8 +141,9 @@ export function clipboardChain(settings: Settings, host: Host): ClipboardChain {
     const run = (mime: string, vars: Vars) => expand(spec, { ...vars, mime });
     return { name: `commands.${name}`, images: true, write: run, read: run };
   };
+  const local = !host.env.TMUX && !host.env.SSH_CONNECTION && !host.env.SSH_CLIENT && !host.env.SSH_TTY;
   const builtin = (program: "writer" | "reader") =>
-    CLIPBOARD_TOOLS.find((tool) => tool.usable(host) && host.which(tool[program]));
+    local ? CLIPBOARD_TOOLS.find((tool) => tool.usable(host) && host.which(tool[program])) : undefined;
   return {
     write: configured("copy") ?? builtin("writer"),
     read: configured("paste") ?? builtin("reader"),
@@ -617,6 +618,10 @@ export interface HostDeps {
   sshHost?(): Promise<string | undefined>;
   /** Image bytes for copy-image; set by the caller, which knows the server. */
   loadImage?(source: string, cwd?: string): Promise<Uint8Array>;
+  /** Rechecked per action: a tmux pane may move between local and remote clients. */
+  clipboardLocal?(): Promise<boolean>;
+  /** tmux passthrough capability, probed before the renderer starts. */
+  clipboardPassthrough?: boolean;
   graceMs?: number;
   /** Where added words go when settings `spell.dictionary` is not set. */
   personalDictionary?: string;
@@ -628,6 +633,18 @@ export function hostActions(deps: HostDeps): Actions {
   const { commands, launchers } = settings;
   const grace = deps.graceMs ?? 1000;
   const chain = clipboardChain(settings, host);
+  // Tool discovery alone cannot tell which machine an attached tmux client belongs to.
+  const clipboard = async () => {
+    const local = deps.clipboardLocal
+      ? await deps.clipboardLocal().catch(() => false)
+      : !host.env.TMUX && !host.env.SSH_CONNECTION && !host.env.SSH_CLIENT && !host.env.SSH_TTY;
+    return clipboardChain(settings, {
+      ...host,
+      env: local
+        ? { ...host.env, TMUX: undefined, SSH_CONNECTION: undefined, SSH_CLIENT: undefined, SSH_TTY: undefined }
+        : { ...host.env, SSH_TTY: "remote-or-unknown" },
+    });
+  };
   const opener = openerChain(settings, host);
   const vars = async (spec: CommandSpec | undefined, own: Vars): Promise<Vars> => ({
     ...own,
@@ -636,25 +653,38 @@ export function hostActions(deps: HostDeps): Actions {
   const command = (name: CommandName) => commands[name];
   const run = async (spec: CommandSpec, own: Vars, options: RunOptions = {}) =>
     runArgs(host, expand(spec, await vars(spec, own)), options);
-  const osc52 = (text: string) =>
-    deps.writeTerminal(`\x1b]52;c;${Buffer.from(text).toString("base64")}\x07`);
+  const osc52 = (text: string) => {
+    const bytes = `\x1b]52;c;${Buffer.from(text).toString("base64")}\x07`;
+    deps.writeTerminal(host.env.TMUX && deps.clipboardPassthrough
+      ? `\x1bPtmux;${bytes.replaceAll("\x1b", "\x1b\x1b")}\x1b\\`
+      : bytes);
+  };
   const writeClipboard = async (data: string | Uint8Array, mime: string) => {
-    const tool = chain.write;
+    const tool = (await clipboard()).write;
     if (!tool) throw new Error("No clipboard tool");
     const spec = settings.commands.copy;
     await runArgs(host, tool.write(mime, await vars(spec, {})), { stdin: data, timeoutMs: 15_000 });
   };
+  const requireReader = (tool: ClipboardTool | undefined) => {
+    if (!tool)
+      throw new Error(
+        "Terminal clipboard reading is unavailable; use your terminal's Paste (usually Ctrl+Shift+V or Cmd+V), or configure commands.paste",
+      );
+    return tool;
+  };
   const readClipboard = async (mime: string) => {
-    const tool = chain.read!;
+    const tool = requireReader((await clipboard()).read);
     return runArgs(host, tool.read(mime, await vars(settings.commands.paste, {})), {
       capture: true,
       timeoutMs: 15_000,
     });
   };
   const copy = (text: string) => {
+    // Explicit commands own their destination and report failure to callers (e.g. Cut).
+    if (commands.copy) return writeClipboard(text, TEXT);
     osc52(text);
-    // OSC 52 already reached the terminal; the local tool is a bonus, so its failure is quiet.
-    if (chain.write) void writeClipboard(text, TEXT).catch(() => {});
+    // Terminal copy is primary; a local desktop tool is only a convenience.
+    return writeClipboard(text, TEXT).catch(() => {});
   };
   const targets = Object.entries(settings.targets).map(([name, target]) => ({
     name,
@@ -680,7 +710,7 @@ export function hostActions(deps: HostDeps): Actions {
     actions.copyTo = async (name, text) =>
       run(targetSpec(name), { mime: TEXT }, { stdin: text, timeoutMs: 15_000 });
   }
-  if (chain.write?.images && deps.loadImage)
+  if ((chain.write?.images || host.env.TMUX) && deps.loadImage)
     actions.copyImage = async (source, cwd) => {
       const bytes = await deps.loadImage!(source, cwd);
       await writeClipboard(bytes, imageMime(bytes));
@@ -690,11 +720,11 @@ export function hostActions(deps: HostDeps): Actions {
       const bytes = await deps.loadImage!(source, cwd);
       await run(targetSpec(name), { mime: imageMime(bytes) }, { stdin: bytes, timeoutMs: 30_000 });
     };
-  if (chain.read) {
-    const tool = chain.read;
+  if (chain.read || host.env.TMUX || host.env.SSH_CONNECTION || host.env.SSH_CLIENT || host.env.SSH_TTY) {
     actions.pasteClipboard = async () => {
+      const tool = requireReader((await clipboard()).read);
       if (tool.types) {
-        const types = decode(await runArgs(host, tool.types, { capture: true })).split(/\r?\n/);
+        const types = decode(await runArgs(host, tool.types, { capture: true, timeoutMs: 15_000 })).split(/\r?\n/);
         if (tool.images && types.includes("image/png"))
           return { type: "image", bytes: await readClipboard("image/png") };
         if (!types.some(isText)) throw new Error("Clipboard has no image or text");
@@ -705,7 +735,7 @@ export function hostActions(deps: HostDeps): Actions {
       }
       return { type: "text", text: decode(await readClipboard(TEXT)) };
     };
-    if (tool.images) actions.pasteImage = () => readClipboard("image/png");
+    if (chain.read?.images) actions.pasteImage = () => readClipboard("image/png");
   }
   if (opener) {
     actions.openUrl = async (url) => {
