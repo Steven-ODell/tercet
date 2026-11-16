@@ -49,9 +49,7 @@ test("a long draft wraps inside the composer and keeps the caret beside the text
       visible: true,
     });
     const findEditor = (node: Renderable): TextareaRenderable | undefined =>
-      node instanceof TextareaRenderable
-        ? node
-        : node.getChildren().map(findEditor).find(Boolean);
+      node instanceof TextareaRenderable ? node : node.getChildren().map(findEditor).find(Boolean);
     const editor = findEditor(view.renderer.root)!;
     const rightBorder = lines[end]!.lastIndexOf("│");
     for (const length of [editor.width - 1, editor.width, editor.width + 1, editor.width * 2]) {
@@ -81,9 +79,7 @@ test("keys typed in bursts (voxtype) keep every character and the caret at the e
     { width: 174, height: 22, kittyKeyboard: true, exitOnCtrlC: false },
   );
   const findEditor = (node: Renderable): TextareaRenderable | undefined =>
-    node instanceof TextareaRenderable
-      ? node
-      : node.getChildren().map(findEditor).find(Boolean);
+    node instanceof TextareaRenderable ? node : node.getChildren().map(findEditor).find(Boolean);
   const sentence =
     "Can we make it so that it also has these features as well where it shows the color of the assistant is blue and it says assistant above it and then the color of mine is green and it says user above mine. Also, can we make it so that there's more themes to choose from please ";
   const dictated = sentence.repeat(3);
@@ -789,7 +785,8 @@ test("while the composer is collapsed, the status line carries the mic's message
     exitOnCtrlC: false,
   });
   const lines = () => view.captureCharFrame().split("\n");
-  const status = () => lines().find((line) => line.includes("Focus:") || line.includes("Mic ")) ?? "";
+  const status = () =>
+    lines().find((line) => line.includes("Focus:") || line.includes("Mic ")) ?? "";
   try {
     await view.waitForFrame((frame) => frame.includes("Focus: sidebar"));
     const composerRow = lines().findIndex((line) => line.includes("Composer─"));
@@ -917,5 +914,151 @@ test.each([
   } finally {
     await act(async () => view.renderer.destroy());
     setTheme({});
+  }
+});
+
+const findTextEditor = (node: Renderable): TextareaRenderable | undefined =>
+  node instanceof TextareaRenderable ? node : node.getChildren().map(findTextEditor).find(Boolean);
+
+test("composer drag, right-click, Copy/Cut/Paste and undo preserve the draft and selection", async () => {
+  const h = await composerFixture();
+  const copied: string[] = [];
+  let finish: (() => void) | undefined;
+  let fail = false;
+  const view = await testRender(
+    <ThreadComposer
+      client={h.client}
+      enabled
+      effects={{
+        copy: async (text) => {
+          copied.push(text);
+          if (fail) throw new Error("clipboard rejected");
+          await new Promise<void>((resolve) => {
+            finish = resolve;
+          });
+        },
+        pasteClipboard: async () => ({ type: "text", text: "NEW" }),
+      }}
+    />,
+    { width: 80, height: 24, kittyKeyboard: true, exitOnCtrlC: false },
+  );
+  const flush = () => view.flush();
+  const key = async (name: string) => {
+    await act(async () => view.mockInput.pressKey(name));
+    await flush();
+  };
+  const editor = () => findTextEditor(view.renderer.root)!;
+  const menu = async () => {
+    await act(async () => view.mockMouse.click(editor().x + 8, editor().y, 2));
+    await flush();
+  };
+  const pick = async (label: string) => {
+    const rows = view.captureCharFrame().split("\n");
+    const y = rows.findIndex((row) => new RegExp(`\\b${label}\\s*│`).test(row));
+    expect(y).toBeGreaterThanOrEqual(0);
+    await act(async () => view.mockMouse.click(rows[y]!.indexOf(label), y));
+    await flush();
+  };
+  try {
+    await act(async () => view.mockInput.pasteBracketedText("hello world"));
+    await flush();
+    await act(async () => view.mockMouse.drag(editor().x, editor().y, editor().x + 4, editor().y));
+    await flush();
+    const selected = editor().getSelectedText();
+    expect(selected).toBe("hello");
+    await menu();
+    expect(editor().getSelectedText()).toBe(selected);
+    await pick("Copy");
+    expect(copied).toEqual([selected]);
+    await act(async () => finish?.());
+    await flush();
+    expect(editor().plainText).toBe("hello world");
+    await menu();
+    await pick("Cut");
+    expect(editor().plainText).toBe("hello world");
+    await act(async () => finish?.());
+    await flush();
+    expect(editor().plainText).toBe(" world");
+    await menu();
+    await pick("Undo");
+    expect(editor().plainText).toBe("hello world");
+    await menu();
+    await pick("Redo");
+    expect(editor().plainText).toBe(" world");
+    await menu();
+    await pick("Select all");
+    expect(editor().getSelectedText()).toBe(" world");
+    fail = true;
+    await menu();
+    await pick("Cut");
+    expect(editor().plainText).toBe(" world");
+    expect(view.captureCharFrame()).toContain("clipboard rejected");
+    fail = false;
+    await menu();
+    await pick("Cut");
+    await act(async () => view.mockInput.typeText("changed while copying"));
+    await flush();
+    await act(async () => finish?.());
+    await flush();
+    expect(editor().plainText).toBe("changed while copying");
+    await menu();
+    await pick("Select all");
+    await menu();
+    await pick("Paste");
+    expect(editor().plainText).toBe("NEW");
+    await menu();
+    await key("ESCAPE");
+    expect(view.captureCharFrame()).not.toContain("Select all");
+    await menu();
+    await act(async () => view.mockMouse.click(70, 20));
+    await flush();
+    expect(view.captureCharFrame()).not.toContain("Select all");
+    expect(h.commands).toHaveLength(0);
+  } finally {
+    await act(async () => view.renderer.destroy());
+  }
+});
+
+test("selected composer Ctrl+C copies without arming quit in the full frame", async () => {
+  const h = await composerFixture();
+  const copied: string[] = [];
+  let quits = 0;
+  const view = await testRender(
+    <AppFrame
+      client={h.client}
+      effects={{
+        copy: (text) => {
+          copied.push(text);
+        },
+      }}
+      onQuit={() => quits++}
+    />,
+    { width: 100, height: 30, kittyKeyboard: true, exitOnCtrlC: false },
+  );
+  const ctrlC = async () => {
+    await act(async () => view.mockInput.pressKey("c", { ctrl: true }));
+    await view.flush();
+  };
+  try {
+    await act(async () => view.mockInput.pasteBracketedText("hello world"));
+    await view.flush();
+    const editor = findTextEditor(view.renderer.root)!;
+    await act(async () => view.mockMouse.drag(editor.x, editor.y, editor.x + 4, editor.y));
+    await view.flush();
+    expect(editor.getSelectedText()).toBe("hello");
+    await ctrlC();
+    await ctrlC();
+    expect(copied).toEqual(["hello", "hello"]);
+    expect(view.captureCharFrame()).not.toContain("again to quit");
+    expect(quits).toBe(0);
+    await act(async () => {
+      editor.editorView.resetSelection();
+    });
+    await ctrlC();
+    expect(view.captureCharFrame()).toContain("again to quit");
+    await ctrlC();
+    expect(quits).toBe(1);
+  } finally {
+    await act(async () => view.renderer.destroy());
   }
 });

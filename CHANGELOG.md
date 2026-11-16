@@ -1,5 +1,16 @@
 # Changelog
 
+## tercet 0.1.3 (2026-11-15)
+
+Works with T3 Code servers >=0.1.8 <0.2.0, tested on 0.1.8.
+
+Changes since v0.1.2:
+
+- step 3: add transcript selection copy menu and verify integration (896900b)
+- step 2: add composer text context menu and safe selection copying (1df27ad)
+- step 1: route clipboard actions to the current terminal machine (c6f2f97)
+- docs: plan text clipboard and context menu build loop (27a0ab2)
+
 ## tercet 0.1.2 (2026-11-15)
 
 Works with T3 Code servers >=0.1.8 <0.2.0, tested on 0.1.8.

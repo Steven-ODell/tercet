@@ -300,15 +300,40 @@ its button label. Y, T, X, F, O, G and V are taken, and a target may not be call
 
 ### Clipboard and opener
 
-Without `commands.copy` and `commands.paste` tercet uses the first tool it finds:
+For a local terminal, without `commands.copy` and `commands.paste`, tercet uses the first tool it finds:
 
 1. `wl-copy`/`wl-paste` when `WAYLAND_DISPLAY` is set (text and images)
 2. `xclip` when `DISPLAY` is set (text and images), then `xsel` (text only)
 3. `pbcopy`/`pbpaste` on macOS (text only)
 4. Windows PowerShell with the native Windows clipboard (text and images)
 
-Copying text always writes OSC 52 too, so it reaches your local clipboard over SSH when the
-terminal allows it. Image copy and image paste appear only when the tool handles images.
+Composer right-click offers editing actions and spelling suggestions; transcript drag-selection
+and right-click offers Copy of exactly the highlighted text. Drag completion still auto-copies.
+Right-click preserves selection, including Vim visual selections. The transcript pauses wheel
+scrolling while its menu is open so its selected rows stay mounted; dismiss with Escape or a
+click outside the menu before scrolling. Shift mouse selection belongs to the terminal.
+Ctrl+C copies a mouse-selected transcript or composer selection without arming quit; without
+selection, two presses quit. Vim `y`/`yy` remain selection/line yank. The embedded terminal
+retains Ctrl+C interrupt. Copy errors are reported; OSC 52 success means emitted, with no
+terminal acknowledgement of clipboard delivery.
+
+Default text Copy writes OSC 52 to the terminal, including over SSH, when the terminal
+allows clipboard writes. A local desktop tool is also used only when the active client is
+confirmed local. Inside tmux this is checked on every action using the most recently active
+client's environment (Linux /proc); an unknown client never falls back to the server clipboard.
+When tmux allows passthrough, OSC 52 is wrapped for the outer terminal. Otherwise tmux must
+support OSC 52 forwarding (`set-clipboard` on and the terminal's `Ms` capability);
+a blocked terminal write cannot be acknowledged or detected by tercet.
+
+Remote Paste does not query the terminal clipboard: many terminals prohibit those reads.
+It reports a hint to use the terminal's Paste shortcut (usually Ctrl+Shift+V on Linux/Windows,
+Cmd+V on macOS), which delivers text through terminal paste input. No server clipboard is read.
+For programmatic paste, configure `commands.paste` to read from the intended machine, e.g.
+an SSH-aware command using `{sshHost}`. Such commands have a 15-second timeout.
+
+Explicit `commands.copy` owns the destination and replaces OSC 52 and the built-in writer.
+Named targets likewise write only to the named destination. Image clipboard operations require
+a suitable local tool or an explicit command; remote operations never fall back to a server tool.
 
 Links and files open with `launchers.opener`, then `xdg-open`, then `open` on macOS. With none
 of them there is no open button.

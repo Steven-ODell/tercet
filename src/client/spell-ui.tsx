@@ -1,4 +1,9 @@
-import { SyntaxStyle, type KeyEvent, type MouseEvent, type TextareaRenderable } from "@opentui/core";
+import {
+  SyntaxStyle,
+  type KeyEvent,
+  type MouseEvent,
+  type TextareaRenderable,
+} from "@opentui/core";
 import { useRenderer, useTerminalDimensions } from "@opentui/react";
 import { useCallback, useEffect, useMemo, useState, type RefObject } from "react";
 import type { Misspelling, SpellChecker } from "./spell";
@@ -7,14 +12,14 @@ import { theme } from "./theme";
 const HIGHLIGHT_REF = 4242;
 const MAX_SUGGESTIONS = 5;
 
-interface Item {
+export interface TextMenuItem {
   label: string;
   run: () => void;
   /** A note, not a choice: drawn dim, skipped by the keys, never numbered. */
   note?: boolean;
 }
-interface Menu {
-  items: Item[];
+export interface TextMenu {
+  items: TextMenuItem[];
   index: number;
   /** Screen position the menu hangs from: the click, or the start of the word. */
   x: number;
@@ -31,7 +36,7 @@ export function misspellingForCaret(found: readonly Misspelling[], caret: number
 }
 
 /**
- * Underlines misspelled words in the composer's textarea in red and offers a menu of corrections:
+ * Underlines misspelled words and combines text actions with a menu of corrections:
  * right-click a word, or press the `spell` key for the word at (or next after) the caret.
  */
 export function useSpellCheck({
@@ -41,7 +46,9 @@ export function useSpellCheck({
   text,
   caret,
   replaceDraft,
+  textActions,
 }: {
+  textActions?: () => TextMenuItem[];
   spell: SpellChecker | undefined;
   editor: RefObject<TextareaRenderable | null>;
   root: RefObject<{ x: number; y: number } | null>;
@@ -50,16 +57,19 @@ export function useSpellCheck({
   replaceDraft: (next: string, caret: number) => void;
 }) {
   const renderer = useRenderer();
-  const { width: screenWidth } = useTerminalDimensions();
+  const { width: screenWidth, height: screenHeight } = useTerminalDimensions();
   const [version, setVersion] = useState(0);
-  const [menu, setMenu] = useState<Menu>();
+  const [menu, setMenu] = useState<TextMenu>();
   // Why the last "Add to dictionary" was not saved; cleared by the next edit.
   const [notice, setNotice] = useState("");
   useEffect(() => spell?.subscribe(() => setVersion((v) => v + 1)), [spell]);
   const style = useMemo(
     () =>
       spell
-        ? SyntaxStyle.fromStyles({ misspelled: { fg: theme.red, underline: true } }, renderer.nativeScene)
+        ? SyntaxStyle.fromStyles(
+            { misspelled: { fg: theme.red, underline: true } },
+            renderer.nativeScene,
+          )
         : undefined,
     [spell, renderer],
   );
@@ -93,38 +103,55 @@ export function useSpellCheck({
   }, [text]);
 
   const show = useCallback(
-    (m: Misspelling, x: number, y: number) => {
-      if (!spell) return;
+    (m: Misspelling | undefined, x: number, y: number, editing = false) => {
       const replace = (value: string) => {
-        if (editor.current?.plainText.slice(m.start, m.end) !== m.word) return;
+        if (!m || editor.current?.plainText.slice(m.start, m.end) !== m.word) return;
         const current = editor.current.plainText;
-        replaceDraft(current.slice(0, m.start) + value + current.slice(m.end), m.start + value.length);
+        replaceDraft(
+          current.slice(0, m.start) + value + current.slice(m.end),
+          m.start + value.length,
+        );
       };
-      const suggestions = spell.suggest(m.word).slice(0, MAX_SUGGESTIONS);
+      const suggestions = m && spell ? spell.suggest(m.word).slice(0, MAX_SUGGESTIONS) : [];
+      const actions = editing ? (textActions?.() ?? []) : [];
       setMenu({
         x,
         y,
-        index: suggestions.length ? 0 : 1,
+        index: m
+          ? suggestions.length
+            ? 0
+            : 1
+          : Math.max(
+              0,
+              actions.findIndex((item) => !item.note),
+            ),
         items: [
-          ...suggestions.map((value) => ({ label: value, run: () => replace(value) })),
-          ...(suggestions.length ? [] : [{ label: "No suggestions", run: () => {}, note: true }]),
-          {
-            label: "Add to dictionary",
-            // The word is already known for this session; only saving it to the file failed.
-            run: () =>
-              void spell.add(m.word).catch((error: unknown) => {
-                const code = (error as { code?: unknown } | null)?.code;
-                setNotice(
-                  `Could not save "${m.word}" to the dictionary${typeof code === "string" ? ` (${code})` : ""}; ` +
-                    "it is known until tercet exits.",
-                );
-              }),
-          },
-          { label: "Ignore", run: () => spell.ignore(m.word) },
+          ...(m && spell
+            ? [
+                ...suggestions.map((value) => ({ label: value, run: () => replace(value) })),
+                ...(suggestions.length
+                  ? []
+                  : [{ label: "No suggestions", run: () => {}, note: true }]),
+                {
+                  label: "Add to dictionary",
+                  // The word is already known for this session; only saving it to the file failed.
+                  run: () =>
+                    void spell!.add(m!.word).catch((error: unknown) => {
+                      const code = (error as { code?: unknown } | null)?.code;
+                      setNotice(
+                        `Could not save "${m.word}" to the dictionary${typeof code === "string" ? ` (${code})` : ""}; ` +
+                          "it is known until tercet exits.",
+                      );
+                    }),
+                },
+                { label: "Ignore", run: () => spell!.ignore(m!.word) },
+              ]
+            : []),
+          ...actions,
         ],
       });
     },
-    [spell, editor, replaceDraft],
+    [spell, editor, replaceDraft, textActions],
   );
   const choose = (index: number) => {
     const item = menu?.items[index];
@@ -138,20 +165,31 @@ export function useSpellCheck({
     /** A failed save from the menu, for the composer's error line. */
     notice,
     /**
-     * Right-click on the textarea: moves the caret there, and opens the menu if on a flagged word.
+     * Right-click offers text actions and spelling suggestions, preserving any selection.
      * Any click on the textarea closes an open menu; picks land on the menu's own rows.
      */
     onMouseUp(event: MouseEvent) {
       setMenu(undefined);
-      if (event.button !== 2 || !spell || !editor.current) return;
+      if (event.button !== 2 || !editor.current) return;
       const target = editor.current;
-      const localX = Math.max(0, event.x - target.x);
-      const localY = Math.max(0, event.y - target.y);
-      target.editorView.setLocalSelection(localX, localY, localX, localY, undefined, undefined, true, false);
-      target.editorView.resetLocalSelection();
+      // A context click must not move the caret or replace an existing selection.
+      // Only hit-test the word when there is no selection to preserve.
+      if (!target.hasSelection()) {
+        target.editorView.setLocalSelection(
+          Math.max(0, event.x - target.x),
+          Math.max(0, event.y - target.y),
+          Math.max(0, event.x - target.x),
+          Math.max(0, event.y - target.y),
+          undefined,
+          undefined,
+          true,
+          false,
+        );
+        target.editorView.resetLocalSelection();
+      }
       const at = target.cursorOffset;
       const m = found.find((word) => word.start <= at && at <= word.end);
-      if (m) show(m, event.x, event.y);
+      show(m, event.x, event.y, true);
     },
     /** The `spell` key: the word at the caret, else the next flagged one. */
     openAtCaret() {
@@ -170,7 +208,7 @@ export function useSpellCheck({
       const move = (by: number) => {
         let index = menu.index;
         do index = (index + by + count) % count;
-        while (menu.items[index]?.note);
+        while (menu.items[index]?.note && index !== menu.index);
         setMenu({ ...menu, index });
       };
       // 1-9 pick among the real choices, so the note row does not shift the numbers.
@@ -179,7 +217,12 @@ export function useSpellCheck({
       else if (key.name === "up" || (key.ctrl && key.name === "p")) move(-1);
       else if (key.name === "down" || key.name === "tab" || (key.ctrl && key.name === "n")) move(1);
       else if (key.name === "return") choose(menu.index);
-      else if (/^[1-9]$/.test(key.name) && !key.ctrl && !key.meta && Number(key.name) <= choices.length)
+      else if (
+        /^[1-9]$/.test(key.name) &&
+        !key.ctrl &&
+        !key.meta &&
+        Number(key.name) <= choices.length
+      )
         choose(choices[Number(key.name) - 1]!);
       else {
         setMenu(undefined);
@@ -189,36 +232,58 @@ export function useSpellCheck({
       return true;
     },
     node: menu && (
-      <SpellMenu
-        menu={menu}
-        root={root}
-        screenWidth={screenWidth}
-        onPick={choose}
-      />
+      <>
+        <box
+          position="absolute"
+          left={-(root.current?.x ?? 0)}
+          top={-(root.current?.y ?? 0)}
+          width={screenWidth}
+          height={screenHeight}
+          zIndex={19}
+          onMouseDown={() => setMenu(undefined)}
+        />
+        <TextContextMenu
+          menu={menu}
+          root={root}
+          screenWidth={screenWidth}
+          screenHeight={screenHeight}
+          onPick={choose}
+        />
+      </>
     ),
   };
 }
 
-function SpellMenu({
+export function TextContextMenu({
   menu,
   root,
   screenWidth,
+  screenHeight,
   onPick,
+  containOrigin = false,
 }: {
-  menu: Menu;
+  containOrigin?: boolean;
+  menu: TextMenu;
   root: RefObject<{ x: number; y: number } | null>;
   screenWidth: number;
+  screenHeight: number;
   onPick: (index: number) => void;
 }) {
-  const width = Math.max(...menu.items.map((item) => item.label.length)) + 6;
-  const height = menu.items.length + 2;
+  const width = Math.min(screenWidth, Math.max(...menu.items.map((item) => item.label.length)) + 6);
+  const height = Math.min(screenHeight, menu.items.length + 2);
   const origin = root.current ?? { x: 0, y: 0 };
   // Above the word when there is room, so the word stays visible; else just below it.
   const above = menu.y - height >= 0;
-  const left = Math.max(0, Math.min(menu.x, screenWidth - width)) - origin.x;
-  const top = (above ? menu.y - height : menu.y + 1) - origin.y;
+  const left =
+    Math.max(containOrigin ? origin.x : 0, Math.min(menu.x, screenWidth - width)) - origin.x;
+  const top =
+    Math.max(
+      containOrigin ? origin.y : 0,
+      Math.min(screenHeight - height, above ? menu.y - height : menu.y + 1),
+    ) - origin.y;
   return (
-    <box
+    <scrollbox
+      scrollY
       position="absolute"
       left={left}
       top={top}
@@ -230,6 +295,10 @@ function SpellMenu({
       backgroundColor={theme.canvas}
       flexDirection="column"
       zIndex={20}
+      onMouseDown={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
     >
       {menu.items.map((item, i) => {
         const number = menu.items.slice(0, i).filter((other) => !other.note).length + 1;
@@ -248,6 +317,6 @@ function SpellMenu({
           </text>
         );
       })}
-    </box>
+    </scrollbox>
   );
 }

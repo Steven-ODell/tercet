@@ -27,7 +27,7 @@ tercet · live · threads=1 · Supervised                                       
 │                            ││                                                                                        │
 │                            │╰────────────────────────────────────────────────────────────────────────────────────────╯
 │                            │╭─● » Composer───────────────────────────────────────────────────────────────────────────╮
-│                            ││                                                                                        │
+│                            ││[Ctrl+v Paste]                                                                          │
 │                            ││Reply exactly acceptance-stream-ok. Do not use tools or change files.                   │
 │                            ││                                                                                        │
 │                            ││                                                                                        │

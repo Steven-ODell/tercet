@@ -214,6 +214,34 @@ function Editor({
     root,
     text,
     caret: cursor,
+    textActions: () => {
+      const target = editor.current;
+      const update = (action: () => void) => { action(); if (target) publish(target.plainText); };
+      const selected = target?.getSelectedText() ?? "";
+      const selection = target?.editorView.getSelection();
+      const original = target?.plainText;
+      const copy = async (cut: boolean) => {
+        try {
+          await effects!.copy(selected);
+          // Async clipboard commands must never delete a newer draft or selection.
+          const current = target?.editorView.getSelection();
+          if (cut && target && target.plainText === original &&
+              current?.start === selection?.start && current?.end === selection?.end) {
+            update(() => { target.deleteSelection(); });
+          }
+        } catch (error) {
+          setMediaStatus(`Copy failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      };
+      return [
+        { label: "Copy", note: !selected || !effects?.copy, run: () => { void copy(false); } },
+        { label: "Cut", note: !selected || !effects?.copy || busy, run: () => { void copy(true); } },
+        { label: "Paste", note: !effects?.pasteClipboard || busy || mediaBusy, run: () => { void media("clipboard"); } },
+        { label: "Select all", note: !target?.plainText, run: () => { target?.selectAll(); } },
+        { label: "Undo", note: busy || !target?.editBuffer.canUndo(), run: () => update(() => { target?.undo(); }) },
+        { label: "Redo", note: busy || !target?.editBuffer.canRedo(), run: () => update(() => { target?.redo(); }) },
+      ];
+    },
     replaceDraft: (next, caret) => {
       editor.current?.replaceText(next);
       if (editor.current) editor.current.cursorOffset = caret;
@@ -322,6 +350,13 @@ function Editor({
       return;
     }
     if (!enabled) return;
+    if (key.ctrl && key.name === "c" && editor.current?.hasSelection()) {
+      key.preventDefault();
+      const selected = editor.current.getSelectedText();
+      void Promise.resolve().then(() => effects?.copy(selected)).catch((error) =>
+        setMediaStatus(`Copy failed: ${error instanceof Error ? error.message : String(error)}`));
+      return;
+    }
     if (spell.onKey(key)) return;
     if (commandForKey(key) === "spell" && effects?.spell) {
       if (spell.openAtCaret()) key.preventDefault();

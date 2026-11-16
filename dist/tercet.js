@@ -80745,6 +80745,22 @@ function sshHostLookup(env, output, read) {
     }
   };
 }
+function clipboardLocalLookup(env, output, read) {
+  const local = (values) => !values.SSH_CONNECTION && !values.SSH_CLIENT && !values.SSH_TTY;
+  return async () => {
+    if (!env.TMUX)
+      return local(env);
+    try {
+      const pid = activeClientPid(await output(["tmux", "list-clients", "-F", "#{client_activity} #{client_pid}"]));
+      if (!pid || !/^\d+$/.test(pid))
+        return false;
+      const environ = await read(`/proc/${pid}/environ`);
+      return !environ.split("\x00").some((entry) => /^SSH_(CONNECTION|CLIENT|TTY)=.+/.test(entry));
+    } catch {
+      return false;
+    }
+  };
+}
 var shellQuote = (value) => "'" + value.replaceAll("'", "'\\''") + "'";
 function threadWebUrl(origin, environmentId, threadId) {
   return new URL(`/${encodeURIComponent(environmentId)}/${encodeURIComponent(threadId)}`, origin).href;
@@ -83243,7 +83259,8 @@ function clipboardChain(settings, host) {
     const run = (mime, vars) => expand(spec, { ...vars, mime });
     return { name: `commands.${name}`, images: true, write: run, read: run };
   };
-  const builtin = (program) => CLIPBOARD_TOOLS.find((tool) => tool.usable(host) && host.which(tool[program]));
+  const local = !host.env.TMUX && !host.env.SSH_CONNECTION && !host.env.SSH_CLIENT && !host.env.SSH_TTY;
+  const builtin = (program) => local ? CLIPBOARD_TOOLS.find((tool) => tool.usable(host) && host.which(tool[program])) : undefined;
   return {
     write: configured("copy") ?? builtin("writer"),
     read: configured("paste") ?? builtin("reader")
@@ -83648,6 +83665,13 @@ function hostActions(deps) {
   const { commands, launchers } = settings;
   const grace = deps.graceMs ?? 1000;
   const chain = clipboardChain(settings, host);
+  const clipboard = async () => {
+    const local = deps.clipboardLocal ? await deps.clipboardLocal().catch(() => false) : !host.env.TMUX && !host.env.SSH_CONNECTION && !host.env.SSH_CLIENT && !host.env.SSH_TTY;
+    return clipboardChain(settings, {
+      ...host,
+      env: local ? { ...host.env, TMUX: undefined, SSH_CONNECTION: undefined, SSH_CLIENT: undefined, SSH_TTY: undefined } : { ...host.env, SSH_TTY: "remote-or-unknown" }
+    });
+  };
   const opener = openerChain(settings, host);
   const vars = async (spec, own) => ({
     ...own,
@@ -83655,25 +83679,34 @@ function hostActions(deps) {
   });
   const command2 = (name) => commands[name];
   const run = async (spec, own, options = {}) => runArgs(host, expand(spec, await vars(spec, own)), options);
-  const osc52 = (text3) => deps.writeTerminal(`\x1B]52;c;${Buffer.from(text3).toString("base64")}\x07`);
+  const osc52 = (text3) => {
+    const bytes = `\x1B]52;c;${Buffer.from(text3).toString("base64")}\x07`;
+    deps.writeTerminal(host.env.TMUX && deps.clipboardPassthrough ? `\x1BPtmux;${bytes.replaceAll("\x1B", "\x1B\x1B")}\x1B\\` : bytes);
+  };
   const writeClipboard = async (data, mime) => {
-    const tool = chain.write;
+    const tool = (await clipboard()).write;
     if (!tool)
       throw new Error("No clipboard tool");
     const spec = settings.commands.copy;
     await runArgs(host, tool.write(mime, await vars(spec, {})), { stdin: data, timeoutMs: 15000 });
   };
+  const requireReader = (tool) => {
+    if (!tool)
+      throw new Error("Terminal clipboard reading is unavailable; use your terminal's Paste (usually Ctrl+Shift+V or Cmd+V), or configure commands.paste");
+    return tool;
+  };
   const readClipboard = async (mime) => {
-    const tool = chain.read;
+    const tool = requireReader((await clipboard()).read);
     return runArgs(host, tool.read(mime, await vars(settings.commands.paste, {})), {
       capture: true,
       timeoutMs: 15000
     });
   };
   const copy = (text3) => {
+    if (commands.copy)
+      return writeClipboard(text3, TEXT);
     osc52(text3);
-    if (chain.write)
-      writeClipboard(text3, TEXT).catch(() => {});
+    return writeClipboard(text3, TEXT).catch(() => {});
   };
   const targets2 = Object.entries(settings.targets).map(([name, target2]) => ({
     name,
@@ -83700,7 +83733,7 @@ function hostActions(deps) {
     actions.targets = targets2.map(({ name, key }) => ({ name, key }));
     actions.copyTo = async (name, text3) => run(targetSpec(name), { mime: TEXT }, { stdin: text3, timeoutMs: 15000 });
   }
-  if (chain.write?.images && deps.loadImage)
+  if ((chain.write?.images || host.env.TMUX) && deps.loadImage)
     actions.copyImage = async (source, cwd) => {
       const bytes = await deps.loadImage(source, cwd);
       await writeClipboard(bytes, imageMime(bytes));
@@ -83710,11 +83743,11 @@ function hostActions(deps) {
       const bytes = await deps.loadImage(source, cwd);
       await run(targetSpec(name), { mime: imageMime(bytes) }, { stdin: bytes, timeoutMs: 30000 });
     };
-  if (chain.read) {
-    const tool = chain.read;
+  if (chain.read || host.env.TMUX || host.env.SSH_CONNECTION || host.env.SSH_CLIENT || host.env.SSH_TTY) {
     actions.pasteClipboard = async () => {
+      const tool = requireReader((await clipboard()).read);
       if (tool.types) {
-        const types = decode(await runArgs(host, tool.types, { capture: true })).split(/\r?\n/);
+        const types = decode(await runArgs(host, tool.types, { capture: true, timeoutMs: 15000 })).split(/\r?\n/);
         if (tool.images && types.includes("image/png"))
           return { type: "image", bytes: await readClipboard("image/png") };
         if (!types.some(isText))
@@ -83728,7 +83761,7 @@ function hostActions(deps) {
       }
       return { type: "text", text: decode(await readClipboard(TEXT)) };
     };
-    if (tool.images)
+    if (chain.read?.images)
       actions.pasteImage = () => readClipboard("image/png");
   }
   if (opener) {
@@ -144720,7 +144753,7 @@ async function detectAppearance(input, output, env) {
   return fromEnv ? { appearance: fromEnv, source: "COLORFGBG" } : { appearance: null, source: "no answer from the terminal" };
 }
 // package.json
-var version = "0.1.2";
+var version = "0.1.3";
 
 // src/doctor.ts
 var TERCET_VERSION = version;
@@ -144855,7 +144888,7 @@ async function actionsReport(settings2, host, probes, readOnly2) {
     const { program, ok } = await programOf(spec, probes);
     add4(name, ok, ok ? `${key5}: ${program}` : `${key5}: ${program} not found`);
   };
-  add4("copy text", true, `OSC 52 (the terminal must allow clipboard writes)${chain.write ? ` and ${toolName(chain.write, "writer")}` : ""}`);
+  add4("copy text", true, settings2.commands.copy ? toolName(chain.write, "writer") : `OSC 52 (the terminal must allow clipboard writes)${chain.write ? ` and ${toolName(chain.write, "writer")}` : ""}`);
   add4("paste text", !!chain.read, chain.read ? toolName(chain.read, "reader") : "no clipboard reader found");
   add4("paste image", !!chain.read?.images, chain.read?.images ? toolName(chain.read, "reader") : chain.read ? `${toolName(chain.read, "reader")} is text only` : "no clipboard reader found");
   add4("copy image", !!chain.write?.images, chain.write?.images ? toolName(chain.write, "writer") : chain.write ? `${toolName(chain.write, "writer")} is text only` : "no clipboard writer found");
@@ -144969,7 +145002,7 @@ async function doctorReport(args2, probes) {
       poster: !!found("ffmpeg")
     },
     clipboard: {
-      write: ["OSC 52", ...chain.write ? [toolName(chain.write, "writer")] : []],
+      write: [...config.settings.commands.copy ? [] : ["OSC 52"], ...chain.write ? [toolName(chain.write, "writer")] : []],
       read: chain.read ? [toolName(chain.read, "reader")] : [],
       images: !!(chain.write?.images && chain.read?.images)
     },
@@ -154714,7 +154747,9 @@ function createDictation(client, effects, notice = () => {}, messageMs = MESSAGE
 var import_react52 = __toESM(require_react(), 1);
 
 // src/client/spell-ui.tsx
-import { SyntaxStyle } from "@opentui/core";
+import {
+  SyntaxStyle
+} from "@opentui/core";
 var import_react51 = __toESM(require_react(), 1);
 var HIGHLIGHT_REF = 4242;
 var MAX_SUGGESTIONS = 5;
@@ -154727,10 +154762,11 @@ function useSpellCheck({
   root,
   text: text5,
   caret,
-  replaceDraft
+  replaceDraft,
+  textActions
 }) {
   const renderer = useRenderer();
-  const { width: screenWidth } = useTerminalDimensions();
+  const { width: screenWidth, height: screenHeight } = useTerminalDimensions();
   const [version2, setVersion] = import_react51.useState(0);
   const [menu, setMenu] = import_react51.useState();
   const [notice, setNotice] = import_react51.useState("");
@@ -154763,34 +154799,36 @@ function useSpellCheck({
     setMenu(undefined);
     setNotice("");
   }, [text5]);
-  const show = import_react51.useCallback((m, x, y) => {
-    if (!spell)
-      return;
+  const show = import_react51.useCallback((m, x, y, editing = false) => {
     const replace = (value4) => {
-      if (editor2.current?.plainText.slice(m.start, m.end) !== m.word)
+      if (!m || editor2.current?.plainText.slice(m.start, m.end) !== m.word)
         return;
       const current2 = editor2.current.plainText;
       replaceDraft(current2.slice(0, m.start) + value4 + current2.slice(m.end), m.start + value4.length);
     };
-    const suggestions = spell.suggest(m.word).slice(0, MAX_SUGGESTIONS);
+    const suggestions = m && spell ? spell.suggest(m.word).slice(0, MAX_SUGGESTIONS) : [];
+    const actions = editing ? textActions?.() ?? [] : [];
     setMenu({
       x,
       y,
-      index: suggestions.length ? 0 : 1,
+      index: m ? suggestions.length ? 0 : 1 : Math.max(0, actions.findIndex((item) => !item.note)),
       items: [
-        ...suggestions.map((value4) => ({ label: value4, run: () => replace(value4) })),
-        ...suggestions.length ? [] : [{ label: "No suggestions", run: () => {}, note: true }],
-        {
-          label: "Add to dictionary",
-          run: () => void spell.add(m.word).catch((error2) => {
-            const code2 = error2?.code;
-            setNotice(`Could not save "${m.word}" to the dictionary${typeof code2 === "string" ? ` (${code2})` : ""}; ` + "it is known until tercet exits.");
-          })
-        },
-        { label: "Ignore", run: () => spell.ignore(m.word) }
+        ...m && spell ? [
+          ...suggestions.map((value4) => ({ label: value4, run: () => replace(value4) })),
+          ...suggestions.length ? [] : [{ label: "No suggestions", run: () => {}, note: true }],
+          {
+            label: "Add to dictionary",
+            run: () => void spell.add(m.word).catch((error2) => {
+              const code2 = error2?.code;
+              setNotice(`Could not save "${m.word}" to the dictionary${typeof code2 === "string" ? ` (${code2})` : ""}; ` + "it is known until tercet exits.");
+            })
+          },
+          { label: "Ignore", run: () => spell.ignore(m.word) }
+        ] : [],
+        ...actions
       ]
     });
-  }, [spell, editor2, replaceDraft]);
+  }, [spell, editor2, replaceDraft, textActions]);
   const choose = (index3) => {
     const item = menu?.items[index3];
     if (!item || item.note)
@@ -154803,17 +154841,16 @@ function useSpellCheck({
     notice,
     onMouseUp(event) {
       setMenu(undefined);
-      if (event.button !== 2 || !spell || !editor2.current)
+      if (event.button !== 2 || !editor2.current)
         return;
       const target2 = editor2.current;
-      const localX = Math.max(0, event.x - target2.x);
-      const localY = Math.max(0, event.y - target2.y);
-      target2.editorView.setLocalSelection(localX, localY, localX, localY, undefined, undefined, true, false);
-      target2.editorView.resetLocalSelection();
+      if (!target2.hasSelection()) {
+        target2.editorView.setLocalSelection(Math.max(0, event.x - target2.x), Math.max(0, event.y - target2.y), Math.max(0, event.x - target2.x), Math.max(0, event.y - target2.y), undefined, undefined, true, false);
+        target2.editorView.resetLocalSelection();
+      }
       const at = target2.cursorOffset;
       const m = found.find((word) => word.start <= at && at <= word.end);
-      if (m)
-        show(m, event.x, event.y);
+      show(m, event.x, event.y, true);
     },
     openAtCaret() {
       const target2 = editor2.current;
@@ -154833,7 +154870,7 @@ function useSpellCheck({
         let index3 = menu.index;
         do
           index3 = (index3 + by + count) % count;
-        while (menu.items[index3]?.note);
+        while (menu.items[index3]?.note && index3 !== menu.index);
         setMenu({ ...menu, index: index3 });
       };
       const choices = menu.items.flatMap((item, at) => item.note ? [] : [at]);
@@ -154854,27 +154891,44 @@ function useSpellCheck({
       key5.preventDefault();
       return true;
     },
-    node: menu && /* @__PURE__ */ import_jsx_runtime.jsx(SpellMenu, {
-      menu,
-      root,
-      screenWidth,
-      onPick: choose
+    node: menu && /* @__PURE__ */ import_jsx_runtime.jsxs(import_jsx_runtime.Fragment, {
+      children: [
+        /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+          position: "absolute",
+          left: -(root.current?.x ?? 0),
+          top: -(root.current?.y ?? 0),
+          width: screenWidth,
+          height: screenHeight,
+          zIndex: 19,
+          onMouseDown: () => setMenu(undefined)
+        }),
+        /* @__PURE__ */ import_jsx_runtime.jsx(TextContextMenu, {
+          menu,
+          root,
+          screenWidth,
+          screenHeight,
+          onPick: choose
+        })
+      ]
     })
   };
 }
-function SpellMenu({
+function TextContextMenu({
   menu,
   root,
   screenWidth,
-  onPick
+  screenHeight,
+  onPick,
+  containOrigin = false
 }) {
-  const width2 = Math.max(...menu.items.map((item) => item.label.length)) + 6;
-  const height = menu.items.length + 2;
+  const width2 = Math.min(screenWidth, Math.max(...menu.items.map((item) => item.label.length)) + 6);
+  const height = Math.min(screenHeight, menu.items.length + 2);
   const origin2 = root.current ?? { x: 0, y: 0 };
   const above = menu.y - height >= 0;
-  const left = Math.max(0, Math.min(menu.x, screenWidth - width2)) - origin2.x;
-  const top = (above ? menu.y - height : menu.y + 1) - origin2.y;
-  return /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+  const left = Math.max(containOrigin ? origin2.x : 0, Math.min(menu.x, screenWidth - width2)) - origin2.x;
+  const top = Math.max(containOrigin ? origin2.y : 0, Math.min(screenHeight - height, above ? menu.y - height : menu.y + 1)) - origin2.y;
+  return /* @__PURE__ */ import_jsx_runtime.jsx("scrollbox", {
+    scrollY: true,
     position: "absolute",
     left,
     top,
@@ -154886,6 +154940,10 @@ function SpellMenu({
     backgroundColor: theme.canvas,
     flexDirection: "column",
     zIndex: 20,
+    onMouseDown: (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    },
     children: menu.items.map((item, i) => {
       const number3 = menu.items.slice(0, i).filter((other) => !other.note).length + 1;
       return /* @__PURE__ */ import_jsx_runtime.jsx("text", {
@@ -156284,6 +156342,50 @@ function Editor({
     root,
     text: text5,
     caret: cursor,
+    textActions: () => {
+      const target2 = editor2.current;
+      const update4 = (action) => {
+        action();
+        if (target2)
+          publish2(target2.plainText);
+      };
+      const selected = target2?.getSelectedText() ?? "";
+      const selection = target2?.editorView.getSelection();
+      const original = target2?.plainText;
+      const copy3 = async (cut) => {
+        try {
+          await effects.copy(selected);
+          const current2 = target2?.editorView.getSelection();
+          if (cut && target2 && target2.plainText === original && current2?.start === selection?.start && current2?.end === selection?.end) {
+            update4(() => {
+              target2.deleteSelection();
+            });
+          }
+        } catch (error3) {
+          setMediaStatus(`Copy failed: ${error3 instanceof Error ? error3.message : String(error3)}`);
+        }
+      };
+      return [
+        { label: "Copy", note: !selected || !effects?.copy, run: () => {
+          copy3(false);
+        } },
+        { label: "Cut", note: !selected || !effects?.copy || busy, run: () => {
+          copy3(true);
+        } },
+        { label: "Paste", note: !effects?.pasteClipboard || busy || mediaBusy, run: () => {
+          media3("clipboard");
+        } },
+        { label: "Select all", note: !target2?.plainText, run: () => {
+          target2?.selectAll();
+        } },
+        { label: "Undo", note: busy || !target2?.editBuffer.canUndo(), run: () => update4(() => {
+          target2?.undo();
+        }) },
+        { label: "Redo", note: busy || !target2?.editBuffer.canRedo(), run: () => update4(() => {
+          target2?.redo();
+        }) }
+      ];
+    },
     replaceDraft: (next2, caret) => {
       editor2.current?.replaceText(next2);
       if (editor2.current)
@@ -156388,6 +156490,12 @@ function Editor({
     }
     if (!enabled)
       return;
+    if (key5.ctrl && key5.name === "c" && editor2.current?.hasSelection()) {
+      key5.preventDefault();
+      const selected = editor2.current.getSelectedText();
+      Promise.resolve().then(() => effects?.copy(selected)).catch((error3) => setMediaStatus(`Copy failed: ${error3 instanceof Error ? error3.message : String(error3)}`));
+      return;
+    }
     if (spell.onKey(key5))
       return;
     if (commandForKey(key5) === "spell" && effects?.spell) {
@@ -159710,6 +159818,14 @@ function TranscriptViewport({
   cwd,
   openFile
 }) {
+  const renderer = useRenderer();
+  const { width: screenWidth, height: screenHeight } = useTerminalDimensions();
+  const root = import_react55.useRef(null);
+  const [menu, setMenu] = import_react55.useState();
+  import_react55.useEffect(() => {
+    if (!enabled)
+      setMenu(undefined);
+  }, [enabled]);
   const [target2, setTarget] = import_react55.useState();
   const [hoveredImage, setHoveredImage] = import_react55.useState();
   const [feedback, setFeedback] = import_react55.useState("");
@@ -159907,10 +160023,46 @@ function TranscriptViewport({
     vim.current.mode = undefined;
     vim.current.anchor = undefined;
   };
+  const selectedText = () => {
+    const selection = renderer.getSelection();
+    if (nativeSelection.current || !selection?.selectedRenderables.length)
+      return "";
+    if (!selection.selectedRenderables.every((r) => r.id.startsWith("transcript-row-")))
+      return "";
+    return selection.getSelectedText();
+  };
+  const visualText = () => {
+    const v = vim.current;
+    const cursor = posOf(v.cursor);
+    const anchor2 = posOf(v.anchor);
+    return v.mode && cursor && anchor2 ? selectionText(rows, anchor2, cursor, v.mode) : "";
+  };
+  const chooseCopy = () => {
+    menu?.items[0]?.run();
+    setMenu(undefined);
+  };
   const targetActions = targetKeys(effects);
   useKeyboard((key5) => {
-    if (!enabled || !keyboardEnabled || key5.meta)
+    if (!enabled || !keyboardEnabled || key5.meta || key5.defaultPrevented)
       return;
+    if (menu) {
+      if (key5.name === "escape")
+        setMenu(undefined);
+      else if (key5.name === "return" || key5.name === "1")
+        chooseCopy();
+      else if (["up", "down", "tab"].includes(key5.name)) {} else
+        setMenu(undefined);
+      key5.preventDefault();
+      return;
+    }
+    if (key5.ctrl && key5.name === "c") {
+      const text5 = selectedText();
+      if (effects && text5) {
+        key5.preventDefault();
+        run3("copy", () => effects.copy(text5));
+      }
+      return;
+    }
     const v = vim.current;
     const half = Math.max(1, Math.floor(viewport / 2));
     if (key5.ctrl) {
@@ -160112,13 +160264,33 @@ function TranscriptViewport({
   const range2 = cursorAt && anchorAt && vim.current.mode ? selectionRange(rows, anchorAt, cursorAt, vim.current.mode) : undefined;
   const modeLabel = vim.current.mode === "line" ? "-- V-LINE -- " : vim.current.mode ? "-- VISUAL -- " : "";
   return /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
+    ref: root,
     width: width2,
     height,
     flexDirection: "column",
     onMouseDown: (event) => {
-      nativeSelection.current = event.modifiers.shift;
+      if (event.button === 2 && !event.modifiers.shift && enabled && effects) {
+        const text5 = selectedText() || visualText();
+        if (text5) {
+          event.preventDefault();
+          event.stopPropagation();
+          setMenu({
+            x: event.x,
+            y: event.y,
+            index: 0,
+            items: [{ label: "Copy", run: () => run3("copy", () => effects.copy(text5)) }]
+          });
+        }
+        return;
+      }
+      if (event.button === 0) {
+        nativeSelection.current = event.modifiers.shift;
+        setMenu(undefined);
+      }
     },
     onMouseScroll: (event) => {
+      if (menu)
+        return;
       if (enabled)
         scroll(event.scroll?.direction === "up" ? -3 : 3);
     },
@@ -160292,6 +160464,27 @@ function TranscriptViewport({
               fg: theme.accent,
               children: modeLabel + (anchor ? "[End Follow tail]" : "Following tail") + (actions.size ? " \xB7 {/} work \xB7 Enter expand" : "")
             })
+          })
+        ]
+      }),
+      menu && /* @__PURE__ */ import_jsx_runtime.jsxs(import_jsx_runtime.Fragment, {
+        children: [
+          /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+            position: "absolute",
+            left: -(root.current?.x ?? 0),
+            top: -(root.current?.y ?? 0),
+            width: screenWidth,
+            height: screenHeight,
+            zIndex: 19,
+            onMouseDown: () => setMenu(undefined)
+          }),
+          /* @__PURE__ */ import_jsx_runtime.jsx(TextContextMenu, {
+            menu,
+            root,
+            containOrigin: true,
+            screenWidth: Math.min(screenWidth, (root.current?.x ?? 0) + width2),
+            screenHeight: Math.min(screenHeight, (root.current?.y ?? 0) + height),
+            onPick: chooseCopy
           })
         ]
       })
@@ -161057,6 +161250,21 @@ function AppFrame({
   useKeyboard((key5) => {
     const found = commandForKey(key5);
     const command2 = found === "shell" && !effects?.shell || found === "dictation" && !hasDictation(effects) || found === "attach" && !effects?.pickFiles || found === "spell" && !effects?.spell || found === "dismissNotice" && !notice ? undefined : found;
+    if (command2 === "quit" && focus === "composer" && renderer.currentFocusedEditor?.hasSelection()) {
+      setQuitArmed(false);
+      return;
+    }
+    const selection = renderer.getSelection();
+    if (command2 === "quit" && !overlay && !(focus === "right" && (right === "terminal" || right === "editor")) && selection?.selectedRenderables.length && selection.selectedRenderables.every((r) => r.id.startsWith("transcript-row-")) && selection.getSelectedText()) {
+      setQuitArmed(false);
+      if (key5.defaultPrevented)
+        return;
+      key5.preventDefault();
+      const text5 = selection.getSelectedText();
+      if (effects)
+        Promise.resolve().then(() => effects.copy(text5)).catch(() => setActionError("Copy failed; retry"));
+      return;
+    }
     if (key5.defaultPrevented)
       return;
     if (overlay === "pullRequests" && command2 !== "pullRequests" && command2 !== "quit")
@@ -162399,11 +162607,12 @@ ${lines.join(`
     };
     const inTmux = !!process.env.TMUX;
     const setting = config.settings.media.protocol;
+    const tmuxCapabilities = inTmux ? await tmuxMedia(probe).catch(() => ({ inside: true, passthrough: null, client: null })) : { inside: false, passthrough: null, client: null };
     setMedia(decideMedia({
       setting,
       env: process.env,
       replies: setting === "auto" && !inTmux ? await queryTerminal(process.stdin, process.stdout) : null,
-      tmux: inTmux ? await tmuxMedia(probe).catch(() => ({ inside: true, passthrough: null, client: null })) : { inside: false, passthrough: null, client: null },
+      tmux: tmuxCapabilities,
       ascii: iconMode() === "ascii"
     }), config.settings.media.video);
     setPageShots(pageShotsFromEnv(process.env) && media().rung !== "none");
@@ -162432,7 +162641,7 @@ ${lines.join(`
       await client?.dispose();
     }, kittyReset);
     const output = async (args3) => {
-      const child = Bun.spawn(args3, { stdout: "pipe", stderr: "ignore" });
+      const child = Bun.spawn(args3, { stdout: "pipe", stderr: "ignore", timeout: 3000 });
       const text5 = await new Response(child.stdout).text();
       if (await child.exited !== 0)
         throw new Error(`${args3[0]} failed`);
@@ -162448,6 +162657,8 @@ ${lines.join(`
       host: systemHost(),
       localWorkspace: isLoopback(new URL(config.url).hostname),
       writeTerminal: (bytes2) => process.stdout.write(bytes2),
+      clipboardLocal: clipboardLocalLookup(process.env, output, (path) => Bun.file(path).text()),
+      clipboardPassthrough: ["on", "all"].includes(tmuxCapabilities.passthrough ?? ""),
       sshHost: sshHostLookup(process.env, output, (path) => Bun.file(path).text()),
       loadImage,
       personalDictionary: join9(settingsDir(process.env, homedir6()), "dictionary.txt")

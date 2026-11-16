@@ -702,3 +702,66 @@ test("hidden hints drop the vim key rows and give one back to the transcript", a
   expect(lastAt(shown)).toBeGreaterThan(0);
   expect(lastAt(hidden)).toBe(lastAt(shown) + 1);
 });
+
+test("transcript right-click Copy preserves exact drag text, scrolling and dismissal", async () => {
+  const copied: string[] = [];
+  let reject = false;
+  const view = await testRender(
+    <TranscriptViewport
+      effects={{
+        copy: async (text) => {
+          if (reject) throw new Error("rejected");
+          copied.push(text);
+        },
+      }}
+      items={[
+        { id: "a", kind: "assistant", text: "alpha 界 beta\nsecond line\nthird line\nfourth line" },
+      ]}
+      width={40}
+      height={12}
+    />,
+    { width: 40, height: 12, kittyKeyboard: true, exitOnCtrlC: false },
+  );
+  const mouse = async (fn: () => Promise<void>) => {
+    await act(fn);
+    await view.flush();
+  };
+  const key = async (name: string) => {
+    await act(async () => view.mockInput.pressKey(name));
+    await view.flush();
+  };
+  const open = () => mouse(() => view.mockMouse.click(10, 2, 2));
+  try {
+    await view.flush();
+    await mouse(() => view.mockMouse.drag(2, 1, 5, 2));
+    const selected = view.renderer.getSelection()!.getSelectedText();
+    expect(selected).toBe("pha 界 beta\nsecond");
+    expect(copied.at(-1)).toBe(selected); // Existing drag auto-copy.
+    await open();
+    expect(view.captureCharFrame()).toContain("1 Copy");
+    expect(view.renderer.getSelection()!.getSelectedText()).toBe(selected);
+    await mouse(() => view.mockMouse.scroll(12, 2, "up"));
+    expect(view.renderer.getSelection()!.getSelectedText()).toBe(selected);
+    const lines = view.captureCharFrame().split("\n");
+    const y = lines.findIndex((line) => line.includes("1 Copy"));
+    await mouse(() => view.mockMouse.click(lines[y]!.indexOf("Copy"), y));
+    expect(copied).toEqual([selected, selected]);
+    expect(view.renderer.getSelection()!.getSelectedText()).toBe(selected);
+    await open();
+    await key("ESCAPE");
+    expect(view.captureCharFrame()).not.toContain("1 Copy");
+    await open();
+    await mouse(() => view.mockMouse.click(35, 9));
+    expect(view.captureCharFrame()).not.toContain("1 Copy");
+    await mouse(() => view.mockMouse.drag(0, 1, 4, 1));
+    await open();
+    reject = true;
+    await key("RETURN");
+    expect(view.captureCharFrame()).toContain("copy failed");
+    reject = false;
+    await mouse(() => view.mockMouse.click(3, 1, 2, { modifiers: { shift: true } }));
+    expect(view.captureCharFrame()).not.toContain("1 Copy");
+  } finally {
+    await act(async () => view.renderer.destroy());
+  }
+});

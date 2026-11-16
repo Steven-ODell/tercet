@@ -69,6 +69,13 @@ test("v, V, y, yy and gg/G drive the transcript like an editor", async () => {
     await press("v");
     for (let i = 0; i < 3; i++) await press("l");
     expect(view.captureCharFrame()).toContain("VISUAL");
+    // Right-click copies the Vim selection without moving its cursor or leaving visual mode.
+    await act(async () => view.mockMouse.click(8, 1, 2));
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("1 Copy");
+    await press("1");
+    expect(copied.at(-1)).toBe("beta");
+    expect(view.captureCharFrame()).toContain("VISUAL");
     await press("y");
     expect(copied.at(-1)).toBe("beta");
     expect(view.captureCharFrame()).not.toContain("VISUAL");

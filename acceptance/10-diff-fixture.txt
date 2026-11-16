@@ -29,7 +29,7 @@ tercet · live · threads=1 · Supervised                                   Cont
 │                            │││                                │││                                                    │
 │                            │││↑/↓ Tab select · Enter answer · │││                                                    │
 │                            ││└────────────────────────────────┘││                                                    │
-│                            ││                                  ││                                                    │
+│                            ││[Ctrl+v Paste]                    ││                                                    │
 │                            ││Message · @file · /skill · :emoji ││                                                    │
 │                            ││                                  ││                                                    │
 │                            ││                                  ││                                                    │

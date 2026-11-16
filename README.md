@@ -205,7 +205,15 @@ bindings. The defaults:
 | `v V`, `y yy`                         | select, yank                                     |
 | `i a o`                               | write in the composer                            |
 | `Y`, `O`                              | copy or open the block, link or selection        |
-| `Ctrl+c` twice                        | quit                                             |
+| `Ctrl+c` with selected text           | copy selection                                   |
+| `Ctrl+c` twice, without selection     | quit                                             |
+
+Drag to highlight transcript text, then right-click **Copy**; completed drags also copy
+immediately. The menu preserves the selection and holds transcript scrolling while open.
+Vim visual selections also offer right-click Copy; `y` still yanks them. In the composer,
+right-click for Copy, Cut, Paste, Select all, Undo/Redo and spelling suggestions. Hold Shift
+to use your terminal's native mouse selection instead. A focused embedded terminal keeps
+Ctrl+C as an interrupt.
 
 To rebind, name the command in the `keys` setting. `tercet keys` prints each command's name in
 its last column (`palette`, `focusUp`, `newThread` and so on), and `"none"` unbinds one:
