@@ -166,6 +166,20 @@ to check the file (the `settings` line should say `ok`). For example:
 }
 ```
 
+To have every message you send start with where you typed it (useful when you type from more
+than one machine), set `messageTag`. It is off unless `local` or `ssh` is set. `local` is used when
+you type on the machine tercet runs on; `ssh` when you type over SSH, with `{client}` replaced by
+the client's name from `clients` (else its address). A message that already starts with `<from `
+is not tagged again, and queued edits are left as they are:
+
+```jsonc
+"messageTag": {
+  "local": "<from PC>",
+  "ssh": "<from {client} SSH to PC>",
+  "clients": { "100.97.33.14": "laptop" },
+}
+```
+
 Commands run without a shell, and thread text always stays one argument. Every key, the command
 templates and their placeholders: [docs/settings.md](docs/settings.md). Images and video:
 [docs/media.md](docs/media.md).

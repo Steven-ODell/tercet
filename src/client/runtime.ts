@@ -88,6 +88,8 @@ export interface Boundary {
   scheduleCompletion?: (callback: () => void) => () => void;
   drafts?: import("./composer-state").DraftStore;
   sendShortcut?: () => Promise<import("./composer-state").SendShortcut>;
+  /** The `messageTag` for whoever is typing right now, looked up per send; none when it is off. */
+  messageTag?: () => Promise<string | undefined>;
   sidebarWorkingShelf?: () => Promise<boolean>;
   /** Whether the key hint rows start shown. */
   showHints?: () => Promise<boolean>;

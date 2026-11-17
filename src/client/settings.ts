@@ -137,6 +137,26 @@ export interface Settings {
     /** A recorder that prints 16 kHz mono 32-bit float little-endian PCM to stdout until killed. */
     recorder?: CommandSpec;
   };
+  /**
+   * A tag put in front of every message you send, saying which machine you typed it on. Off
+   * (no `local` and no `ssh`) by default; see `messageTagFor`.
+   */
+  messageTag: {
+    /** Used when you type on the machine tercet runs on. */
+    local?: string;
+    /** Used when you type over SSH; `{client}` is the client's name from `clients`, else its address. */
+    ssh?: string;
+    /** SSH client address to a short name, e.g. `{ "100.64.0.2": "laptop" }`. */
+    clients: Record<string, string>;
+  };
+}
+
+/** The tag for a message typed on `host` (an SSH client address, or none when typing locally). */
+export function messageTagFor(tag: Settings["messageTag"], host?: string): string | undefined {
+  const template = host ? tag.ssh : tag.local;
+  if (!template) return undefined;
+  const client = host ? (Object.hasOwn(tag.clients, host) ? tag.clients[host]! : host) : "";
+  return template.replaceAll("{client}", client) || undefined;
 }
 
 export const defaultSettings = (): Settings => ({
@@ -152,6 +172,7 @@ export const defaultSettings = (): Settings => ({
   targets: {},
   spell: { enabled: true },
   dictation: { language: "auto" },
+  messageTag: { clients: {} },
 });
 
 /** A bad settings file. The message is one line naming the file, line and key. */
@@ -571,6 +592,11 @@ const schema = struct({
     ),
     recorder: template([]),
   }),
+  messageTag: struct({
+    local: text,
+    ssh: text,
+    clients: record(/^\S+$/, "client addresses have no spaces", text),
+  }),
 });
 
 /** `~/x` is under home; other relative paths are relative to the settings directory. */
@@ -619,6 +645,7 @@ export function parseSettings(
     targets: { ...base.targets, ...raw.targets },
     spell: { ...base.spell, ...raw.spell },
     dictation: { ...base.dictation, ...raw.dictation },
+    messageTag: { ...base.messageTag, ...raw.messageTag },
   };
   try {
     resolveKeymap(settings.keys, settingsTargetKeys(settings));

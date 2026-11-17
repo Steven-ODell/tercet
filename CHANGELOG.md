@@ -126,6 +126,7 @@ Changes since v0.1.0:
 
 ## Unreleased
 
+- `messageTag` setting: optional tag in front of every message you send (`<from PC>`, `<from laptop SSH to PC>`), so the agent knows which machine you typed it on. Off by default.
 - inline images: scrolling a Kitty image no longer leaves holes or flickers (it was re-uploaded on
   every scroll that cropped its top), and inside tmux the image is cleared when you switch to
   another session or window and redrawn when you come back, instead of staying on top of the
