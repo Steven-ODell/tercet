@@ -27,6 +27,14 @@ export function completionTrigger(text: string, cursor: number) {
     ? { prefix: match[1]!, query: match[2]!, start: cursor - match[2]!.length - 1, end: cursor }
     : null;
 }
+/**
+ * `tag` in front of a message so the agent knows which machine it was typed on. A message that
+ * already starts with `<from ` is left alone, and an image-only one becomes just the tag.
+ */
+export function tagMessage(tag: string | undefined, text: string) {
+  if (!tag || text.trimStart().startsWith("<from ")) return text;
+  return text.trim() ? `${tag} ${text}` : tag;
+}
 export function createComposer(client: Client, storage?: DraftStore) {
   const images = Atom.make<Record<string, readonly PendingImage[]>>({}).pipe(Atom.keepAlive);
   const drafts = Atom.make<Record<string, string>>({}).pipe(Atom.keepAlive);
@@ -59,14 +67,17 @@ export function createComposer(client: Client, storage?: DraftStore) {
         client.registry.set(error, "Draft could not be saved.");
       });
   }
-  async function command(command: OrchestrationV2Command, prepare?: () => Promise<void>) {
-    const interrupt = command.type === "run.interrupt";
+  async function command(
+    build: OrchestrationV2Command | (() => Promise<OrchestrationV2Command>),
+    prepare?: () => Promise<void>,
+  ) {
+    const interrupt = typeof build !== "function" && build.type === "run.interrupt";
     if (!interrupt && client.registry.get(busy)) return false;
     if (!interrupt) client.registry.set(busy, true);
     client.registry.set(error, "");
     try {
       await prepare?.();
-      await client.dispatch(command);
+      await client.dispatch(typeof build === "function" ? await build() : build);
       return true;
     } catch {
       client.registry.set(error, "Command failed. Draft kept; retry when connected.");
@@ -155,27 +166,34 @@ export function createComposer(client: Client, storage?: DraftStore) {
       const ok = await command(
         edit
           ? { ...base, type: "queued-run.edit", runId: edit, text }
-          : {
-              ...base,
-              type: "message.dispatch",
-              messageId: MessageId.make(crypto.randomUUID()),
-              text,
-              attachments,
-              ...(unnamed
-                ? {
-                    titleSeed: deriveThreadTitleSeed({
-                      text,
-                      attachments: pending.map((image) => ({
-                        type: image.upload?.type ?? ("image" as const),
-                        name: image.upload?.name ?? "clipboard.png",
-                      })),
-                    }),
-                  }
-                : {}),
-              createdBy: "user",
-              creationSource: "server",
-              ...(mode === "steer" ? { deliveryIntent: "steer" as const } : {}),
-              dispatchMode: { type: mode === "queue" ? "queue_after_active" : "start_immediately" },
+          : async () => {
+              // Looked up now, not at startup: the machine you type on can change between messages.
+              const tag = await client.boundary.messageTag?.().catch(() => undefined);
+              return {
+                ...base,
+                type: "message.dispatch" as const,
+                messageId: MessageId.make(crypto.randomUUID()),
+                text: tagMessage(tag, text),
+                attachments,
+                // The title comes from what you wrote, not from the tag.
+                ...(unnamed
+                  ? {
+                      titleSeed: deriveThreadTitleSeed({
+                        text,
+                        attachments: pending.map((image) => ({
+                          type: image.upload?.type ?? ("image" as const),
+                          name: image.upload?.name ?? "clipboard.png",
+                        })),
+                      }),
+                    }
+                  : {}),
+                createdBy: "user" as const,
+                creationSource: "server" as const,
+                ...(mode === "steer" ? { deliveryIntent: "steer" as const } : {}),
+                dispatchMode: {
+                  type: mode === "queue" ? ("queue_after_active" as const) : ("start_immediately" as const),
+                },
+              };
             },
         async () => {
           for (const image of pending) {

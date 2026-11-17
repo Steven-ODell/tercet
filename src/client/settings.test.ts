@@ -6,6 +6,7 @@ import {
   SettingsError,
   defaultSettings,
   loadSettings,
+  messageTagFor,
   migrateLegacyDir,
   parseSettings,
   settingsDir,
@@ -129,7 +130,7 @@ test("schema errors name the file, line and key", () => {
     `settings error in ${PATH}:3: theme.colour: unknown key; theme takes preset, accent, link`,
   );
   expect(failure('{\n  "sever": {}\n}')).toBe(
-    `settings error in ${PATH}:2: sever: unknown key; the top level takes server, theme, keys, icons, defaults, launchers, media, commands, targets, spell, readback, dictation`,
+    `settings error in ${PATH}:2: sever: unknown key; the top level takes server, theme, keys, icons, defaults, launchers, media, commands, targets, spell, readback, dictation, messageTag`,
   );
   expect(failure('{\n  "defaults": {\n\n    "mode": "yolo"\n  }\n}')).toBe(
     `settings error in ${PATH}:4: defaults.mode: expected one of "approval-required", "auto-accept-edits", "auto", "full-access", got "yolo"`,
@@ -419,4 +420,33 @@ test("browser destination, executable, profile and link color settings validate"
   expect(settings.launchers.browserLocation).toBe("client");
   expect(failure('{"launchers":{"browserLocation":"elsewhere"}}')).toContain("launchers.browserLocation");
   expect(failure('{"theme":{"link":"invalid"}}')).toContain("theme.link");
+});
+
+test("messageTag is off by default, parses, and rejects bad values", () => {
+  expect(parse("{}").messageTag).toEqual({ clients: {} });
+  expect(messageTagFor(parse("{}").messageTag)).toBeUndefined();
+  expect(messageTagFor(parse("{}").messageTag, "100.1.2.3")).toBeUndefined();
+  expect(
+    parse('{"messageTag":{"local":"<from PC>","ssh":"<from {client} SSH to PC>","clients":{"100.97.33.14":"laptop"}}}').messageTag,
+  ).toEqual({
+    local: "<from PC>",
+    ssh: "<from {client} SSH to PC>",
+    clients: { "100.97.33.14": "laptop" },
+  });
+  expect(failure('{"messageTag":{"local":12}}')).toContain("messageTag.local");
+  expect(failure('{"messageTag":{"ssh":""}}')).toContain("messageTag.ssh");
+  expect(failure('{"messageTag":{"clients":{"100.1.2.3":4}}}')).toContain("messageTag.clients");
+  expect(failure('{"messageTag":"on"}')).toContain("messageTag");
+});
+
+test("messageTagFor picks local or ssh, maps known clients, and keeps the raw address otherwise", () => {
+  const { messageTag } = parse(
+    '{"messageTag":{"local":"<from PC>","ssh":"<from {client} SSH to PC>","clients":{"100.97.33.14":"laptop"}}}',
+  );
+  expect(messageTagFor(messageTag)).toBe("<from PC>");
+  expect(messageTagFor(messageTag, "100.97.33.14")).toBe("<from laptop SSH to PC>");
+  expect(messageTagFor(messageTag, "203.0.113.7")).toBe("<from 203.0.113.7 SSH to PC>");
+  // Either key may be left out: no tag in that case.
+  expect(messageTagFor(parse('{"messageTag":{"ssh":"<ssh {client}>"}}').messageTag)).toBeUndefined();
+  expect(messageTagFor(parse('{"messageTag":{"local":"<pc>"}}').messageTag, "100.1.2.3")).toBeUndefined();
 });

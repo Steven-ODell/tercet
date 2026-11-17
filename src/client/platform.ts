@@ -11,6 +11,7 @@ import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { AuthStandardClientScopes } from "@t3tools/contracts";
 import { isLoopback, type Config } from "./config";
+import { messageTagFor } from "./settings";
 import { findT3, systemT3Host } from "./t3-command";
 import { speechStatus, transcribeSpeech } from "./speech";
 import {
@@ -77,7 +78,11 @@ export function tokenIssueArgs(config: Config) {
   ];
 }
 
-export function platform(config: Config) {
+export function platform(
+  config: Config,
+  /** The SSH client address of whoever types (see `sshHostLookup`); none when typing locally. */
+  sshHost?: () => Promise<string | undefined>,
+) {
   const draftPath = `${config.tokenFile}.drafts-${Bun.hash(config.url).toString(16)}.json`;
   const git: GitBoundary = <K extends GitOperation>(token: string, operation: K, input: GitInput<K>) =>
     Effect.suspend(() => {
@@ -148,6 +153,13 @@ export function platform(config: Config) {
       },
     },
     sendShortcut: async () => config.settings.defaults.sendShortcut,
+    messageTag: async () => {
+      const tag = config.settings.messageTag;
+      if (!tag.local && !tag.ssh) return undefined;
+      // The lookup reads tmux and /proc; a failure means "typing here".
+      const host = tag.ssh ? await sshHost?.().catch(() => undefined) : undefined;
+      return messageTagFor(tag, host);
+    },
     sidebarWorkingShelf: async () => config.settings.defaults.sidebarWorkingShelf,
     showHints: async () => config.settings.defaults.hints,
     newThreadDefaults: {

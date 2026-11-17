@@ -106,7 +106,14 @@ try {
       ? (await detectAppearance(process.stdin, process.stdout, process.env)).appearance
       : null;
   applyLook(config.settings, appearance);
-  const boundary = config.hello ? undefined : platform(config);
+  const output = async (args: string[]) => {
+    const child = Bun.spawn(args, { stdout: "pipe", stderr: "ignore", timeout: 3000 });
+    const text = await new Response(child.stdout).text();
+    if ((await child.exited) !== 0) throw new Error(`${args[0]} failed`);
+    return text;
+  };
+  const sshHost = sshHostLookup(process.env, output, (path) => Bun.file(path).text());
+  const boundary = config.hello ? undefined : platform(config, sshHost);
   const client = boundary && createClient(boundary, config.managedToken);
   // The version gate (client/compat.ts). A local autostart holder gets the document load that
   // wakes the real server, then the next check finds it.
@@ -209,12 +216,6 @@ try {
       },
       kittyReset,
     );
-    const output = async (args: string[]) => {
-      const child = Bun.spawn(args, { stdout: "pipe", stderr: "ignore", timeout: 3000 });
-      const text = await new Response(child.stdout).text();
-      if ((await child.exited) !== 0) throw new Error(`${args[0]} failed`);
-      return text;
-    };
     const shootPageId = cachedShots(async (id) =>
       shootPage(await client!.pageUrl(id), async (args, timeoutMs) => {
         const child = Bun.spawn(args, { stdout: "ignore", stderr: "ignore", timeout: timeoutMs });
@@ -232,7 +233,7 @@ try {
       writeTerminal: (bytes) => process.stdout.write(bytes),
       clipboardLocal: clipboardLocalLookup(process.env, output, (path) => Bun.file(path).text()),
       clipboardPassthrough: ["on", "all"].includes(tmuxCapabilities.passthrough ?? ""),
-      sshHost: sshHostLookup(process.env, output, (path) => Bun.file(path).text()),
+      sshHost,
       loadImage,
       personalDictionary: join(settingsDir(process.env, homedir()), "dictionary.txt"),
     });

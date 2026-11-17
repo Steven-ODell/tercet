@@ -19,8 +19,12 @@ import {
   createComposer,
   requiresModifier,
   completionTrigger,
+  tagMessage,
   type DraftStore,
 } from "./composer-state";
+import { connectionConfig } from "./config";
+import { platform } from "./platform";
+import { parseSettings } from "./settings";
 import { ThreadComposer } from "./composer";
 import { AppFrame } from "./frame";
 import { setTheme } from "./theme";
@@ -1061,4 +1065,96 @@ test("selected composer Ctrl+C copies without arming quit in the full frame", as
   } finally {
     await act(async () => view.renderer.destroy());
   }
+});
+
+test("messageTag: untagged by default; tags message.dispatch only, never twice, never queued edits; title seed stays untagged", async () => {
+  const h = await composerFixture();
+  const c = createComposer(h.client);
+  const snapshot = h.client.registry.get(h.client.snapshot)!;
+  try {
+    // Off by default: no boundary lookup, text goes out as typed.
+    c.setDraft(id, "plain");
+    await c.send(id);
+    expect(h.commands.at(-1)).toMatchObject({ type: "message.dispatch", text: "plain" });
+
+    h.client.boundary.messageTag = async () => "<from PC>";
+    c.setDraft(id, "hello");
+    await c.send(id);
+    expect(h.commands.at(-1)).toMatchObject({ type: "message.dispatch", text: "<from PC> hello" });
+
+    // Already tagged (by hand, or by an earlier hop): left alone.
+    c.setDraft(id, "<from laptop> hello");
+    await c.send(id);
+    expect(h.commands.at(-1)).toMatchObject({ text: "<from laptop> hello" });
+
+    // A lookup that throws sends the message untagged instead of failing it.
+    h.client.boundary.messageTag = async () => {
+      throw new Error("tmux gone");
+    };
+    c.setDraft(id, "still sent");
+    expect(await c.send(id)).toBe(true);
+    expect(h.commands.at(-1)).toMatchObject({ text: "still sent" });
+
+    // Queued-run edits keep the stored text, which was tagged when it was first sent.
+    h.client.boundary.messageTag = async () => "<from PC>";
+    c.setDraft(id, "edited");
+    await c.send(id, false, RunId.make("queued"));
+    expect(h.commands.at(-1)).toMatchObject({ type: "queued-run.edit", text: "edited" });
+
+    // The title seed never carries the tag.
+    h.client.registry.set(h.client.snapshot, {
+      ...snapshot,
+      threads: snapshot.threads.map((thread) => ({ ...thread, title: "New thread" })),
+    });
+    c.setDraft(id, "fix the login redirect");
+    await c.send(id);
+    expect(h.commands.at(-1)).toMatchObject({
+      text: "<from PC> fix the login redirect",
+      titleSeed: "fix the login redirect",
+    });
+  } finally {
+    await h.client.dispose();
+  }
+});
+
+test("tagMessage: one space, tag first; image-only becomes the tag; <from prefix is never doubled", () => {
+  expect(tagMessage(undefined, "hi")).toBe("hi");
+  expect(tagMessage("<from PC>", "hi")).toBe("<from PC> hi");
+  expect(tagMessage("<from PC>", "")).toBe("<from PC>");
+  expect(tagMessage("<from PC>", "  \n")).toBe("<from PC>");
+  expect(tagMessage("<from PC>", "  <from laptop> hi")).toBe("  <from laptop> hi");
+  expect(tagMessage("<from PC>", "<fromage> hi")).toBe("<from PC> <fromage> hi");
+});
+
+test("the platform boundary tags per send: local with no SSH client, ssh with a mapped or raw address", async () => {
+  const base = await connectionConfig(["--url", "http://127.0.0.1:1"], async () => undefined, "/absent");
+  const where = { home: "/home/u", dir: "/home/u/.config/tercet" };
+  const tagged = parseSettings(
+    '{"messageTag":{"local":"<from PC>","ssh":"<from {client} SSH to PC>","clients":{"100.97.33.14":"laptop"}}}',
+    "settings.json",
+    where,
+  );
+  let host: string | undefined;
+  let lookups = 0;
+  const lookup = async () => {
+    lookups++;
+    if (host === "boom") throw new Error("tmux gone");
+    return host;
+  };
+  const boundary = platform({ ...base, settings: tagged }, lookup);
+  expect(await boundary.messageTag()).toBe("<from PC>");
+  host = "100.97.33.14";
+  expect(await boundary.messageTag()).toBe("<from laptop SSH to PC>");
+  host = "203.0.113.7";
+  expect(await boundary.messageTag()).toBe("<from 203.0.113.7 SSH to PC>");
+  host = "boom";
+  expect(await boundary.messageTag()).toBe("<from PC>");
+  // Off: no tag and no lookup at all.
+  lookups = 0;
+  expect(await platform({ ...base, settings: parseSettings("{}", "settings.json", where) }, lookup).messageTag()).toBeUndefined();
+  expect(lookups).toBe(0);
+  // Only ssh set: typing locally means no tag.
+  host = undefined;
+  const sshOnly = parseSettings('{"messageTag":{"ssh":"<ssh {client}>"}}', "settings.json", where);
+  expect(await platform({ ...base, settings: sshOnly }, lookup).messageTag()).toBeUndefined();
 });
