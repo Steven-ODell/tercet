@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Local Read aloud keeps one warm Kokoro process (idle-stopped after 2 minutes) and starts with a small first piece, so speech begins in about two seconds instead of six.
+
 ## tercet 0.1.6 (2026-11-16)
 
 Works with T3 Code servers >=0.1.9 <0.2.0, tested on 0.1.9.
