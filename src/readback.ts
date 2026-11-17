@@ -1,5 +1,5 @@
 // Kokoro synthesis is independent of T3's dictation service. Never send T3 credentials here.
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { statSync } from "node:fs";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -20,25 +20,36 @@ export function spokenText(text: string) {
     .trim();
 }
 
-// One cancellable Python process per Read, using kokoro-onnx from the Kokoro home's venv.
-// No HTTP service, credentials or resident worker. The voice prefix picks the language.
+// One resident Python worker per tercet, using kokoro-onnx from the Kokoro home's venv. It reads one
+// JSON request per stdin line and answers each with one JSON header line, then that many WAV bytes:
+//   {"ok": true, "bytes": N}\n<N bytes>      or      {"ok": false, "error": "..."}\n
+// No HTTP service or credentials. The voice prefix picks the language. Stray prints go to stderr.
 const LOCAL_SYNTHESIS = String.raw`
 import io, json, sys, wave
 from pathlib import Path
 import numpy as np
 from kokoro_onnx import Kokoro
+out = sys.stdout.buffer
+sys.stdout = sys.stderr
 home = Path(sys.argv[1])
-req = json.load(sys.stdin)
 model = Kokoro(str(home / "kokoro-v1.0.onnx"), str(home / "voices-v1.0.bin"))
-samples, rate = model.create(req["text"], voice=req["voice"], speed=float(req["speed"]), lang={"a":"en-us", "b":"en-gb"}.get(req["voice"][:1], "en-us"))
-pcm = (np.clip(samples, -1.0, 1.0) * 32767).astype("<i2").tobytes()
-audio = io.BytesIO()
-with wave.open(audio, "wb") as wav:
-    wav.setnchannels(1)
-    wav.setsampwidth(2)
-    wav.setframerate(int(rate))
-    wav.writeframes(pcm)
-sys.stdout.buffer.write(audio.getvalue())
+for line in sys.stdin.buffer:
+    try:
+        req = json.loads(line)
+        samples, rate = model.create(req["text"], voice=req["voice"], speed=float(req["speed"]), lang={"a":"en-us", "b":"en-gb"}.get(req["voice"][:1], "en-us"))
+        pcm = (np.clip(samples, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+        audio = io.BytesIO()
+        with wave.open(audio, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(int(rate))
+            wav.writeframes(pcm)
+        data = audio.getvalue()
+        head = {"ok": True, "bytes": len(data)}
+    except Exception as e:
+        data, head = b"", {"ok": False, "error": (type(e).__name__ + ": " + str(e))[:300]}
+    out.write(json.dumps(head).encode() + b"\n" + data)
+    out.flush()
 `;
 export const KOKORO_MODEL_FILE = "kokoro-v1.0.onnx";
 export const KOKORO_VOICES_FILE = "voices-v1.0.bin";
@@ -121,48 +132,161 @@ export function readbackStatus(
   return { ready: missing.length === 0, home: modelHome, python, missing };
 }
 
+const MAX_AUDIO = 64 * 1024 * 1024;
+const WORKER_IDLE = 2 * 60_000;
+const CANNOT_START = "Cannot start local Kokoro Python. Run `tercet readback setup`, or check KOKORO_HOME, readback.home and KOKORO_PYTHON.";
+const GENERATION_FAILED = "Local Kokoro generation failed. Run `tercet readback setup` to repair the install, and check readback.voice.";
+
+type LocalCommand = ReturnType<typeof localReadbackCommand>;
+interface LiveWorker {
+  child: ChildProcess;
+  key: string;
+  buffer: Buffer;
+  bytes?: number; // Set once a header arrived and that many audio bytes are awaited.
+  dead: boolean;
+  pending?: { resolve: (audio: Uint8Array) => void; reject: (error: Error) => void };
+}
+
+/**
+ * One resident Kokoro process, so a piece costs synthesis only, not a model load. Started on the first
+ * request, shared by every piece and Read (one at a time), killed after `idleMs` quiet, on process exit,
+ * and whenever a piece is abandoned (Stop, new Read, timeout) so stale synthesis cannot delay the next
+ * Read; it is then started again in the background. A crash fails the pending piece and the next request
+ * starts a new one. The idle timer is unref'd and the process is only ref'd while a piece is made.
+ */
+export function createLocalWorker(options: { spawnProcess?: typeof spawn; idleMs?: number } = {}) {
+  const spawnProcess = options.spawnProcess ?? spawn;
+  const idleMs = options.idleMs ?? WORKER_IDLE;
+  let current: LiveWorker | undefined;
+  let idle: ReturnType<typeof setTimeout> | undefined;
+  let queue: Promise<unknown> = Promise.resolve();
+  let exitHook = false;
+
+  const hold = (live: LiveWorker, on: boolean) => {
+    for (const handle of [live.child, live.child.stdin, live.child.stdout] as any[]) handle?.[on ? "ref" : "unref"]?.();
+  };
+  const stopIdle = () => { clearTimeout(idle); idle = undefined; };
+  const armIdle = () => {
+    stopIdle();
+    idle = setTimeout(() => { if (current) kill(current); }, idleMs);
+    idle.unref?.();
+  };
+  const kill = (live: LiveWorker) => {
+    live.dead = true;
+    if (current === live) current = undefined;
+    live.pending = undefined;
+    live.child.kill();
+  };
+  const fail = (live: LiveWorker, error: Error) => {
+    live.dead = true;
+    if (current === live) current = undefined;
+    const pending = live.pending;
+    live.pending = undefined;
+    pending?.reject(error);
+  };
+  const consume = (live: LiveWorker) => {
+    while (!live.dead) {
+      if (live.bytes === undefined) {
+        const end = live.buffer.indexOf(10);
+        if (end < 0) { if (live.buffer.length > 65_536) { fail(live, new Error(GENERATION_FAILED)); live.child.kill(); } return; }
+        let head: any;
+        try { head = JSON.parse(live.buffer.toString("utf8", 0, end)); } catch { head = undefined; }
+        live.buffer = live.buffer.subarray(end + 1);
+        const pending = live.pending;
+        if (!pending || !head) { fail(live, new Error(GENERATION_FAILED)); live.child.kill(); return; }
+        if (!head.ok) { live.pending = undefined; pending.reject(new Error(GENERATION_FAILED)); continue; }
+        if (!Number.isSafeInteger(head.bytes) || head.bytes < 0) { fail(live, new Error(GENERATION_FAILED)); live.child.kill(); return; }
+        if (head.bytes > MAX_AUDIO) { fail(live, new Error("Kokoro audio exceeds the 64 MB limit.")); live.child.kill(); return; }
+        live.bytes = head.bytes;
+      }
+      const size = live.bytes as number;
+      if (live.buffer.length < size) return;
+      const audio = live.buffer.subarray(0, size);
+      live.buffer = live.buffer.subarray(size);
+      live.bytes = undefined;
+      const pending = live.pending;
+      live.pending = undefined;
+      if (!pending) continue;
+      if (audio.toString("ascii", 0, 4) !== "RIFF" || audio.toString("ascii", 8, 12) !== "WAVE") pending.reject(new Error("Local Kokoro returned invalid WAV audio."));
+      else pending.resolve(Buffer.from(audio));
+    }
+  };
+  const start = (command: LocalCommand): LiveWorker => {
+    const child = spawnProcess(command.python, command.args, { stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
+    const live: LiveWorker = { child, key: JSON.stringify([command.python, command.args.at(-1)]), buffer: Buffer.alloc(0), dead: false };
+    child.once("error", () => fail(live, new Error(CANNOT_START)));
+    child.once("close", () => fail(live, new Error(GENERATION_FAILED)));
+    child.stdin!.on("error", () => {}); // An early exit is reported through close.
+    child.stdout!.on("data", (part: Buffer) => {
+      if (live.dead) return;
+      live.buffer = Buffer.concat([live.buffer, part]);
+      consume(live);
+    });
+    current = live;
+    hold(live, false);
+    if (!exitHook) { exitHook = true; process.once("exit", () => { if (current) kill(current); }); }
+    return live;
+  };
+  const ensure = (command: LocalCommand) => {
+    const key = JSON.stringify([command.python, command.args.at(-1)]);
+    if (current && !current.dead && current.key === key && current.child.exitCode === null) return current;
+    if (current) kill(current);
+    return start(command);
+  };
+
+  const run = async (command: LocalCommand, payload: object, signal: AbortSignal) => {
+    signal.throwIfAborted();
+    stopIdle();
+    let live: LiveWorker;
+    try { live = ensure(command); } catch { armIdle(); throw new Error(CANNOT_START); }
+    hold(live, true);
+    try {
+      return await new Promise<Uint8Array>((resolve, reject) => {
+        const abort = () => {
+          kill(live);
+          reject(signal.reason);
+          try { hold(ensure(command), false); } catch { /* the next request reports it */ }
+        };
+        signal.addEventListener("abort", abort, { once: true });
+        live.pending = {
+          resolve: (audio) => { signal.removeEventListener("abort", abort); resolve(audio); },
+          reject: (error) => { signal.removeEventListener("abort", abort); reject(error); },
+        };
+        live.child.stdin!.write(JSON.stringify(payload) + "\n");
+      });
+    } finally {
+      if (current === live) hold(live, false);
+      if (current) armIdle();
+    }
+  };
+
+  return {
+    request(command: LocalCommand, payload: object, signal: AbortSignal) {
+      const result = queue.then(() => run(command, payload, signal));
+      queue = result.catch(() => {});
+      return result;
+    },
+    /** Kills the resident process, if any. */
+    close() { stopIdle(); if (current) kill(current); },
+    get running() { return !!current && !current.dead; },
+  };
+}
+
+const sharedWorker = createLocalWorker();
+
 /**
  * Checked on every Read, not once at startup, so a `tercet readback setup` run in another terminal
  * works without restarting tercet. Nothing is spawned until it passes.
  */
-export async function synthesizeLocalReadback(text: string, settings: Settings["readback"], signal: AbortSignal, env: NodeJS.ProcessEnv = process.env) {
+export async function synthesizeLocalReadback(text: string, settings: Settings["readback"], signal: AbortSignal, env: NodeJS.ProcessEnv = process.env, worker = sharedWorker) {
   const input = spokenText(text);
   if (!input) throw new Error("No text to read.");
   if (input.length > 30_000) throw new Error("Response is too long to read (30,000 character limit).");
   signal.throwIfAborted();
   if (!readbackStatus(env, settings.home).ready) throw new Error(READBACK_NOT_SET_UP);
-  const command = localReadbackCommand(env, settings.home);
-  return new Promise<Uint8Array>((resolve, reject) => {
-    const child = spawn(command.python, command.args, { stdio: ["pipe", "pipe", "ignore"], windowsHide: true, signal });
-    const abort = () => { child.kill(); reject(signal.reason); };
-    signal.addEventListener("abort", abort, { once: true });
-    if (signal.aborted) abort();
-    const parts: Buffer[] = [];
-    let size = 0;
-    let failure: Error | undefined;
-    child.once("error", (error) => {
-      failure = error;
-      reject(signal.aborted ? signal.reason : new Error("Cannot start local Kokoro Python. Run `tercet readback setup`, or check KOKORO_HOME, readback.home and KOKORO_PYTHON."));
-    });
-    child.stdin.on("error", () => {}); // Early worker exit is reported through close below.
-    child.stdout.on("data", (part: Buffer) => {
-      size += part.length;
-      if (size > MAX_AUDIO) { failure = new Error("Kokoro audio exceeds the 64 MB limit."); child.kill(); }
-      else parts.push(part);
-    });
-    child.once("close", (code) => {
-      signal.removeEventListener("abort", abort);
-      if (signal.aborted) { reject(signal.reason); return; }
-      if (failure || code !== 0) { reject(new Error("Local Kokoro generation failed. Run `tercet readback setup` to repair the install, and check readback.voice.")); return; }
-      const audio = Buffer.concat(parts);
-      if (audio.toString("ascii", 0, 4) !== "RIFF" || audio.toString("ascii", 8, 12) !== "WAVE") { reject(new Error("Local Kokoro returned invalid WAV audio.")); return; }
-      resolve(audio);
-    });
-    child.stdin.end(JSON.stringify({ text: input, voice: settings.voice, speed: settings.speed }));
-  });
+  return worker.request(localReadbackCommand(env, settings.home), { text: input, voice: settings.voice, speed: settings.speed }, signal);
 }
 
-const MAX_AUDIO = 64 * 1024 * 1024;
 export async function synthesizeReadback(
   text: string,
   settings: Settings["readback"],
@@ -290,19 +414,22 @@ export async function playReadbackVia(audio: Uint8Array, signal: AbortSignal, ho
 
 /**
  * Splits speech at sentence ends so playback can start after the first piece is made instead of
- * after the whole reply. The first piece is small to start sooner; later ones are bigger because
- * every piece costs a player launch. Never splits inside a sentence.
+ * after the whole reply. The first piece is small (about `first` characters) to start sooner; later
+ * ones are bigger because every piece costs a player launch. Never splits inside a sentence (a single
+ * long sentence stays whole) and never packs across a paragraph break (a blank line).
  */
-export function speechChunks(text: string, first = 300, rest = 700) {
+export function speechChunks(text: string, first = 120, rest = 400) {
   const chunks: string[] = [];
-  let buffer = "";
-  for (const sentence of text.split(/(?<=[.!?])\s+|\n+/)) {
-    if (!sentence.trim()) continue;
-    const budget = chunks.length ? rest : first;
-    if (buffer && buffer.length + sentence.length >= budget) { chunks.push(buffer); buffer = sentence; }
-    else buffer = buffer ? `${buffer} ${sentence}` : sentence;
+  for (const paragraph of text.split(/\n\s*\n/)) {
+    let buffer = "";
+    for (const sentence of paragraph.split(/(?<=[.!?])\s+|\n+/)) {
+      if (!sentence.trim()) continue;
+      const budget = chunks.length ? rest : first;
+      if (buffer && buffer.length + 1 + sentence.length > budget) { chunks.push(buffer); buffer = sentence; }
+      else buffer = buffer ? `${buffer} ${sentence}` : sentence;
+    }
+    if (buffer) chunks.push(buffer);
   }
-  if (buffer) chunks.push(buffer);
   return chunks;
 }
 
