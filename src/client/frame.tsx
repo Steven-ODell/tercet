@@ -35,6 +35,7 @@ import { contextContentOf } from "./context-content";
 import { ContextChip, contextDetailOf, ContextDropdown } from "./context-meter";
 import { paneGlyphs, selectionIcon } from "./icons";
 import { ThreadSidebar, wrapName } from "./sidebar";
+import { layoutFor, type LayoutMode } from "./layout";
 import type { Client } from "./runtime";
 import { ConnectionScreen, ServerNotice, useClientAtom } from "./screen";
 import { cheatSheet, commandForKey, hintFor, HintsShown, keymap, type Command } from "./keymap";
@@ -119,8 +120,15 @@ export function AppFrame({
   const statusText = `tercet · ${status} · threads=${count}${selected ? ` · ${runtimeModeLabels[selected.runtimeMode] ?? selected.runtimeMode}` : ""}`;
   const agentsText =
     runningAgents > 0 ? `${runningAgents} ${runningAgents === 1 ? "agent" : "agents"} running` : "";
-  const chipColumns =
-    width - Bun.stringWidth(statusText) - (agentsText ? 2 + Bun.stringWidth(agentsText) : 0) - 2;
+  // Narrow terminals (a phone) show one view at a time: Threads, Chat or the side panel.
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>("auto");
+  useEffect(() => {
+    void client.boundary
+      .layoutMode?.()
+      .then(setLayoutMode)
+      .catch(() => {});
+  }, [client]);
+  const oneView = layoutFor({ width, height, mode: layoutMode }).narrow;
   const headerRows = selected
     ? [
         ...wrapName(
@@ -153,7 +161,6 @@ export function AppFrame({
   // Rows outside the panes: header and banner above, the hint rows below.
   const chromeRows = topRows + (hintsShown ? 2 : 0);
   const [sidebarWanted, setSidebar] = useState(!attached);
-  const [narrowSidebar, setNarrowSidebar] = useState(false);
   const [focus, setFocusPane] = useState<Pane>(attached ? "composer" : "sidebar");
   // The composer shrinks to its draft line while another pane has focus or right after a send.
   // Anything that focuses it (click, key command, paste) opens it again.
@@ -182,12 +189,36 @@ export function AppFrame({
   const [diffSerial, setDiffSerial] = useState(0);
   const [editorSession, setEditorSession] = useState<EditorSession>();
   const [right, setRight] = useState<RightPanel | null>(null);
-  const sidebarWidth = width < 100 ? 22 : 30;
+  const sidebarWidth = oneView ? width : width < 100 ? 22 : 30;
   const tuckSidebar = width >= 70 && (right === "files" || right === "diff") &&
     width - sidebarWidth - rightWidth(right, width) - 2 < 60;
   const [compactSidebar, setCompactSidebar] = useState(false);
   useEffect(() => setCompactSidebar(false), [right, tuckSidebar]);
-  const sidebar = width < 70 ? narrowSidebar : tuckSidebar ? compactSidebar : sidebarWanted;
+  // One view at a time: the sidebar is the Threads view, shown exactly while it has focus.
+  const sidebar = oneView ? focus === "sidebar" : tuckSidebar ? compactSidebar : sidebarWanted;
+  const inChat = focus === "transcript" || focus === "composer";
+  const hasSidebar = oneView ? !attached : sidebar;
+  const rightTitle =
+    right === "files"
+      ? "Files"
+      : right === "diff"
+        ? "Diff"
+        : right === "editor"
+          ? "Editor"
+          : right === "terminal"
+            ? "Terminal"
+            : "Launchers";
+  const rightOuter = (kind: RightPanel) => (oneView ? Math.max(1, width) : rightWidth(kind, width));
+  const tabs: { label: string; pane: Pane }[] = [
+    ...(hasSidebar ? [{ label: "Threads", pane: "sidebar" as const }] : []),
+    { label: "Chat", pane: "transcript" },
+    ...(right ? [{ label: rightTitle, pane: "right" as const }] : []),
+  ];
+  const tabsText = tabs.map((tab) => `[${tab.label}]`).join(" ");
+  const chipColumns = oneView
+    ? width - Bun.stringWidth(tabsText) - 2
+    : width - Bun.stringWidth(statusText) - (agentsText ? 2 + Bun.stringWidth(agentsText) : 0) - 2;
+
   useEffect(() => {
     if (!sidebar && focus === "sidebar") setFocusPane(right ? "right" : "transcript");
   }, [sidebar, focus, right]);
@@ -257,19 +288,27 @@ export function AppFrame({
   // The media ladder's one-time hint (tmux passthrough off) when the first image falls back.
   useEffect(() => onMediaNotice(setActionError), []);
   const [quitArmed, setQuitArmed] = useState(false);
+  // The view is the focused pane, so a resize never moves it; only a vanished panel does.
   useEffect(() => {
-    setNarrowSidebar(false);
-    if (width < 70) setFocus(right ? "right" : "transcript");
-  }, [width, right]);
+    if (oneView && focus === "right" && !right) setFocusPane("transcript");
+  }, [oneView, focus, right]);
   const center = useRef<"transcript" | "composer">("transcript");
   useEffect(() => {
     if (focus === "transcript" || focus === "composer") center.current = focus;
   }, [focus]);
-  const visiblePanes = (): Pane[] => [
-    ...(sidebar ? ["sidebar" as const] : []),
-    ...(width >= 70 || !right ? ["transcript" as const, "composer" as const] : []),
-    ...(right ? ["right" as const] : []),
-  ];
+  const visiblePanes = (): Pane[] =>
+    oneView
+      ? [
+          ...(hasSidebar ? ["sidebar" as const] : []),
+          center.current,
+          ...(right ? ["right" as const] : []),
+        ]
+      : [
+          ...(sidebar ? ["sidebar" as const] : []),
+          "transcript" as const,
+          "composer" as const,
+          ...(right ? ["right" as const] : []),
+        ];
   const cwd =
     selected?.worktreePath ??
     snapshot?.projects.find((p) => p.id === selected?.projectId)?.workspaceRoot;
@@ -375,10 +414,12 @@ export function AppFrame({
           setActionError(failureText(error, `${command} failed; select a thread and retry.`)),
         );
     } else if (command === "sidebar") {
-      if (width < 70) setNarrowSidebar(!sidebar);
-      else if (tuckSidebar) setCompactSidebar(!sidebar);
-      else setSidebar(!sidebar);
-      if (focus === "sidebar") setFocus("transcript");
+      if (oneView) setFocus(focus === "sidebar" ? center.current : "sidebar");
+      else {
+        if (tuckSidebar) setCompactSidebar(!sidebar);
+        else setSidebar(!sidebar);
+        if (focus === "sidebar") setFocus("transcript");
+      }
     } else if (
       command === "files" ||
       command === "diff" ||
@@ -400,13 +441,9 @@ export function AppFrame({
         closeAgent();
         return;
       }
-      if (focus === "right") {
-        // Esc leaves the side panel for the centre; a terminal too narrow to show both closes it.
-        if (width >= 70) setFocus(center.current);
-        else {
-          setRight(null);
-          setFocus("transcript");
-        }
+      // Esc leaves the side panel for the centre; one view at a time it keeps walking the views.
+      if (focus === "right" && !oneView) {
+        setFocus(center.current);
         return;
       }
       // Esc with nothing to close walks the panes in reading order.
@@ -414,11 +451,10 @@ export function AppFrame({
       setFocus(panes[(panes.indexOf(focus) + 1) % panes.length]!);
     } else if (command.startsWith("focus")) {
       // Columns are sidebar | transcript over composer | right panel.
-      const centerShown = width >= 70 || !right;
       const leftward: Pane | undefined =
-        focus === "right" && centerShown ? center.current : sidebar ? "sidebar" : undefined;
+        focus === "right" ? center.current : hasSidebar ? "sidebar" : undefined;
       const rightward: Pane | undefined =
-        focus === "sidebar" && centerShown ? center.current : right ? "right" : undefined;
+        focus === "sidebar" ? center.current : right ? "right" : undefined;
       const target: Pane | undefined =
         command === "focusLeft"
           ? focus === "sidebar"
@@ -429,10 +465,10 @@ export function AppFrame({
               ? undefined
               : rightward
             : command === "focusUp"
-              ? focus === "composer" || (focus === "right" && centerShown)
+              ? focus === "composer" || focus === "right"
                 ? "transcript"
                 : undefined
-              : focus === "transcript" || (focus === "right" && centerShown)
+              : focus === "transcript" || focus === "right"
                 ? "composer"
                 : undefined;
       if (target) setFocus(target);
@@ -547,7 +583,7 @@ export function AppFrame({
     id: Pane,
     title: string,
     children: ReactNode,
-    size: { width?: number; height?: number; flexGrow?: number },
+    size: { width?: number; height?: number; flexGrow?: number; visible?: boolean },
   ) => (
     <box
       {...size}
@@ -589,8 +625,33 @@ export function AppFrame({
     <HintsShown.Provider value={hintsShown}>
       <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.canvas}>
         <box height={1} flexShrink={0} flexDirection="row">
-          <text fg={theme.text}>{statusText}</text>
-          {runningAgents > 0 && (
+          {oneView ? (
+            tabs.map((tab) => (
+              <box
+                key={tab.pane}
+                marginRight={1}
+                onMouseUp={(event) => {
+                  if (event.button !== 0 || overlay) return;
+                  setFocus(tab.pane === "transcript" ? center.current : tab.pane);
+                  setQuitArmed(false);
+                }}
+              >
+                <text
+                  fg={
+                    (tab.pane === "transcript" ? inChat : focus === tab.pane)
+                      ? theme.accent
+                      : theme.muted
+                  }
+                  selectable={false}
+                >
+                  [{tab.label}]
+                </text>
+              </box>
+            ))
+          ) : (
+            <text fg={theme.text}>{statusText}</text>
+          )}
+          {!oneView && runningAgents > 0 && (
             <box
               marginLeft={2}
               onMouseUp={(event) => {
@@ -660,9 +721,7 @@ export function AppFrame({
                   height={Math.max(1, height - 5 - chromeRows)}
                   enabled={!overlay}
                   keyboardEnabled={focus === "sidebar"}
-                  onOpen={() => {
-                    if (width >= 70 || !right) setFocus("transcript");
-                  }}
+                  onOpen={() => setFocus("transcript")}
                   onMenu={(id) => {
                     setMenuTarget(allThreads(client).find((t) => t.id === id));
                     setOverlay("menu");
@@ -671,7 +730,12 @@ export function AppFrame({
               ),
               { width: sidebarWidth },
             )}
-          <box flexGrow={1} minWidth={0} flexDirection="column" visible={width >= 70 || !right}>
+          <box
+            flexGrow={1}
+            minWidth={0}
+            flexDirection="column"
+            visible={!oneView || inChat}
+          >
             {pane(
               "transcript",
               agentId
@@ -711,7 +775,7 @@ export function AppFrame({
                       2,
                       width -
                         (sidebar ? sidebarWidth : 0) -
-                        (right ? rightWidth(right, width) : 0) -
+                        (right && !oneView ? rightWidth(right, width) : 0) -
                         2,
                     )}
                     height={Math.max(2, height - 13 - chromeRows - (composerHeight - 9))}
@@ -738,7 +802,7 @@ export function AppFrame({
                       pasteEnabled={
                         !overlay &&
                         !agentId &&
-                        (width >= 70 || !right) &&
+                        (!oneView || inChat) &&
                         !(focus === "right" && (right === "terminal" || right === "editor"))
                       }
                       collapsed={composerCollapsed}
@@ -779,25 +843,13 @@ export function AppFrame({
           {right &&
             pane(
               "right",
-              right === "files"
-                ? "Files"
-                : right === "diff"
-                  ? "Diff"
-                  : right === "editor"
-                    ? "Editor"
-                    : right === "terminal"
-                      ? "Terminal"
-                      : "Launchers",
+              rightTitle,
               content.right ??
                 (right === "editor" ? (
                   <EditorPanel
                     session={editorSession}
                     enabled={!overlay && focus === "right"}
-                    width={
-                      (width < 70
-                        ? Math.max(1, width - (sidebar ? 22 : 0))
-                        : rightWidth("editor", width)) - 2
-                    }
+                    width={rightOuter("editor") - 2}
                     height={height - 6 - chromeRows}
                     close={() => {
                       setRight("files");
@@ -817,11 +869,7 @@ export function AppFrame({
                     queuedRun={queuedRun}
                     onRunDone={(id) => setQueuedRun((last) => (last?.id === id ? undefined : last))}
                     height={height - 6 - chromeRows}
-                    width={
-                      (width < 70
-                        ? Math.max(1, width - (sidebar ? 22 : 0))
-                        : rightWidth("terminal", width)) - 2
-                    }
+                    width={rightOuter("terminal") - 2}
                     close={() => {
                       setRight(null);
                       setFocus("transcript");
@@ -870,11 +918,7 @@ export function AppFrame({
                     enabled={!overlay && focus === "right"}
                     effects={effects}
                     height={height - 5 - chromeRows}
-                    width={
-                      (width < 70
-                        ? Math.max(1, width - (sidebar ? 22 : 0))
-                        : rightWidth("files", width)) - 2
-                    }
+                    width={rightOuter("files") - 2}
                     close={() => {
                       setRight(null);
                       setFocus("transcript");
@@ -893,10 +937,7 @@ export function AppFrame({
                     }}
                   />
                 )),
-              {
-                width:
-                  width < 70 ? Math.max(1, width - (sidebar ? 22 : 0)) : rightWidth(right, width),
-              },
+              { width: rightOuter(right), visible: !oneView || focus === "right" },
             )}
         </box>
         <text height={1} flexShrink={0} fg={theme.accent}>
@@ -976,7 +1017,7 @@ export function AppFrame({
             close={() => setOverlay(null)}
             created={() => {
               setOverlay("model");
-              if (width >= 70 || !right) setFocus("composer");
+              setFocus("composer");
             }}
           />
         )}
