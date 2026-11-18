@@ -1,0 +1,40 @@
+╭─Menu · tap a row───────────────────────────────╮
+│Alt+r       Editor                              │
+│Alt+j       Terminal                            │
+│Alt+o       Web                                 │
+│Alt+l       Launchers                           │
+│Alt+b       Sidebar                             │
+│Alt+m       Model                               │
+│Alt+e       Effort / Permissions                │
+│Alt+u       Context usage                       │
+│Alt+f       Files                               │
+│Alt+d       Diff                                │
+│Ctrl+p      Palette                             │
+│Ctrl+n      New thread                          │
+│Ctrl+/      Search threads                      │
+│.           Thread actions                      │
+│?           Help                                │
+│Alt+i       Show / hide key hints               │
+│Alt+h       Pane left                           │
+│Ctrl+j      Pane down                           │
+│Ctrl+k      Pane up                             │
+│Ctrl+l      Pane right                          │
+│Alt+c       Close side panel                    │
+│Esc         Close overlay / next pane           │
+│Ctrl+c ×2   Quit                                │
+│Alt+w       Pull requests                       │
+│Alt+g       Branches                            │
+│[ Key reference ]                               │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│[ Esc Close ]                                   │
+╰────────────────────────────────────────────────╯

@@ -1,0 +1,20 @@
+[Threads] [Chat] [Info]          Context unknown ▾
+╭─¶ Transcript───────────────────────────────────╮
+│ and the composer keeps four rows.              │
+│                                                │
+│• One view at a time                            │
+│• Tabs on the status row                        │
+│                                                │
+│╭─ bash ────────────────────────────── [copy] ─╮│
+││ bun test                                     ││
+│╰──────────────────────────────────────────────╯│
+│Following tail                                  │
+│                                                │
+╰────────────────────────────────────────────────╯
+╭─● » Composer───────────────────────────────────╮
+│Wrap it, then run the tests                     │
+│                                                │
+│                                                │
+│[send] [steer] [stop]                           │
+╰────────────────────────────────────────────────╯
+[Menu] [Model] [Panels] [Threads] [Help]

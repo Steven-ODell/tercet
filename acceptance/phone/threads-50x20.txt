@@ -1,0 +1,20 @@
+[Threads] [Chat] [Info]          Context unknown ▾
+╭─● ≡ Threads────────────────────────────────────╮
+│[h] All threads                                 │
+│                                                │
+│  ◆ Make the phone terminal layout usable in […]│
+│  portrait and landscape: wrap every thread     │
+│  name, keep the composer above the keyboard    │
+│  and never cut a label                         │
+│  ✻ · ■ Alpha repo                           10m│
+│────────────────────────────────────────────────│
+│  ◆ Alpha pinned first                          │
+│  ◎ · ■ Alpha repo                            1h│
+│────────────────────────────────────────────────│
+│  ◆ Beta pinned second                          │
+│  ◎ · ■ Beta repo                            50m│
+│────────────────────────────────────────────────│
+│                                                │
+│                                                │
+╰────────────────────────────────────────────────╯
+[Menu] [Model] [Panels] [Threads] [Help]

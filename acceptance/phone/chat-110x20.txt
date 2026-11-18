@@ -1,0 +1,20 @@
+tercet · live · threads=26 · Full access                                                     Context unknown ▾
+╭─● ≡ Threads────────────────╮╭─¶ Transcript─────────────────────────────────────────────────────────────────╮
+│[h] All threads             ││──────────────────────────────────────────────────────────────────────────────│
+│                            ││assistant                                                                     │
+│  ◆ Make the phone       […]││Done. Names wrap on word breaks, the project and age move to their own row    │
+│  terminal layout usable    ││when they do not fit, and the composer keeps four rows.                       │
+│  in portrait and           ││                                                                              │
+│  landscape: wrap every     ││• One view at a time                                                          │
+│  thread name, keep the     ││• Tabs on the status row                                                      │
+│  composer above the        ││                                                                              │
+│  keyboard and never cut    ││╭─ bash ──────────────────────────────────────────────────────────── [copy] ─╮│
+│  a label                   │││ bun test                                                                   ││
+│  ✻ · ■ Alpha repo       10m││╰────────────────────────────────────────────────────────────────────────────╯│
+│────────────────────────────││Following tail                                                                │
+│  ◆ Alpha pinned first      ││                                                                              │
+│  ◎ · ■ Alpha repo        1h│╰──────────────────────────────────────────────────────────────────────────────╯
+│                            │╭─» Composer───────────────────────────────────────────────────────────────────╮
+│                            ││Message · @file · /skill · :emoji                                             │
+╰────────────────────────────╯╰──────────────────────────────────────────────────────────────────────────────╯
+[Menu] [Model] [Panels] [Threads] [Help]
