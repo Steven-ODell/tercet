@@ -1,6 +1,7 @@
 import { CommandId, type VcsRef } from "@t3tools/contracts";
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { useKeyboard, useTerminalDimensions } from "@opentui/react";
+import { useKeyboard } from "@opentui/react";
+import { useLayout } from "./layout-context";
 import type { Client } from "./runtime";
 import { workspaceChoices, verifiedWorkspaceChoices, type WorkspaceChoice } from "./workspace";
 import { theme } from "./theme";
@@ -144,8 +145,7 @@ export function BranchPanel({ workflow, target, close }: { workflow: BranchWorkf
   const [name, setName] = useState("");
   const key = target && workspaceKey(target);
   // Phone sizes (the narrow/short thresholds of the frame): the button column becomes one wrapping row.
-  const { width, height } = useTerminalDimensions();
-  const compact = width < 70 || height < 24;
+  const compact = useLayout().compact;
   useEffect(() => {
     setCursor(0); setCreating(false); setName("");
     if (target) void workflow.refresh(target);

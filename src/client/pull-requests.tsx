@@ -1,5 +1,6 @@
 import { createElement, Fragment, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { useKeyboard, useTerminalDimensions } from "@opentui/react";
+import { useKeyboard } from "@opentui/react";
+import { useLayout } from "./layout-context";
 import type { TextareaRenderable, ScrollBoxRenderable } from "@opentui/core";
 import type { PullRequestReviewVerdict } from "@t3tools/contracts";
 import type { Actions } from "../actions";
@@ -22,8 +23,7 @@ export function PullRequestPanel({ workflow, target, effects, close }: { workflo
   const scroll = useRef<ScrollBoxRenderable>(null);
   const workspace = target && workspaceKey(target);
   // Phone sizes (the frame's narrow/short thresholds): buttons share wrapping rows instead of one each.
-  const { width, height } = useTerminalDimensions();
-  const compact = width < 70 || height < 24;
+  const compact = useLayout().compact;
   const key = target && prKey(target, selection);
   useEffect(() => { setSelection(undefined); setEditing(false); setConfirm(undefined); setCursor(0); }, [workspace]);
   useEffect(() => {

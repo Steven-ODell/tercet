@@ -80,7 +80,7 @@ test("keys typed in bursts (voxtype) keep every character and the caret at the e
   );
   const view = await testRender(
     <AppFrame client={h.client} effects={{ copy() {}, pasteImage: async () => png }} />,
-    { width: 174, height: 22, kittyKeyboard: true, exitOnCtrlC: false },
+    { width: 174, height: 24, kittyKeyboard: true, exitOnCtrlC: false },
   );
   const findEditor = (node: Renderable): TextareaRenderable | undefined =>
     node instanceof TextareaRenderable ? node : node.getChildren().map(findEditor).find(Boolean);
