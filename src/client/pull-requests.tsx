@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { useKeyboard } from "@opentui/react";
+import { createElement, Fragment, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import type { TextareaRenderable, ScrollBoxRenderable } from "@opentui/core";
 import type { PullRequestReviewVerdict } from "@t3tools/contracts";
 import type { Actions } from "../actions";
@@ -21,6 +21,9 @@ export function PullRequestPanel({ workflow, target, effects, close }: { workflo
   const generation = useRef(0);
   const scroll = useRef<ScrollBoxRenderable>(null);
   const workspace = target && workspaceKey(target);
+  // Phone sizes (the frame's narrow/short thresholds): buttons share wrapping rows instead of one each.
+  const { width, height } = useTerminalDimensions();
+  const compact = width < 70 || height < 24;
   const key = target && prKey(target, selection);
   useEffect(() => { setSelection(undefined); setEditing(false); setConfirm(undefined); setCursor(0); }, [workspace]);
   useEffect(() => {
@@ -79,13 +82,14 @@ export function PullRequestPanel({ workflow, target, effects, close }: { workflo
     if (delta && (data || file !== undefined)) { event.preventDefault(); scroll.current?.scrollBy(delta); return; }
     if (delta) { event.preventDefault(); setCursor((n) => Math.max(0, Math.min((list?.entries.length ?? files.length) - 1, n + delta))); }
   });
-  const button = (label: string, action: () => void) => <text flexShrink={0} fg={theme.accent} onMouseUp={(e) => { if (e.button === 0) action(); }}>{label}</text>;
+  const button = (label: string, action: () => void) => <text flexShrink={0} fg={theme.accent} onMouseUp={(e) => { if (e.button === 0) action(); }}>{compact ? `${label} ` : label}</text>;
+  const buttons = (...items: ReactNode[]) => compact ? createElement("box", { flexShrink: 0, flexDirection: "row", flexWrap: "wrap" }, ...items) : createElement(Fragment, null, ...items);
   const link = (action: "link" | "unlink" | "watch" | "unwatch") => { if (target && selection) void workflow.link(target, selection, action); };
   return <box position="absolute" left={0} top={0} width="100%" height="100%" border borderColor={theme.accent} backgroundColor={theme.canvas} flexDirection="column" title="Pull requests">
-    {button("[Esc Back]", back)}
+    {compact ? buttons(button("[Esc Back]", back), button("[r Refresh]", refresh)) : button("[Esc Back]", back)}
     <text flexShrink={0} fg={theme.plain}>{target ? `${workspaceCwd(target)} · thread ${target.threadId ?? "none"}` : "Select a thread first"}</text>
     {selection && <text flexShrink={0} fg={theme.strong}>{`${selection.ref.host} / ${selection.ref.repository} #${selection.ref.number}`}</text>}
-    {button("[r Refresh]", refresh)}
+    {!compact && button("[r Refresh]", refresh)}
     {busy && <text flexShrink={0} fg={theme.muted}>Loading / action pending… Closing cannot undo a write.</text>}
     {state.status === "error" && state.target === key && <text flexShrink={0} fg={theme.red}>{state.error.message}</text>}
     {notice && <text flexShrink={0} fg={theme.muted}>{notice}</text>}
@@ -94,12 +98,14 @@ export function PullRequestPanel({ workflow, target, effects, close }: { workflo
       <text flexShrink={0} fg={theme.plain}>{confirm === "create" ? "No automatic retry. Inspect host if result is uncertain." : key && workflow.draft(key)}</text>
       {button("[Enter Confirm submission]", execute)}
     </box> : editing ? <box minHeight={0} flexGrow={1} flexDirection="column">
-      <text flexShrink={0} fg={theme.muted}>Draft · Esc saves · Ctrl+s post · Ctrl+e review · Ctrl+a approve · Ctrl+r changes</text>
+      <text flexShrink={0} fg={theme.muted}>{compact ? "Draft · Esc saves" : "Draft · Esc saves · Ctrl+s post · Ctrl+e review · Ctrl+a approve · Ctrl+r changes"}</text>
       <textarea key={key} ref={editor} focused cursorColor={theme.strong} flexGrow={1} minHeight={2} initialValue={key ? workflow.draft(key) : ""} onContentChange={() => { if (key && editor.current) workflow.setDraft(key, editor.current.plainText); }} />
-      {button("[Post discussion comment]", () => { setEditing(false); setConfirm("discussion"); })}
-      {button("[Comment review]", () => { setEditing(false); setConfirm("comment"); })}
-      {button("[Approve]", () => { setEditing(false); setConfirm("approve"); })}
-      {button("[Request changes]", () => { setEditing(false); setConfirm("request-changes"); })}
+      {buttons(
+        button("[Post discussion comment]", () => { setEditing(false); setConfirm("discussion"); }),
+        button("[Comment review]", () => { setEditing(false); setConfirm("comment"); }),
+        button("[Approve]", () => { setEditing(false); setConfirm("approve"); }),
+        button("[Request changes]", () => { setEditing(false); setConfirm("request-changes"); }),
+      )}
     </box> : <scrollbox ref={scroll} minHeight={0} flexGrow={1} scrollY scrollX={false}>
       {!selection && button("[n Create PR for current branch]", () => setConfirm("create"))}
       {list?.errors.map((e) => <text flexShrink={0} key={e.projectId} fg={theme.red}>{`${e.projectTitle}: PR listing unavailable. Check server Git host authentication.`}</text>)}
@@ -107,17 +113,17 @@ export function PullRequestPanel({ workflow, target, effects, close }: { workflo
       {list && !list.entries.length && <text fg={theme.plain}>No PRs returned. Check host setup if unexpected.</text>}
       {list?.entries.map((entry, index) => <text flexShrink={0} key={`${entry.host}/${entry.repository}/${entry.number}`} fg={index === cursor ? theme.strong : theme.plain} bg={index === cursor ? theme.highlight : undefined} onMouseUp={() => choose(index)}>{`${index === cursor ? "› " : ""}#${entry.number} ${entry.title} · ${entry.state}${entry.isDraft ? " draft" : ""} · ${entry.checksState ?? "checks unknown"}`}</text>)}
       {list?.truncated && <text fg={theme.muted}>Listing limited to 100. Use T3 Web for more PRs.</text>}
-      {selection && <>
-        {button("[y Copy link]", () => { effects?.copy(selection.url); setNotice(effects ? "Link copied" : "Clipboard unavailable"); })}
-        {button("[o Open PR]", () => external(selection.url))}
-        {button("[Open host diff]", () => external(`${selection.url}/files`))}
-        {button("[l Link to this thread]", () => link("link"))}
-        {button("[u Unlink from this thread]", () => link("unlink"))}
-        {button("[w Watch: enable thread notifications]", () => link("watch"))}
-        {button("[W Unwatch: disable thread notifications]", () => link("unwatch"))}
-        {button("[c Comment / review draft]", () => setEditing(true))}
-        {button("[d Local branch comparison]", () => { if (target) void workflow.diff(target, selection); })}
-      </>}
+      {selection && buttons(
+        button("[y Copy link]", () => { effects?.copy(selection.url); setNotice(effects ? "Link copied" : "Clipboard unavailable"); }),
+        button("[o Open PR]", () => external(selection.url)),
+        button("[Open host diff]", () => external(`${selection.url}/files`)),
+        button("[l Link to this thread]", () => link("link")),
+        button("[u Unlink from this thread]", () => link("unlink")),
+        button("[w Watch: enable thread notifications]", () => link("watch")),
+        button("[W Unwatch: disable thread notifications]", () => link("unwatch")),
+        button("[c Comment / review draft]", () => setEditing(true)),
+        button("[d Local branch comparison]", () => { if (target) void workflow.diff(target, selection); }),
+      )}
       {data && <>
         <text flexShrink={0} fg={theme.strong}>{`${data.detail.title}\n${data.detail.state}${data.detail.isDraft ? " · draft" : ""} · ${data.detail.mergeability}\n${data.detail.headBranch} → ${data.detail.baseBranch}\n+${data.detail.additions} −${data.detail.deletions}\n${data.detail.body}`}</text>
         <text flexShrink={0} fg={theme.accent}>Checks</text>
