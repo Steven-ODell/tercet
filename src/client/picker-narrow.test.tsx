@@ -9,8 +9,10 @@ import { ThreadPalette } from "./thread-palette";
 import { NewThreadPicker, WorkspacePicker } from "./workspace";
 import { createThreadActions } from "./thread-actions";
 
-const longModel = "Claude Opus 5.5 Extended Thinking Preview With A Very Long Display Name";
-const longThread = "Beta thread with a long name that goes on and on and on past fifty columns";
+const longModel =
+  "Claude Opus 5.5 Extended Thinking Preview With A Very Long Display Name";
+const longThread =
+  "Beta thread with a long name that goes on and on and on past fifty columns";
 const provider = {
   ...claude([]),
   models: [
@@ -211,14 +213,28 @@ async function fixture(plain = false) {
   const snap = h.client.registry.get(h.client.snapshot)!;
   const extra = plain
     ? ["Alpha", longThread, "Gamma"]
-    : ["Alpha", longThread, "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta"];
+    : [
+        "Alpha",
+        longThread,
+        "Gamma",
+        "Delta",
+        "Epsilon",
+        "Zeta",
+        "Eta",
+        "Theta",
+      ];
   h.client.registry.set(h.client.snapshot, {
     ...snap,
     projects: plain
       ? snap.projects
       : [
           ...snap.projects,
-          ...["Second project with a long title", "Third", "Fourth", "Fifth"].map(
+          ...[
+            "Second project with a long title",
+            "Third",
+            "Fourth",
+            "Fifth",
+          ].map(
             (title, i) =>
               ({
                 ...snap.projects[0]!,
@@ -230,14 +246,28 @@ async function fixture(plain = false) {
         ],
     threads: [
       ...snap.threads,
-      ...extra.map((title, i) => ({ ...snap.threads[0]!, id: `t${i}`, title }) as never),
+      ...extra.map(
+        (title, i) => ({ ...snap.threads[0]!, id: `t${i}`, title }) as never,
+      ),
     ],
   });
   h.client.boundary.workspaceRefs = () =>
     Effect.succeed([
-      { name: "main", current: true, isDefault: true, worktreePath: "/fixture" },
+      {
+        name: "main",
+        current: true,
+        isDefault: true,
+        worktreePath: "/fixture",
+      },
       ...(plain
-        ? [{ name: "feature", current: false, isDefault: false, worktreePath: "/fixture-feature" }]
+        ? [
+            {
+              name: "feature",
+              current: false,
+              isDefault: false,
+              worktreePath: "/fixture-feature",
+            },
+          ]
         : ["one", "two", "three", "four"].map((name) => ({
             name: `feature/${name}-with-a-long-branch-name`,
             current: false,
@@ -251,7 +281,13 @@ async function fixture(plain = false) {
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 const pickers: Record<string, (h: Fixture) => ReactNode> = {
   model: (h) => (
-    <ModelPicker client={h.client} effort={false} close={() => {}} width={W} height={H} />
+    <ModelPicker
+      client={h.client}
+      effort={false}
+      close={() => {}}
+      width={W}
+      height={H}
+    />
   ),
   palette: (h) => (
     <ThreadPalette
@@ -264,10 +300,18 @@ const pickers: Record<string, (h: Fixture) => ReactNode> = {
     />
   ),
   new: (h) => (
-    <NewThreadPicker client={h.client} actions={createThreadActions(h.client)} close={() => {}} />
+    <NewThreadPicker
+      client={h.client}
+      actions={createThreadActions(h.client)}
+      close={() => {}}
+    />
   ),
   ws: (h) => (
-    <WorkspacePicker client={h.client} actions={createThreadActions(h.client)} close={() => {}} />
+    <WorkspacePicker
+      client={h.client}
+      actions={createThreadActions(h.client)}
+      close={() => {}}
+    />
   ),
 };
 // The pickers read the size from props or the renderer; `render` sets these before building.
@@ -276,7 +320,11 @@ let H = 40;
 async function render(name: string, h: Fixture, width: number, height: number) {
   W = width;
   H = height;
-  const view = await testRender(pickers[name]!(h), { width, height, kittyKeyboard: true });
+  const view = await testRender(pickers[name]!(h), {
+    width,
+    height,
+    kittyKeyboard: true,
+  });
   await view.waitForFrame((f) => f.length > 0);
   await view.flush();
   await act(async () => {});
@@ -284,16 +332,19 @@ async function render(name: string, h: Fixture, width: number, height: number) {
   return view;
 }
 
-test.each(["model", "palette", "new", "ws"])("%s picker at 120x40 is unchanged", async (name) => {
-  const h = await fixture(true);
-  const view = await render(name, h, 120, 40);
-  try {
-    expect(frame(view)).toBe(BASE_120x40[name]!);
-  } finally {
-    view.renderer.destroy();
-    await h.client.dispose();
-  }
-});
+test.each(["model", "palette", "new", "ws"])(
+  "%s picker at 120x40 is unchanged",
+  async (name) => {
+    const h = await fixture(true);
+    const view = await render(name, h, 120, 40);
+    try {
+      expect(frame(view)).toBe(BASE_120x40[name]!);
+    } finally {
+      view.renderer.destroy();
+      await h.client.dispose();
+    }
+  },
+);
 
 const sizes: [number, number][] = [
   [50, 40],
@@ -314,7 +365,8 @@ function expectWhole(text: string, width: number, height: number) {
   }
   expect(lines.some((l) => l.includes("└"))).toBe(true);
 }
-const count = (text: string, names: string[]) => names.filter((n) => text.includes(n)).length;
+const count = (text: string, names: string[]) =>
+  names.filter((n) => text.includes(n)).length;
 
 test.each(sizes)("model picker reflows at %ix%i", async (width, height) => {
   const h = await fixture();
@@ -326,8 +378,12 @@ test.each(sizes)("model picker reflows at %ix%i", async (width, height) => {
     expect(text).toContain("[ Esc Close ]");
     // The long name is first and wraps whole; the rows after it still show (>= 3 rows).
     expect(flat(text)).toContain(flat(longModel));
-    expect(text.split("\n").filter((l) => l.includes("…") && !l.includes("filter"))).toEqual([]);
-    expect(count(text, ["Sonnet 5.5", "Haiku 5.5", "Fable 5.2"]) + 1).toBeGreaterThanOrEqual(3);
+    expect(
+      text.split("\n").filter((l) => l.includes("…") && !l.includes("filter")),
+    ).toEqual([]);
+    expect(
+      count(text, ["Sonnet 5.5", "Haiku 5.5", "Fable 5.2"]) + 1,
+    ).toBeGreaterThanOrEqual(3);
     if (height >= 14) expect(flat(text)).toContain(flat("Tab edit favorite"));
   } finally {
     view.renderer.destroy();
@@ -365,7 +421,9 @@ test.each(sizes)("thread palette reflows at %ix%i", async (width, height) => {
     expect(text).toContain("Type to search");
     expect(text).toContain("[ Esc Close ]");
     expect(text).toContain("[ Enter select ]");
-    expect(count(text, ["New thread", "Settle", "Unsettle", "Pin"])).toBeGreaterThanOrEqual(3);
+    expect(
+      count(text, ["New thread", "Settle", "Unsettle", "Pin"]),
+    ).toBeGreaterThanOrEqual(3);
     // Walk to the long thread name: it shows whole, and its row is on screen.
     for (let i = 0; i < 15; i++) {
       await act(async () => view.mockInput.pressKey("ARROW_DOWN"));
@@ -375,39 +433,50 @@ test.each(sizes)("thread palette reflows at %ix%i", async (width, height) => {
     expectWhole(text, width, height);
     expect(text).toContain("› ");
     expect(flat(text)).toContain(flat(longThread));
-    expect(text.split("\n").filter((l) => l.includes("fifty") && l.includes("…"))).toEqual([]);
+    expect(
+      text.split("\n").filter((l) => l.includes("fifty") && l.includes("…")),
+    ).toEqual([]);
   } finally {
     view.renderer.destroy();
     await h.client.dispose();
   }
 });
 
-test.each(sizes)("new-thread picker reflows at %ix%i", async (width, height) => {
-  const h = await fixture();
-  const view = await render("new", h, width, height);
-  try {
-    let text = frame(view);
-    expectWhole(text, width, height);
-    expect(text).toContain("[Esc close]");
-    expect(text).toContain("[l next]");
-    expect(count(text, ["p · /fixture", "Second", "Third", "Fourth"])).toBeGreaterThanOrEqual(3);
-    await act(async () => view.mockInput.pressKey("ARROW_DOWN"));
-    await view.flush();
-    text = frame(view);
-    expect(text).toContain("› Second project with a long title");
-    expect(flat(text)).toContain(flat("/home/someone/projects/deeply/nested/second"));
-    expect(text).not.toContain("…");
-  } finally {
-    view.renderer.destroy();
-    await h.client.dispose();
-  }
-});
+test.each(sizes)(
+  "new-thread picker reflows at %ix%i",
+  async (width, height) => {
+    const h = await fixture();
+    const view = await render("new", h, width, height);
+    try {
+      let text = frame(view);
+      expectWhole(text, width, height);
+      expect(text).toContain("[Esc close]");
+      expect(text).toContain("[l next]");
+      expect(
+        count(text, ["p · /fixture", "Second", "Third", "Fourth"]),
+      ).toBeGreaterThanOrEqual(3);
+      await act(async () => view.mockInput.pressKey("ARROW_DOWN"));
+      await view.flush();
+      text = frame(view);
+      expect(text).toContain("› Second project with a long title");
+      expect(flat(text)).toContain(
+        flat("/home/someone/projects/deeply/nested/second"),
+      );
+      expect(text).not.toContain("…");
+    } finally {
+      view.renderer.destroy();
+      await h.client.dispose();
+    }
+  },
+);
 
 test.each(sizes)("workspace picker reflows at %ix%i", async (width, height) => {
   const h = await fixture();
   const view = await render("ws", h, width, height);
   try {
-    await view.waitForFrame((f) => f.includes("Project root") || f.includes("main"));
+    await view.waitForFrame(
+      (f) => f.includes("Project root") || f.includes("main"),
+    );
     let text = frame(view);
     expectWhole(text, width, height);
     expect(text).toContain("[Esc close]");
@@ -425,6 +494,91 @@ test.each(sizes)("workspace picker reflows at %ix%i", async (width, height) => {
       flat("/home/someone/worktrees/four/with/a/long/path/to/the/checkout"),
     );
     expect(text).not.toContain("…");
+  } finally {
+    view.renderer.destroy();
+    await h.client.dispose();
+  }
+});
+
+/** The model list grown past what 50x14 can show. */
+function manyModels(h: Fixture) {
+  const extra = [1, 2, 3, 4, 5, 6].map((n) => ({
+    slug: `x${n}`,
+    name: `Extra ${n}`,
+    isCustom: false,
+    capabilities: null,
+  }));
+  h.client.registry.set(h.client.providers, [
+    { ...provider, models: [...provider.models, ...extra] },
+  ] as never);
+}
+
+/** A finger swipe on the phone arrives only as wheel events. */
+async function wheel(
+  view: Awaited<ReturnType<typeof render>>,
+  direction: "up" | "down",
+  n: number,
+) {
+  for (let i = 0; i < n; i++) {
+    await act(async () => view.mockMouse.scroll(10, 6, direction));
+    await view.flush();
+  }
+}
+
+const wheelCases: [string, string, string][] = [
+  ["model", "Extra 6", "Sonnet 5.5"],
+  ["palette", "Theta", "New thread"],
+  ["new", "Fifth", "Second"],
+  ["ws", "feature/four", "feature/one"],
+];
+
+test.each(wheelCases)(
+  "%s picker scrolls with the mouse wheel at 50x14",
+  async (name, far, near) => {
+    const h = await fixture();
+    if (name === "model") manyModels(h);
+    const view = await render(name, h, 50, 14);
+    try {
+      if (name === "ws")
+        await view.waitForFrame(
+          (f) => f.includes("Project root") || f.includes("main"),
+        );
+      let text = frame(view);
+      expect(text).not.toContain(far);
+      expect(text).toContain(
+        name === "model" || name === "palette"
+          ? "[ Esc Close ]"
+          : "[Esc close]",
+      );
+      const cursorRow = text.split("\n").find((l) => l.includes("› "));
+      await wheel(view, "down", 30);
+      text = frame(view);
+      expectWhole(text, 50, 14);
+      expect(flat(text)).toContain(flat(far));
+      expect(text).not.toContain("› ");
+      // The wheel moves the window, not the cursor: the cursor row is still the first one.
+      await wheel(view, "up", 30);
+      text = frame(view);
+      expectWhole(text, 50, 14);
+      expect(flat(text)).toContain(flat(near));
+      expect(text.split("\n").find((l) => l.includes("› "))).toBe(cursorRow);
+    } finally {
+      view.renderer.destroy();
+      await h.client.dispose();
+    }
+  },
+);
+
+test("model picker: a key press after the wheel brings the cursor row back", async () => {
+  const h = await fixture();
+  manyModels(h);
+  const view = await render("model", h, 50, 14);
+  try {
+    await wheel(view, "down", 30);
+    expect(frame(view)).not.toContain("› ");
+    await act(async () => view.mockInput.pressKey("ARROW_DOWN"));
+    await view.flush();
+    expect(frame(view)).toContain("› ✻ Claude · Sonnet 5.5");
   } finally {
     view.renderer.destroy();
     await h.client.dispose();

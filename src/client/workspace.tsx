@@ -2,7 +2,13 @@ import { theme } from "./theme";
 import type { ColorInput } from "@opentui/core";
 import { useEffect, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import { pickerCompact, rowText, windowWithHint, wrapWords } from "./model-picker";
+import {
+  pickerCompact,
+  rowText,
+  useWheelTop,
+  windowWithHint,
+  wrapWords,
+} from "./model-picker";
 import type { OrchestrationV2ThreadShell, VcsRef } from "@t3tools/contracts";
 import type { Client } from "./runtime";
 import { useClientAtom } from "./screen";
@@ -26,20 +32,47 @@ export async function verifiedWorkspaceChoices(
     paths.add(row.worktreePath);
     return true;
   });
-  const checked = await Promise.all(candidates.map(async (row) => {
-    try {
-      const value = await status(row.worktreePath!);
-      return value.isRepo ? { branch: value.refName, worktreePath: row.worktreePath } : undefined;
-    } catch { return undefined; }
-  }));
-  return workspaceChoices(root, refs, checked.filter((row): row is WorkspaceChoice => row !== undefined));
+  const checked = await Promise.all(
+    candidates.map(async (row) => {
+      try {
+        const value = await status(row.worktreePath!);
+        return value.isRepo
+          ? { branch: value.refName, worktreePath: row.worktreePath }
+          : undefined;
+      } catch {
+        return undefined;
+      }
+    }),
+  );
+  return workspaceChoices(
+    root,
+    refs,
+    checked.filter((row): row is WorkspaceChoice => row !== undefined),
+  );
 }
-export function workspaceChoices(root: string, refs: readonly VcsRef[], known: readonly WorkspaceChoice[] = []): WorkspaceChoice[] {
-  const current = refs.find((ref) => ref.worktreePath === root) ?? refs.find((ref) => ref.current && !ref.worktreePath);
+export function workspaceChoices(
+  root: string,
+  refs: readonly VcsRef[],
+  known: readonly WorkspaceChoice[] = [],
+): WorkspaceChoice[] {
+  const current =
+    refs.find((ref) => ref.worktreePath === root) ??
+    refs.find((ref) => ref.current && !ref.worktreePath);
   const choices = new Map<string, WorkspaceChoice>();
   choices.set(root, { branch: current?.name ?? null, worktreePath: null });
-  for (const row of [...refs.map((ref) => ({ branch: ref.name, worktreePath: ref.worktreePath ?? null })), ...known]) {
-    if (row.worktreePath && row.worktreePath !== root && !choices.has(row.worktreePath)) choices.set(row.worktreePath, row);
+  for (const row of [
+    ...refs.map((ref) => ({
+      branch: ref.name,
+      worktreePath: ref.worktreePath ?? null,
+    })),
+    ...known,
+  ]) {
+    if (
+      row.worktreePath &&
+      row.worktreePath !== root &&
+      !choices.has(row.worktreePath)
+    )
+      choices.set(row.worktreePath, row);
   }
   return [...choices.values()];
 }
@@ -48,7 +81,9 @@ export function projectChoices<P extends { id: string }>(
   projects: readonly P[],
   currentId: string | undefined,
 ): P[] {
-  return [...projects].sort((a, b) => Number(b.id === currentId) - Number(a.id === currentId));
+  return [...projects].sort(
+    (a, b) => Number(b.id === currentId) - Number(a.id === currentId),
+  );
 }
 /**
  * Phone sizes: a full-screen list. Title, status and rows are wrapped whole and counted, so at
@@ -79,6 +114,7 @@ function CompactList({
   buttons: { label: string; onClick: () => void }[];
   onRow: (index: number) => void;
 }) {
+  const { top: wheelTop, onWheel } = useWheelTop(cursor, texts.length);
   const inner = width - 2;
   const titleLines = wrapWords(title, inner);
   const subLines = sub ? wrapWords(sub, inner) : [];
@@ -91,6 +127,7 @@ function CompactList({
     inner - 2,
     Math.max(1, height - 2 - fixed),
     hintLines.length,
+    wheelTop,
   );
   return (
     <box
@@ -103,6 +140,7 @@ function CompactList({
       border
       borderColor={theme.accent}
       flexDirection="column"
+      onMouseScroll={onWheel(win.start, win.last)}
     >
       <text fg={theme.accent} height={titleLines.length} wrapMode="none">
         {titleLines.join("\n")}
@@ -192,7 +230,11 @@ export function NewThreadPicker({
       next(cursor);
     }
     const step =
-      key.name === "up" || key.name === "k" ? -1 : key.name === "down" || key.name === "j" ? 1 : 0;
+      key.name === "up" || key.name === "k"
+        ? -1
+        : key.name === "down" || key.name === "j"
+          ? 1
+          : 0;
     if (step) {
       key.preventDefault();
       setCursor((n) => Math.max(0, Math.min(projects.length - 1, n + step)));
@@ -218,7 +260,9 @@ export function NewThreadPicker({
         title="New thread"
         sub="Project"
         subColor={theme.muted}
-        texts={projects.map((project) => `${project.title} · ${project.workspaceRoot}`)}
+        texts={projects.map(
+          (project) => `${project.title} · ${project.workspaceRoot}`,
+        )}
         cursor={cursor}
         empty="No projects on this server yet. Add one in the T3 web app or with `t3 project add <folder>`; it shows up here."
         hint="j/k project · l/Enter next · Esc close"
@@ -309,7 +353,9 @@ export function WorkspacePicker({
   const { width, height } = useTerminalDimensions();
   const wanted = projectId ?? target?.projectId;
   const project =
-    client.registry.get(client.snapshot)?.projects.find((p) => p.id === wanted) ??
+    client.registry
+      .get(client.snapshot)
+      ?.projects.find((p) => p.id === wanted) ??
     client.registry.get(client.snapshot)?.projects[0];
   const root = project?.workspaceRoot;
   const [rows, setRows] = useState<WorkspaceChoice[]>([]);
@@ -330,9 +376,14 @@ export function WorkspacePicker({
     void client
       .workspaceRefs(root)
       .then(async (refs) => {
-        const choices = await verifiedWorkspaceChoices(root, refs,
-          client.registry.get(client.snapshot)?.threads.filter((t) => t.projectId === project?.id) ?? [],
-          (cwd) => client.git("status", { cwd, localOnly: true }));
+        const choices = await verifiedWorkspaceChoices(
+          root,
+          refs,
+          client.registry
+            .get(client.snapshot)
+            ?.threads.filter((t) => t.projectId === project?.id) ?? [],
+          (cwd) => client.git("status", { cwd, localOnly: true }),
+        );
         if (!stale) {
           setRows(choices);
           setCursor(0);
@@ -344,7 +395,9 @@ export function WorkspacePicker({
         if (!stale) {
           const projectRoot = { branch: null, worktreePath: null };
           setRows([projectRoot]);
-          setError("Workspace list unavailable. r Retry, Enter uses the project root.");
+          setError(
+            "Workspace list unavailable. r Retry, Enter uses the project root.",
+          );
           if (chooseSoleRow) void create(projectRoot);
         }
       })
@@ -367,7 +420,9 @@ export function WorkspacePicker({
       (created ?? close)();
     } catch (cause) {
       const reason = cause instanceof Error ? cause.message : "";
-      setError(`Thread creation failed${reason ? `: ${reason}` : ". Retry when connected."}`);
+      setError(
+        `Thread creation failed${reason ? `: ${reason}` : ". Retry when connected."}`,
+      );
     } finally {
       setBusy(false);
     }
@@ -377,8 +432,10 @@ export function WorkspacePicker({
     key.preventDefault();
     if ((key.name === "escape" || key.name === "h") && !busy) close();
     if (key.name === "r" && !busy) setAttempt((n) => n + 1);
-    if (key.name === "up" || key.name === "k") setCursor((n) => Math.max(0, n - 1));
-    if (key.name === "down" || key.name === "j") setCursor((n) => Math.min(rows.length - 1, n + 1));
+    if (key.name === "up" || key.name === "k")
+      setCursor((n) => Math.max(0, n - 1));
+    if (key.name === "down" || key.name === "j")
+      setCursor((n) => Math.min(rows.length - 1, n + 1));
     if (key.name === "return" || key.name === "l") choose(cursor);
   });
   if (pickerCompact(width, height))
@@ -398,11 +455,17 @@ export function WorkspacePicker({
         texts={
           loading
             ? []
-            : rows.map((row) => `${row.branch ?? "Project root"} · ${row.worktreePath ?? root}`)
+            : rows.map(
+                (row) =>
+                  `${row.branch ?? "Project root"} · ${row.worktreePath ?? root}`,
+              )
         }
         cursor={cursor}
         buttons={[
-          { label: "[r Retry]", onClick: () => !busy && setAttempt((n) => n + 1) },
+          {
+            label: "[r Retry]",
+            onClick: () => !busy && setAttempt((n) => n + 1),
+          },
           { label: "[Esc close]", onClick: () => !busy && close() },
         ]}
         onRow={choose}

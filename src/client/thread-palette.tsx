@@ -15,7 +15,13 @@ import {
 import type { Client } from "./runtime";
 import { useClientAtom } from "./screen";
 import { wrapName } from "./sidebar";
-import { pickerCompact, rowText, windowWithHint, wrapWords } from "./model-picker";
+import {
+  pickerCompact,
+  rowText,
+  useWheelTop,
+  windowWithHint,
+  wrapWords,
+} from "./model-picker";
 
 export function ThreadPalette({
   client,
@@ -43,7 +49,9 @@ export function ThreadPalette({
   const [prompt, setPrompt] = useState<"rename" | "delete">();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [matches, setMatches] = useState<readonly OrchestrationThreadSearchMatch[]>([]);
+  const [matches, setMatches] = useState<
+    readonly OrchestrationThreadSearchMatch[]
+  >([]);
   const [loading, setLoading] = useState(false);
   useEffect(() => {
     if (mode !== "search") return;
@@ -125,7 +133,8 @@ export function ThreadPalette({
     try {
       if (row.action === "undo") await actions.undo();
       else if (row.action) await actions.run(row.action, target);
-      else if (row.thread || row.id) client.openThread(row.thread?.id ?? row.id!);
+      else if (row.thread || row.id)
+        client.openThread(row.thread?.id ?? row.id!);
       close();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Action failed");
@@ -163,10 +172,19 @@ export function ThreadPalette({
     }
     if (!prompt && (key.name === "up" || key.name === "down")) {
       key.preventDefault();
-      setCursor(Math.max(0, Math.min(rows.length - 1, index + (key.name === "up" ? -1 : 1))));
+      setCursor(
+        Math.max(
+          0,
+          Math.min(rows.length - 1, index + (key.name === "up" ? -1 : 1)),
+        ),
+      );
     }
   });
   const panelWidth = Math.min(70, width);
+  const { top: wheelTop, onWheel } = useWheelTop(
+    index,
+    rows.length + (prompt ? 1000 : 0),
+  );
   if (pickerCompact(width, height)) {
     // Phone sizes: the panel takes the whole screen; rows are wrapped whole and counted so the
     // filter, at least three rows and the buttons always show.
@@ -195,15 +213,17 @@ export function ThreadPalette({
     const noteLines = note ? wrapWords(note, inner) : [];
     const hint = busy ? "Working…" : "↑/↓ choose · Enter select · Esc close";
     const hintLines = wrapWords(hint, inner);
-    const fixed = titleLines.length + targetLines.length + 1 + errorLines.length + 1;
+    const fixed =
+      titleLines.length + targetLines.length + 1 + errorLines.length + 1;
     const { win, hint: showHint } = prompt
-      ? { win: { start: 0, rows: [] as string[][] }, hint: true }
+      ? { win: { start: 0, rows: [] as string[][], last: 0 }, hint: true }
       : windowWithHint(
           rows.map((row) => row.label),
           index,
           inner - 2,
           Math.max(1, height - 2 - fixed - noteLines.length),
           hintLines.length,
+          wheelTop,
         );
     return (
       <box position="absolute" left={0} top={0} width="100%" height="100%">
@@ -217,6 +237,7 @@ export function ThreadPalette({
           borderColor={theme.accent}
           backgroundColor={theme.canvas}
           flexDirection="column"
+          onMouseScroll={onWheel(win.start, win.last)}
         >
           <text fg={theme.accent} height={titleLines.length} wrapMode="none">
             {titleLines.join("\n")}
@@ -378,7 +399,9 @@ export function ThreadPalette({
           )}
         </scrollbox>
         <text fg={theme.red}>{error}</text>
-        <text fg={theme.muted}>{busy ? "Working…" : "↑/↓ choose · Enter select · Esc close"}</text>
+        <text fg={theme.muted}>
+          {busy ? "Working…" : "↑/↓ choose · Enter select · Esc close"}
+        </text>
         <box flexDirection="row">
           <text
             fg={theme.plain}
