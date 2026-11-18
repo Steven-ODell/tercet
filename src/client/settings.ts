@@ -1,6 +1,7 @@
 import { lstatSync, renameSync, symlinkSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { ICON_MODES, type IconMode } from "./icons";
+import { LAYOUT_MODES, type LayoutMode } from "./layout";
 import { KeyConflict, resolveKeymap } from "./keymap";
 import { THEME_CHOICES, type ThemeChoice } from "./theme";
 import { MEDIA_PROTOCOLS, VIDEO_MODES, type MediaProtocol, type VideoMode } from "./media";
@@ -92,6 +93,8 @@ export interface Settings {
   /** Command name to key, e.g. `"palette": "Ctrl+k"`; `"none"` unbinds. */
   keys: Record<string, string>;
   icons: IconMode;
+  /** `auto` picks compact on a small terminal; `compact` / `full` force it. TERCET_LAYOUT wins. */
+  layout: LayoutMode;
   defaults: {
     /** Provider instance id, e.g. "codex"; narrows `model` when two providers share a slug. */
     provider?: string;
@@ -166,6 +169,7 @@ export const defaultSettings = (): Settings => ({
   theme: {},
   keys: {},
   icons: "unicode",
+  layout: "auto",
   defaults: { sendShortcut: "enter", favorites: [], sidebarWorkingShelf: false, hints: true },
   launchers: {},
   media: { protocol: "auto", video: "player", pageShots: true },
@@ -557,6 +561,7 @@ const schema = struct({
   theme: struct({ preset: oneOf(THEME_CHOICES), accent: color, link: color }),
   keys: record(/^[A-Za-z][\w.-]*$/, "action names use letters, digits, ., _ and -", text),
   icons: oneOf(ICON_MODES),
+  layout: oneOf(LAYOUT_MODES),
   defaults: struct({
     provider: text,
     model: text,
@@ -649,6 +654,7 @@ export function parseSettings(
     theme: { ...base.theme, ...raw.theme },
     keys: { ...base.keys, ...raw.keys },
     icons: raw.icons ?? base.icons,
+    layout: raw.layout ?? base.layout,
     defaults: { ...base.defaults, ...raw.defaults },
     launchers: { ...base.launchers, ...raw.launchers },
     media: { ...base.media, ...raw.media },

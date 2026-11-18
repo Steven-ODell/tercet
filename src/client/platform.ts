@@ -11,6 +11,7 @@ import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { AuthStandardClientScopes } from "@t3tools/contracts";
 import { isLoopback, type Config } from "./config";
+import { layoutModeFromEnv } from "./layout";
 import { messageTagFor } from "./settings";
 import { writeFavorite, type FavoriteEntry } from "./favorites-file";
 import { findT3, systemT3Host } from "./t3-command";
@@ -83,6 +84,7 @@ export function platform(
   config: Config,
   /** The SSH client address of whoever types (see `sshHostLookup`); none when typing locally. */
   sshHost?: () => Promise<string | undefined>,
+  env: Record<string, string | undefined> = process.env,
 ) {
   const draftPath = `${config.tokenFile}.drafts-${Bun.hash(config.url).toString(16)}.json`;
   const git: GitBoundary = <K extends GitOperation>(token: string, operation: K, input: GitInput<K>) =>
@@ -171,6 +173,7 @@ export function platform(
     },
     sidebarWorkingShelf: async () => config.settings.defaults.sidebarWorkingShelf,
     showHints: async () => config.settings.defaults.hints,
+    layoutMode: async () => layoutModeFromEnv(env, config.settings.layout),
     newThreadDefaults: {
       provider: config.settings.defaults.provider,
       model: config.settings.defaults.model,
