@@ -1,0 +1,20 @@
+[Threads] [Chat] [Files] [Info]  Context unknown ▾
+╭─● ▤ Files──────────────────────────────────────╮
+│[b Tree][/ Find][s Search][p Preview on]        │
+│[Alt+c Close]                                   │
+│/fixture/a                                      │
+│› ▸ ▸ docs                                      │
+│  ▸ ▸ src                                       │
+│    • README.md                                 │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│[↑][↓]                                          │
+╰────────────────────────────────────────────────╯
+[Menu] [Model] [Panels] [Threads] [Help]

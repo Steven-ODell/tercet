@@ -1,0 +1,20 @@
+tercet · live · threads=26 · Full access                                                     Context unknown ▾
+╭─¶ Transcript──────────────────────────────────────────────────────╮╭─● ▤ Files─────────────────────────────╮
+│───────────────────────────────────────────────────────────────────││[b Tree][/ Find][s Search]             │
+│assistant                                                          ││[p Preview on][Alt+c Close]            │
+│Done. Names wrap on word breaks, the project and age move to their ││/fixture/a                             │
+│own row when they do not fit, and the composer keeps four rows.    ││› ▸ ▸ docs                             │
+│                                                                   ││  ▸ ▸ src                              │
+│• One view at a time                                               ││    • README.md                        │
+│• Tabs on the status row                                           ││                                       │
+│                                                                   ││                                       │
+│╭─ bash ───────────────────────────────────────────────── [copy] ─╮││                                       │
+││ bun test                                                        │││                                       │
+│╰─────────────────────────────────────────────────────────────────╯││                                       │
+│Following tail                                                     ││                                       │
+│                                                                   ││                                       │
+╰───────────────────────────────────────────────────────────────────╯│                                       │
+╭─» Composer────────────────────────────────────────────────────────╮│                                       │
+│Message · @file · /skill · :emoji                                  ││[↑][↓]                                 │
+╰───────────────────────────────────────────────────────────────────╯╰───────────────────────────────────────╯
+[Menu] [Model] [Panels] [Threads] [Help]

@@ -1,0 +1,40 @@
+┌────────────────────────────────────────────────┐
+│Model · Favorites first                         │
+│Press / or type to filter all providers…        │
+│› ✻ Claude · Claude Opus 5.5 Extended Thinking  │
+│  Preview With A Very Long Display Name         │
+│  ✻ Claude · Sonnet 5.5                         │
+│  ✻ Claude · Haiku 5.5                          │
+│  ✻ Claude · Fable 5.2                          │
+│  ✻ Claude · Opus 5.5                           │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│j/k or ↑/↓ select · Enter choose · Tab edit     │
+│favorite · h back                               │
+│[ Esc Close ]                                   │
+└────────────────────────────────────────────────┘

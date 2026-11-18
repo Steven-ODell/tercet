@@ -1,0 +1,40 @@
+[Threads] [Chat] [Files]         Context unknown ▾
+✻ long · effort default
+↱ phone-layout · /fixture/a
+╭─● ▤ Files──────────────────────────────────────╮
+│[b Tree][/ Find][s Search][p Preview on]        │
+│[Alt+c Close]                                   │
+│/fixture/a                                      │
+│› ▸ ▸ docs                                      │
+│  ▸ ▸ src                                       │
+│    • README.md                                 │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│── docs ────────────────────────────────────────│
+│Folder: Enter or l opens it                     │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│[↑][↓]                                          │
+╰────────────────────────────────────────────────╯
+[Menu] [Model] [Panels] [Threads] [Help]

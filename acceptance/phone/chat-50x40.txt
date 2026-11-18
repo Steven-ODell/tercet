@@ -1,0 +1,40 @@
+[Threads] [Chat]                 Context unknown ▾
+✻ long · effort default
+↱ phone-layout · /fixture/a
+╭─● ¶ Transcript─────────────────────────────────╮
+│user                                            │
+│Please wrap every thread name instead of cutting│
+│ it with an ellipsis, and keep the composer     │
+│above the keyboard on a fifty column phone      │
+│screen.                                         │
+│                                                │
+│────────────────────────────────────────────────│
+│assistant                                       │
+│Done. Names wrap on word breaks, the project and│
+│ age move to their own row when they do not fit,│
+│ and the composer keeps four rows.              │
+│                                                │
+│• One view at a time                            │
+│• Tabs on the status row                        │
+│                                                │
+│╭─ bash ────────────────────────────── [copy] ─╮│
+││ bun test                                     ││
+│╰──────────────────────────────────────────────╯│
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│Following tail                                  │
+│                                                │
+╰────────────────────────────────────────────────╯
+╭─» Composer─────────────────────────────────────╮
+│Message · @file · /skill · :emoji               │
+╰────────────────────────────────────────────────╯
+[Menu] [Model] [Panels] [Threads] [Help]
