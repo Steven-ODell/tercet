@@ -286,11 +286,112 @@ export function truncateName(text: string, width: number): string {
   return `${row}…`;
 }
 
+export interface SidebarRow {
+  entry: SidebarEntry;
+  lead: string;
+  text: string;
+  projectText: string;
+  timeText: string;
+  rule: boolean;
+  /** Compact only: the tappable thread-menu cell at the right end of the first title row. */
+  menuText?: string;
+}
+export interface SidebarRowsOptions {
+  /** Compact: names, status and project wrap onto more rows instead of ending in an ellipsis. */
+  wrapNames?: boolean;
+  /** Compact: the entry whose first row carries the `[…]` menu cell. */
+  menuKey?: string | undefined;
+}
+const MENU_CELL = "[…]";
+
+/** wrapName that breaks between words; only a word wider than the row is split inside. */
+function wrapWords(text: string, width: number): string[] {
+  const rows: string[] = [];
+  let row = "";
+  for (const word of text.split(" ")) {
+    const joined = row ? `${row} ${word}` : word;
+    if (Bun.stringWidth(joined) <= width) {
+      row = joined;
+      continue;
+    }
+    if (row) rows.push(row);
+    const pieces = wrapName(word, width);
+    rows.push(...pieces.slice(0, -1));
+    row = pieces[pieces.length - 1]!;
+  }
+  rows.push(row);
+  return rows;
+}
+
+/** Compact rows: nothing is cut; the project and the age move to their own rows when too long. */
+function wrappedSidebarRows(
+  entries: readonly SidebarEntry[],
+  width: number,
+  menuKey: string | undefined,
+): SidebarRow[] {
+  return entries.flatMap((entry, index) => {
+    const glyph = entry.modelIcon?.glyph;
+    const timeWidth = entry.timeLabel ? Bun.stringWidth(entry.timeLabel) + 1 : 0;
+    const menu = entry.thread !== undefined && entry.key === menuKey;
+    const plain = (text: string, extra: Partial<SidebarRow> = {}): SidebarRow => ({
+      entry,
+      lead: "",
+      text,
+      projectText: "",
+      timeText: "",
+      rule: false,
+      ...extra,
+    });
+    const rows: SidebarRow[] = [];
+    entry.text.split("\n").forEach((line, at) => {
+      // The menu cell and its gap come out of the first title row only.
+      const room = width - 2 - (menu && at === 0 ? Bun.stringWidth(MENU_CELL) + 1 : 0);
+      wrapWords(line, room).forEach((part, i) => {
+        const logo = glyph !== undefined && at > 0 && i === 0 && part.startsWith(glyph);
+        const row = logo
+          ? plain(part.slice(glyph.length), { lead: `  ${glyph}` })
+          : plain(`  ${part}`);
+        if (menu && at === 0 && i === 0) row.menuText = MENU_CELL;
+        rows.push(row);
+      });
+    });
+    const last = rows[rows.length - 1]!;
+    if (entry.project) {
+      const project = entry.projectGlyph ? `${entry.projectGlyph} ${entry.project}` : entry.project;
+      const tail = `${last.text.trim() === "·" ? "" : " ·"} ${project}`;
+      const room = width - timeWidth - Bun.stringWidth(last.lead + last.text);
+      if (Bun.stringWidth(tail) <= room) last.projectText = tail;
+      else
+        for (const part of wrapName(project, width - 2 - timeWidth))
+          rows.push(plain("  ", { projectText: part }));
+    }
+    if (entry.timeLabel) {
+      const tailRow = rows[rows.length - 1]!;
+      const used = Bun.stringWidth(tailRow.lead + tailRow.text + tailRow.projectText);
+      const labelWidth = Bun.stringWidth(entry.timeLabel);
+      const pad = " ".repeat(Math.max(0, width - used - labelWidth));
+      if (used + timeWidth <= width) tailRow.timeText = pad + entry.timeLabel;
+      else
+        rows.push(
+          plain("", { timeText: " ".repeat(Math.max(0, width - labelWidth)) + entry.timeLabel }),
+        );
+    }
+    if (entry.thread !== undefined && entries[index + 1]?.thread !== undefined)
+      rows.push(plain("─".repeat(Math.max(1, width)), { rule: true }));
+    return rows;
+  });
+}
+
 /**
  * Every thread is two rows, as on web: the title, then the status with the project and the age
- * as tails. Whatever does not fit ends in an ellipsis; nothing wraps.
+ * as tails. Whatever does not fit ends in an ellipsis; nothing wraps (unless `wrapNames`).
  */
-export function sidebarRows(entries: readonly SidebarEntry[], width: number) {
+export function sidebarRows(
+  entries: readonly SidebarEntry[],
+  width: number,
+  options: SidebarRowsOptions = {},
+): SidebarRow[] {
+  if (options.wrapNames) return wrappedSidebarRows(entries, width, options.menuKey);
   return entries.flatMap((entry, index) => {
     const glyph = entry.modelIcon?.glyph;
     const timeWidth = entry.timeLabel ? Bun.stringWidth(entry.timeLabel) + 1 : 0;
@@ -355,6 +456,7 @@ export function ThreadSidebar({
   keyboardEnabled,
   onMenu,
   onOpen,
+  wrapNames = false,
 }: {
   client: Client;
   width: number;
@@ -364,6 +466,8 @@ export function ThreadSidebar({
   onMenu?: (id: import("@t3tools/contracts").ThreadId) => void;
   /** `l` or Right opened a thread: the frame moves focus into the transcript. */
   onOpen?: () => void;
+  /** Compact: wrapped names, and a tappable `[…]` thread menu on the highlighted row. */
+  wrapNames?: boolean;
 }) {
   const transcripts = useClientAtom(client, client.transcripts);
   const waiting = useMemo(
@@ -435,7 +539,17 @@ export function ThreadSidebar({
     providers,
     wakeTick,
   ]);
-  const rows = useMemo(() => sidebarRows(entries, width), [entries, width]);
+  // Before the first move the cursor rests on the open thread, or else the first thread.
+  const current =
+    entries.find((e) => e.key === cursor) ??
+    entries.find((e) => e.thread?.id === selected) ??
+    entries.find((e) => e.thread);
+  const menuKey =
+    wrapNames && onMenu ? ((keyboardEnabled ? current?.key : cursor) ?? current?.key) : undefined;
+  const rows = useMemo(
+    () => sidebarRows(entries, width, { wrapNames, menuKey }),
+    [entries, width, wrapNames, menuKey],
+  );
   const limits = useUsageLimits(client);
   const footer: LimitPart[][] = limits.flatMap((provider) => [
     ...(limits.length > 1
@@ -472,11 +586,6 @@ export function ThreadSidebar({
       setCursor(more);
     }
   };
-  // Before the first move the cursor rests on the open thread, or else the first thread.
-  const current =
-    entries.find((e) => e.key === cursor) ??
-    entries.find((e) => e.thread?.id === selected) ??
-    entries.find((e) => e.thread);
   // A thread opened from elsewhere (the palette, a link) moves the cursor onto it and scrolls it
   // into view; otherwise the highlight would stay on the thread the cursor last rested on.
   if (shownSelected !== selected) {
@@ -555,41 +664,63 @@ export function ThreadSidebar({
             );
         }}
       >
-        {rows.slice(top, top + viewport).map((row, index) => (
-          <text
-            key={`${row.entry.key}:${top + index}`}
-            height={1}
-            selectable={false}
-            fg={
-              row.rule
-                ? theme.rule
-                : row.entry.thread
-                  ? row.entry.thread.id === selected
-                    ? theme.strong
-                    : theme.text
-                  : theme.muted
-            }
-            bg={
-              !row.rule && row.entry.key === (keyboardEnabled ? current?.key : cursor)
-                ? theme.highlight
-                : undefined
-            }
-            onMouseUp={
-              row.rule
-                ? undefined
-                : (event) => {
-                    if (enabled && event.button === 0) activate(row.entry);
-                    if (enabled && event.button === 2 && row.entry.thread)
-                      onMenu?.(row.entry.thread.id);
-                  }
-            }
-          >
-            {row.lead ? <span fg={row.entry.modelIcon?.color}>{row.lead}</span> : null}
-            {row.text}
-            {row.projectText ? <span fg={row.entry.projectColor}>{row.projectText}</span> : null}
-            {row.timeText ? <span fg={theme.muted}>{row.timeText}</span> : null}
-          </text>
-        ))}
+        {rows.slice(top, top + viewport).map((row, index) => {
+          const fg = row.rule
+            ? theme.rule
+            : row.entry.thread
+              ? row.entry.thread.id === selected
+                ? theme.strong
+                : theme.text
+              : theme.muted;
+          const bg =
+            !row.rule && row.entry.key === (keyboardEnabled ? current?.key : cursor)
+              ? theme.highlight
+              : undefined;
+          const press = row.rule
+            ? undefined
+            : (event: { button: number }) => {
+                if (enabled && event.button === 0) activate(row.entry);
+                if (enabled && event.button === 2 && row.entry.thread)
+                  onMenu?.(row.entry.thread.id);
+              };
+          const body = (
+            <>
+              {row.lead ? <span fg={row.entry.modelIcon?.color}>{row.lead}</span> : null}
+              {row.text}
+              {row.projectText ? <span fg={row.entry.projectColor}>{row.projectText}</span> : null}
+              {row.timeText ? <span fg={theme.muted}>{row.timeText}</span> : null}
+            </>
+          );
+          const key = `${row.entry.key}:${top + index}`;
+          if (row.menuText === undefined)
+            return (
+              <text key={key} height={1} selectable={false} fg={fg} bg={bg} onMouseUp={press}>
+                {body}
+              </text>
+            );
+          // The `[…]` cell is its own target: a tap opens the thread menu instead of the thread.
+          return (
+            <box key={key} height={1} flexDirection="row" onMouseUp={press}>
+              <text height={1} flexGrow={1} selectable={false} fg={fg} bg={bg}>
+                {body}
+              </text>
+              <text
+                height={1}
+                width={Bun.stringWidth(row.menuText)}
+                selectable={false}
+                fg={theme.accent}
+                bg={bg}
+                onMouseUp={(event) => {
+                  event.stopPropagation();
+                  if (enabled && event.button === 0 && row.entry.thread)
+                    onMenu?.(row.entry.thread.id);
+                }}
+              >
+                {row.menuText}
+              </text>
+            </box>
+          );
+        })}
         {!rows.length && <text fg={theme.muted}>No threads</text>}
       </box>
       {footerHeader > 0 && (
