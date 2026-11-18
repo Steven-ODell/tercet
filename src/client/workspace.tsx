@@ -1,6 +1,8 @@
 import { theme } from "./theme";
+import type { ColorInput } from "@opentui/core";
 import { useEffect, useState } from "react";
-import { useKeyboard } from "@opentui/react";
+import { useKeyboard, useTerminalDimensions } from "@opentui/react";
+import { pickerCompact, rowText, windowWithHint, wrapWords } from "./model-picker";
 import type { OrchestrationV2ThreadShell, VcsRef } from "@t3tools/contracts";
 import type { Client } from "./runtime";
 import { useClientAtom } from "./screen";
@@ -49,6 +51,111 @@ export function projectChoices<P extends { id: string }>(
   return [...projects].sort((a, b) => Number(b.id === currentId) - Number(a.id === currentId));
 }
 /**
+ * Phone sizes: a full-screen list. Title, status and rows are wrapped whole and counted, so at
+ * least three rows and the button line always show; the hint drops first when space is short.
+ */
+function CompactList({
+  width,
+  height,
+  title,
+  sub,
+  subColor,
+  texts,
+  cursor,
+  empty,
+  hint,
+  buttons,
+  onRow,
+}: {
+  width: number;
+  height: number;
+  title: string;
+  sub: string;
+  subColor: ColorInput;
+  texts: readonly string[];
+  cursor: number;
+  empty?: string;
+  hint?: string;
+  buttons: { label: string; onClick: () => void }[];
+  onRow: (index: number) => void;
+}) {
+  const inner = width - 2;
+  const titleLines = wrapWords(title, inner);
+  const subLines = sub ? wrapWords(sub, inner) : [];
+  const emptyLines = empty && !texts.length ? wrapWords(empty, inner) : [];
+  const hintLines = hint ? wrapWords(hint, inner) : [];
+  const fixed = titleLines.length + subLines.length + emptyLines.length + 1;
+  const { win, hint: showHint } = windowWithHint(
+    texts,
+    cursor,
+    inner - 2,
+    Math.max(1, height - 2 - fixed),
+    hintLines.length,
+  );
+  return (
+    <box
+      position="absolute"
+      left={0}
+      top={0}
+      width="100%"
+      height="100%"
+      backgroundColor={theme.canvas}
+      border
+      borderColor={theme.accent}
+      flexDirection="column"
+    >
+      <text fg={theme.accent} height={titleLines.length} wrapMode="none">
+        {titleLines.join("\n")}
+      </text>
+      {subLines.length > 0 && (
+        <text fg={subColor} height={subLines.length} wrapMode="none">
+          {subLines.join("\n")}
+        </text>
+      )}
+      <box flexGrow={1} flexDirection="column">
+        {win.rows.map((lines, offset) => (
+          <text
+            key={win.start + offset}
+            height={lines.length}
+            wrapMode="none"
+            fg={win.start + offset === cursor ? theme.strong : theme.text}
+            bg={win.start + offset === cursor ? theme.highlight : undefined}
+            onMouseUp={(event) => {
+              if (event.button === 0) onRow(win.start + offset);
+            }}
+          >
+            {rowText(lines, win.start + offset === cursor)}
+          </text>
+        ))}
+        {emptyLines.length > 0 && (
+          <text fg={theme.plain} height={emptyLines.length} wrapMode="none">
+            {emptyLines.join("\n")}
+          </text>
+        )}
+      </box>
+      {showHint && (
+        <text fg={theme.muted} height={hintLines.length} wrapMode="none">
+          {hintLines.join("\n")}
+        </text>
+      )}
+      <box flexDirection="row">
+        {buttons.map((b, i) => (
+          <text
+            key={b.label}
+            fg={theme.plain}
+            onMouseUp={(event) => {
+              if (event.button === 0) b.onClick();
+            }}
+          >
+            {i ? " " : ""}
+            {b.label}
+          </text>
+        ))}
+      </box>
+    </box>
+  );
+}
+/**
  * Ctrl+n: j/k or arrows pick the project, l or Enter continues. A project with other worktrees
  * then asks which one; a project with only its root creates the thread straight away. There is no
  * name prompt: the first message names the thread.
@@ -66,6 +173,7 @@ export function NewThreadPicker({
   close: () => void;
   created?: () => void;
 }) {
+  const { width, height } = useTerminalDimensions();
   const snapshot = useClientAtom(client, client.snapshot);
   const projects = projectChoices(snapshot?.projects ?? [], target?.projectId);
   const [cursor, setCursor] = useState(0);
@@ -100,6 +208,25 @@ export function NewThreadPicker({
         created={created ?? close}
         projectId={picked.id}
         chooseSoleRow
+      />
+    );
+  if (pickerCompact(width, height))
+    return (
+      <CompactList
+        width={width}
+        height={height}
+        title="New thread"
+        sub="Project"
+        subColor={theme.muted}
+        texts={projects.map((project) => `${project.title} · ${project.workspaceRoot}`)}
+        cursor={cursor}
+        empty="No projects on this server yet. Add one in the T3 web app or with `t3 project add <folder>`; it shows up here."
+        hint="j/k project · l/Enter next · Esc close"
+        buttons={[
+          { label: "[l next]", onClick: () => next(cursor) },
+          { label: "[Esc close]", onClick: close },
+        ]}
+        onRow={next}
       />
     );
   return (
@@ -179,6 +306,7 @@ export function WorkspacePicker({
   /** Create without asking when the project has only its root to offer. */
   chooseSoleRow?: boolean;
 }) {
+  const { width, height } = useTerminalDimensions();
   const wanted = projectId ?? target?.projectId;
   const project =
     client.registry.get(client.snapshot)?.projects.find((p) => p.id === wanted) ??
@@ -253,6 +381,33 @@ export function WorkspacePicker({
     if (key.name === "down" || key.name === "j") setCursor((n) => Math.min(rows.length - 1, n + 1));
     if (key.name === "return" || key.name === "l") choose(cursor);
   });
+  if (pickerCompact(width, height))
+    return (
+      <CompactList
+        width={width}
+        height={height}
+        title="New thread · choose workspace"
+        sub={
+          loading
+            ? "Loading workspaces…"
+            : busy
+              ? "Creating…"
+              : error || "j/k · l/Enter choose · h/Esc back · r Retry"
+        }
+        subColor={theme.plain}
+        texts={
+          loading
+            ? []
+            : rows.map((row) => `${row.branch ?? "Project root"} · ${row.worktreePath ?? root}`)
+        }
+        cursor={cursor}
+        buttons={[
+          { label: "[r Retry]", onClick: () => !busy && setAttempt((n) => n + 1) },
+          { label: "[Esc close]", onClick: () => !busy && close() },
+        ]}
+        onRow={choose}
+      />
+    );
   return (
     <box
       position="absolute"

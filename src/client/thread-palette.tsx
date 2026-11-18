@@ -15,6 +15,7 @@ import {
 import type { Client } from "./runtime";
 import { useClientAtom } from "./screen";
 import { wrapName } from "./sidebar";
+import { pickerCompact, rowText, windowWithHint, wrapWords } from "./model-picker";
 
 export function ThreadPalette({
   client,
@@ -166,6 +167,141 @@ export function ThreadPalette({
     }
   });
   const panelWidth = Math.min(70, width);
+  if (pickerCompact(width, height)) {
+    // Phone sizes: the panel takes the whole screen; rows are wrapped whole and counted so the
+    // filter, at least three rows and the buttons always show.
+    const inner = panelWidth - 2;
+    const title = prompt
+      ? prompt === "delete"
+        ? "Permanent delete · cannot be undone"
+        : "Rename thread"
+      : mode === "search"
+        ? "Cross-thread search"
+        : mode === "menu"
+          ? "Thread actions"
+          : "Actions and thread search";
+    const titleLines = wrapWords(title, inner);
+    const targetLines = target ? wrapWords(target.title, inner) : [];
+    const errorLines = error ? wrapWords(error, inner) : [];
+    const note = prompt
+      ? ""
+      : loading && !rows.length
+        ? "Searching…"
+        : !rows.length
+          ? mode === "search" && query.length < 2
+            ? "Enter at least two characters"
+            : "No results"
+          : "";
+    const noteLines = note ? wrapWords(note, inner) : [];
+    const hint = busy ? "Working…" : "↑/↓ choose · Enter select · Esc close";
+    const hintLines = wrapWords(hint, inner);
+    const fixed = titleLines.length + targetLines.length + 1 + errorLines.length + 1;
+    const { win, hint: showHint } = prompt
+      ? { win: { start: 0, rows: [] as string[][] }, hint: true }
+      : windowWithHint(
+          rows.map((row) => row.label),
+          index,
+          inner - 2,
+          Math.max(1, height - 2 - fixed - noteLines.length),
+          hintLines.length,
+        );
+    return (
+      <box position="absolute" left={0} top={0} width="100%" height="100%">
+        <box
+          position="absolute"
+          left={Math.max(0, Math.floor((width - panelWidth) / 2))}
+          top={0}
+          width={panelWidth}
+          height={height}
+          border
+          borderColor={theme.accent}
+          backgroundColor={theme.canvas}
+          flexDirection="column"
+        >
+          <text fg={theme.accent} height={titleLines.length} wrapMode="none">
+            {titleLines.join("\n")}
+          </text>
+          {target && (
+            <text fg={theme.muted} height={targetLines.length} wrapMode="none">
+              {targetLines.join("\n")}
+            </text>
+          )}
+          <input
+            focused
+            value={query}
+            placeholderColor={theme.muted}
+            placeholder={
+              prompt === "delete"
+                ? "Type DELETE"
+                : prompt === "rename"
+                  ? "New title"
+                  : "Type to search…"
+            }
+            onInput={(text) => {
+              setQuery(text);
+              setCursor(0);
+              setMatches([]);
+              setError("");
+              setLoading(mode === "search" && text.trim().length >= 2);
+            }}
+          />
+          <box flexGrow={1} flexDirection="column">
+            {win.rows.map((lines, offset) => {
+              const row = rows[win.start + offset]!;
+              const active = row === rows[index];
+              return (
+                <text
+                  key={row.key}
+                  height={lines.length}
+                  wrapMode="none"
+                  fg={active ? theme.strong : theme.text}
+                  bg={active ? theme.highlight : undefined}
+                  onMouseUp={(event) => {
+                    if (event.button === 0) void execute(row);
+                  }}
+                >
+                  {rowText(lines, active)}
+                </text>
+              );
+            })}
+            {noteLines.length > 0 && (
+              <text fg={theme.plain} height={noteLines.length} wrapMode="none">
+                {noteLines.join("\n")}
+              </text>
+            )}
+          </box>
+          {errorLines.length > 0 && (
+            <text fg={theme.red} height={errorLines.length} wrapMode="none">
+              {errorLines.join("\n")}
+            </text>
+          )}
+          {showHint && (
+            <text fg={theme.muted} height={hintLines.length} wrapMode="none">
+              {hintLines.join("\n")}
+            </text>
+          )}
+          <box flexDirection="row">
+            <text
+              fg={theme.plain}
+              onMouseUp={(e) => {
+                if (e.button === 0) void submit();
+              }}
+            >
+              [ Enter select ]{" "}
+            </text>
+            <text
+              fg={theme.plain}
+              onMouseUp={(e) => {
+                if (e.button === 0) close();
+              }}
+            >
+              [ Esc Close ]
+            </text>
+          </box>
+        </box>
+      </box>
+    );
+  }
   const capacity = Math.max(1, height - 12);
   const visible: Row[] = [];
   let used = 0;
