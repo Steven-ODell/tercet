@@ -56,6 +56,10 @@ sandbox_seed() {
   }
 }
 JSON
+  # A fresh HOME has no OpenCode config, so OpenCode would try to upgrade itself at startup (into
+  # the shared install, e.g. mise's) and report no models meanwhile: 02-model found nothing.
+  mkdir -p "$dir/.config/opencode"
+  printf '{ "autoupdate": false }\n' > "$dir/.config/opencode/opencode.json"
 }
 
 # Starts the server as a named bgrun job under reaper.py, which writes $dir/server.pid and

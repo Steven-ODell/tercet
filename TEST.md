@@ -156,3 +156,23 @@ Local comparison is explicitly labeled; remote full diff/history use the host UR
 3. Over SSH, choose `client` and confirm it launches on the attached client with reverse
    SSH access configured. With no reachable client, confirm a copy notice appears. File
    opening should continue using the ordinary opener.
+
+## Phone layout
+
+Run a sandbox (`scripts/acceptance.sh --keep`) and start tercet in a private tmux sized like
+the phone, for example `tmux -L phone new -x 50 -y 40`, then `-x 110 -y 20`
+(`TERCET_LAYOUT` unset).
+
+1. At 50x40 tercet opens on Threads full width with `[Threads] [Chat]` tabs; long thread names
+   wrap whole and no label is cut. Tapping a thread opens Chat.
+2. Tap the composer, type, send: the reply streams above the composer.
+3. Tabs switch views by tap; Esc walks Threads, Chat, then the side panel.
+4. `[Model]` opens the picker full screen; type to filter and tap a model to apply it.
+5. `[Menu]` lists every command; Files, Diff and Terminal are reachable (at 20 rows the sheet
+   scrolls).
+6. `tmux resize-window -y 20` (the keyboard coming up): the composer, its draft and `[send]`
+   stay visible, and the view does not change.
+7. At 110x20 the columns stay, the header rows are gone and one action bar row remains.
+8. `TERCET_LAYOUT=full` at 50x40 gives the desktop frame; `TERCET_LAYOUT=compact` at 120x40
+   gives the compact one, pickers included.
+

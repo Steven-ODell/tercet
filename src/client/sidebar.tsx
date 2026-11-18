@@ -457,6 +457,7 @@ export function ThreadSidebar({
   onMenu,
   onOpen,
   wrapNames = false,
+  tapOpens = false,
 }: {
   client: Client;
   width: number;
@@ -468,6 +469,8 @@ export function ThreadSidebar({
   onOpen?: () => void;
   /** Compact: wrapped names, and a tappable `[…]` thread menu on the highlighted row. */
   wrapNames?: boolean;
+  /** One view at a time (phone): a tap on a thread opens it like `l`, not just selects it. */
+  tapOpens?: boolean;
 }) {
   const transcripts = useClientAtom(client, client.transcripts);
   const waiting = useMemo(
@@ -489,7 +492,8 @@ export function ThreadSidebar({
   const [limitsOpen, setLimitsOpen] = useState(true);
   const [cursor, setCursor] = useState<string>();
   const [offset, setOffset] = useState(0);
-  const [shownSelected, setShownSelected] = useState(selected);
+  // The open thread whose row was last scrolled into view.
+  const [revealed, setRevealed] = useState<string | null>();
   // Relative ages need only one shared minute tick, including while the server is idle.
   useEffect(() => {
     const timer = setInterval(() => setWakeTick((tick) => tick + 1), 60_000);
@@ -586,18 +590,23 @@ export function ThreadSidebar({
       setCursor(more);
     }
   };
-  // A thread opened from elsewhere (the palette, a link) moves the cursor onto it and scrolls it
-  // into view; otherwise the highlight would stay on the thread the cursor last rested on.
-  if (shownSelected !== selected) {
-    setShownSelected(selected);
+  // The offset that shows all of an entry's rows (a wrapped name spans several), or its first.
+  const offsetFor = (entry: SidebarEntry) => {
+    const first = rows.findIndex((r) => r.entry === entry);
+    if (first < 0) return top;
+    const last = rows.findLastIndex((r) => r.entry === entry);
+    if (first < top) return first;
+    if (last >= top + viewport) return Math.min(first, last - viewport + 1);
+    return top;
+  };
+  // The open thread, once its row exists (open at start, or opened from elsewhere: the palette,
+  // a link), gets the cursor and is scrolled into view; otherwise a short screen could hide it.
+  if (selected && revealed !== selected) {
     const target = entries.find((e) => e.thread?.id === selected);
-    if (target && current?.thread?.id !== selected) {
-      setCursor(target.key);
-      const rowIndex = rows.findIndex((r) => r.entry === target);
-      if (rowIndex >= 0)
-        setOffset(
-          rowIndex < top ? rowIndex : rowIndex >= top + viewport ? rowIndex - viewport + 1 : top,
-        );
+    if (target && rows.some((r) => r.entry === target)) {
+      setRevealed(selected);
+      if (current?.thread?.id !== selected) setCursor(target.key);
+      setOffset(offsetFor(target));
     }
   }
   const toggle = () => {
@@ -626,10 +635,7 @@ export function ThreadSidebar({
       const next = entries[Math.max(0, Math.min(entries.length - 1, index + delta))];
       if (next) {
         setCursor(next.key);
-        const rowIndex = rows.findIndex((r) => r.entry === next);
-        setOffset(
-          rowIndex < top ? rowIndex : rowIndex >= top + viewport ? rowIndex - viewport + 1 : top,
-        );
+        setOffset(offsetFor(next));
       }
     }
     if (key.name === "home") setOffset(0);
@@ -679,7 +685,10 @@ export function ThreadSidebar({
           const press = row.rule
             ? undefined
             : (event: { button: number }) => {
-                if (enabled && event.button === 0) activate(row.entry);
+                if (enabled && event.button === 0) {
+                  activate(row.entry);
+                  if (tapOpens && row.entry.thread) onOpen?.();
+                }
                 if (enabled && event.button === 2 && row.entry.thread)
                   onMenu?.(row.entry.thread.id);
               };

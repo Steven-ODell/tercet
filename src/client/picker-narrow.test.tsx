@@ -8,6 +8,8 @@ import { ModelPicker } from "./model-picker";
 import { ThreadPalette } from "./thread-palette";
 import { NewThreadPicker, WorkspacePicker } from "./workspace";
 import { createThreadActions } from "./thread-actions";
+import { LayoutContext } from "./layout-context";
+import { layoutFor, type LayoutMode } from "./layout";
 
 const longModel =
   "Claude Opus 5.5 Extended Thinking Preview With A Very Long Display Name";
@@ -317,10 +319,25 @@ const pickers: Record<string, (h: Fixture) => ReactNode> = {
 // The pickers read the size from props or the renderer; `render` sets these before building.
 let W = 120;
 let H = 40;
-async function render(name: string, h: Fixture, width: number, height: number) {
+async function render(
+  name: string,
+  h: Fixture,
+  width: number,
+  height: number,
+  mode?: LayoutMode,
+) {
   W = width;
   H = height;
-  const view = await testRender(pickers[name]!(h), {
+  // A mode stands in for the frame's layout (the `layout` setting or TERCET_LAYOUT).
+  const picker = pickers[name]!(h);
+  const node = mode ? (
+    <LayoutContext.Provider value={layoutFor({ width, height, mode })}>
+      {picker}
+    </LayoutContext.Provider>
+  ) : (
+    picker
+  );
+  const view = await testRender(node, {
     width,
     height,
     kittyKeyboard: true,
@@ -341,6 +358,28 @@ test.each(["model", "palette", "new", "ws"])(
       expect(frame(view)).toBe(BASE_120x40[name]!);
     } finally {
       view.renderer.destroy();
+      await h.client.dispose();
+    }
+  },
+);
+
+// The new-thread and workspace pickers look the same either way at these sizes, so only these two.
+test.each(["model", "palette"])(
+  "%s picker follows the layout setting, not the screen size",
+  async (name) => {
+    const h = await fixture(true);
+    const views = [];
+    try {
+      // Compact at 120x40 gives the phone picker, still with nothing cut.
+      views.push(await render(name, h, 120, 40, "compact"));
+      expect(frame(views[0]!)).not.toBe(BASE_120x40[name]!);
+      expectWhole(frame(views[0]!), 120, 40);
+      // Full at 50x40 keeps the desktop picker.
+      views.push(await render(name, h, 50, 40));
+      views.push(await render(name, h, 50, 40, "full"));
+      expect(frame(views[2]!)).not.toBe(frame(views[1]!));
+    } finally {
+      for (const view of views) view.renderer.destroy();
       await h.client.dispose();
     }
   },

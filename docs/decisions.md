@@ -438,3 +438,19 @@ P10 release/publication gates remain paused.
   each client that stopped showing it. Image data is kept; focus-in repaints. A blur while the
   window is still shown (the terminal lost focus) leaves the images alone.
 - Needs `focus-events on`. Without it there is no blur and the old behavior stays.
+
+## Phone layout: breakpoints and an env override (2026-11-18)
+
+- Tercet runs in Phone Assist's PC Terminal: about 50x40 in portrait and 110x20 in landscape,
+  and the on-screen keyboard halves the rows. Two independent axes decide it (`layoutFor` in
+  `src/client/layout.ts`): narrow = width < 70, the width at which the frame already dropped
+  the sidebar; short = height < 24, so a classic 80x24 terminal stays desktop. Compact is
+  either. Narrow gets one view at a time with a tab strip; short only slims the chrome.
+- The frame computes the layout once and shares it through `LayoutContext`; panels, pickers
+  and dialogs read `useLayout()` instead of measuring the screen, so the setting reaches them.
+- `TERCET_LAYOUT` wins over the `layout` setting because the settings file is shared by every
+  session on a machine, while the phone is one session: Phone Assist (or a shell alias) can
+  force `compact` for its tmux session alone if `auto` ever misjudges a size.
+- Desktop is unchanged: 120x40 acceptance screens are identical, and thread titles still
+  truncate on desktop; wrapping is compact-only.
+

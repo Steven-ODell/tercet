@@ -4,12 +4,6 @@
 ╭─● ≡ Threads────────────────────────────────────╮
 │[h] All threads                                 │
 │                                                │
-│  ◆ Make the phone terminal layout usable in […]│
-│  portrait and landscape: wrap every thread     │
-│  name, keep the composer above the keyboard    │
-│  and never cut a label                         │
-│  ✻ · ■ Alpha repo                           10m│
-│────────────────────────────────────────────────│
 │  ◆ Alpha pinned first                          │
 │  ◎ · ■ Alpha repo                            1h│
 │────────────────────────────────────────────────│
@@ -24,6 +18,12 @@
 │────────────────────────────────────────────────│
 │  Alpha newest active thread                    │
 │  ◎ · ■ Alpha repo                           10m│
+│────────────────────────────────────────────────│
+│  Make the phone terminal layout usable in   […]│
+│  portrait and landscape: wrap every thread     │
+│  name, keep the composer above the keyboard    │
+│  and never cut a label                         │
+│  ✻ · ■ Alpha repo                           10m│
 │────────────────────────────────────────────────│
 │  Beta newer active thread                      │
 │  ◎ ▶ running · ■ Beta repo                  20m│

@@ -15,8 +15,8 @@ import {
 import type { Client } from "./runtime";
 import { useClientAtom } from "./screen";
 import { wrapName } from "./sidebar";
+import { useLayout } from "./layout-context";
 import {
-  pickerCompact,
   rowText,
   useWheelTop,
   windowWithHint,
@@ -42,6 +42,7 @@ export function ThreadPalette({
   width: number;
   height: number;
 }) {
+  const compact = useLayout().compact;
   useClientAtom(client, client.snapshot);
   useClientAtom(client, client.archives);
   const [query, setQuery] = useState("");
@@ -185,7 +186,7 @@ export function ThreadPalette({
     index,
     rows.length + (prompt ? 1000 : 0),
   );
-  if (pickerCompact(width, height)) {
+  if (compact) {
     // Phone sizes: the panel takes the whole screen; rows are wrapped whole and counted so the
     // filter, at least three rows and the buttons always show.
     const inner = panelWidth - 2;

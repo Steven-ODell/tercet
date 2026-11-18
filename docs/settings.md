@@ -94,6 +94,7 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
 | `defaults.favorites`                                  | list of `{ provider, model, options? }`                         | `[]`                                       | now       |
 | `defaults.sidebarWorkingShelf`                        | boolean                                                         | `false`                                    | now       |
 | `defaults.hints`                                      | boolean                                                         | `true`                                     | now       |
+| `layout`                                              | `auto`, `compact`, `full` (see Layout)                          | `auto`                                     | now       |
 | `theme.preset`, `theme.accent`, `theme.link`                        | a preset name or `auto` (see Theme); `#rrggbb`                  | `cyberdream`, its own accent               | now       |
 | `keys`                                                | command name to key                                             | built-in keys                              | now       |
 | `icons`                                               | `nerd`, `unicode`, `ascii`                                      | `unicode`                                  | now       |
@@ -143,6 +144,29 @@ lost on a save.
 When `defaults.favorites` is non-empty it is the favorites list for tercet. When it is empty or
 absent, tercet shows the T3 server's favorites; the first favorite saved from tercet copies the
 list already shown into the file.
+
+## Layout
+
+Small terminals (a phone over SSH) get a compact layout: one view at a time with a tab strip
+(`[Threads] [Chat] [Files]`), a one-row action bar (`[Menu] [Model] [Panels] [Threads] [Help]`)
+instead of the hint rows, wrapped thread names, and pickers that take the whole screen. Every
+action has a tap: the Menu sheet lists each command with its key.
+
+| `layout`  | What you get                                                                 |
+| --------- | ---------------------------------------------------------------------------- |
+| `auto`    | Compact when the screen is under 70 columns or under 24 rows; else desktop.  |
+| `compact` | Compact at any size.                                                         |
+| `full`    | The desktop layout at any size (columns stay; nothing switches to tabs).     |
+
+Under 70 columns compact shows one view at a time; tapping a thread opens Chat. At 70 columns
+or more with under 24 rows (a landscape phone) the columns stay and only the chrome slims.
+
+`TERCET_LAYOUT=auto|compact|full` in the environment wins over the setting, so one machine can
+force a layout for one session without editing the file:
+
+```bash
+TERCET_LAYOUT=compact tercet
+```
 
 ## Theme
 

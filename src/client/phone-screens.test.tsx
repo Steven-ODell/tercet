@@ -45,9 +45,6 @@ async function fixtureClient() {
     title: longTitle,
     status: "idle" as const,
     modelSelection: { instanceId: "claudeAgent", model: "long" },
-    // Pinned first, so the short screens show it without scrolling the list.
-    pinnedAt: thread.createdAt,
-    pinOrderKey: "0",
     worktreePath: "/fixture/a",
     branch: "phone-layout",
   };
@@ -196,7 +193,7 @@ async function screen(
     },
   };
   try {
-    await t.settle((f) => f.includes("Alpha pinned first"));
+    await t.settle((f) => f.includes("Make the phone"));
     await drive(t);
     await act(async () => view.renderOnce());
     return frame()
@@ -319,3 +316,23 @@ for (const size of ["50x20", "110x20"] as const)
     expect(text).toContain(draft);
     expect(text).toContain("[send");
   });
+
+// One view at a time: a tap on a thread opens Chat, as `l` does; with columns it only selects.
+test("a thread tap opens chat at 50x40", async () => {
+  const text = await screen("50x40", async (t) => {
+    await t.tap("Make the phone");
+    await t.settle(waitChat);
+  });
+  expect(text).toContain("Transcript");
+  expect(text).toContain("Composer");
+  expect(text).not.toContain("[h] All threads");
+});
+
+test("a thread tap keeps the columns at 110x20", async () => {
+  const text = await screen("110x20", async (t) => {
+    await t.tap("Make the phone");
+    await t.settle(waitChat);
+  });
+  expect(text).toContain("[h] All threads");
+  expect(text).toContain("Transcript");
+});

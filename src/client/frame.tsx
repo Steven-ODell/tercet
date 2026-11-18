@@ -804,6 +804,7 @@ export function AppFrame({
                   enabled={!overlay}
                   keyboardEnabled={focus === "sidebar"}
                   wrapNames={compact}
+                  tapOpens={oneView}
                   onOpen={() => setFocus("transcript")}
                   onMenu={(id) => {
                     setMenuTarget(allThreads(client).find((t) => t.id === id));

@@ -19,15 +19,12 @@ import type { Boundary, Client } from "./runtime";
 import type { FavoriteEntry } from "./favorites-file";
 import { useClientAtom } from "./screen";
 import { wrapName } from "./sidebar";
+import { useLayout } from "./layout-context";
 
 import { defaultRuntimeMode, selectionFor } from "./model-defaults";
 export { selectionFor } from "./model-defaults";
 
 export type FavoriteRef = { provider: string; model: string };
-
-/** Phone sizes: the same cut as the frame (narrow < 70 columns, short < 24 rows). */
-export const pickerCompact = (width: number, height: number) =>
-  width < 70 || height < 24;
 
 /** Wraps at spaces; a word wider than the row is cut by cells. Lines are in text order. */
 export function wrapWords(text: string, width: number): string[] {
@@ -284,6 +281,8 @@ export function ModelPicker({
   width: number;
   height: number;
 }) {
+  // Phone sizes come from the frame's layout, so the `layout` setting and TERCET_LAYOUT apply.
+  const compact = useLayout().compact;
   const providers = useClientAtom(client, client.providers);
   const snapshot = useClientAtom(client, client.snapshot);
   const id = useClientAtom(client, client.selectedThreadId);
@@ -609,7 +608,7 @@ export function ModelPicker({
     : effort
       ? "Effort · choose model"
       : "Model · Favorites first";
-  if (pickerCompact(width, height)) {
+  if (compact) {
     // Phone sizes: the box takes the whole screen; every row is wrapped whole and counted, so
     // the filter, at least three rows and the close line always show.
     const bw = Math.min(76, width);

@@ -2,18 +2,18 @@ tercet · live · threads=26 · Full access                                     
 ╭─≡ Threads──────────────────╮╭─¶ Transcript─────────────────────────────────────────────────────────────────╮
 │[h] All threads             ││when they do not fit, and the composer keeps four rows.                       │
 │                            ││                                                                              │
-│  ◆ Make the phone       […]││• One view at a time                                                          │
-│  terminal layout usable    ││• Tabs on the status row                                                      │
-│  in portrait and           ││                                                                              │
-│  landscape: wrap every     ││╭─ bash ──────────────────────────────────────────────────────────── [copy] ─╮│
-│  thread name, keep the     │││ bun test                                                                   ││
-│  composer above the        ││╰────────────────────────────────────────────────────────────────────────────╯│
-│  keyboard and never cut    ││Following tail                                                                │
-│  a label                   ││                                                                              │
-│  ✻ · ■ Alpha repo       10m│╰──────────────────────────────────────────────────────────────────────────────╯
-│────────────────────────────│╭─● » Composer─────────────────────────────────────────────────────────────────╮
-│  ◆ Alpha pinned first      ││Wrap it, then run the tests                                                   │
-│  ◎ · ■ Alpha repo        1h││                                                                              │
+│  ◎ · ■ Alpha repo       10m││• One view at a time                                                          │
+│────────────────────────────││• Tabs on the status row                                                      │
+│  Make the phone         […]││                                                                              │
+│  terminal layout usable    ││╭─ bash ──────────────────────────────────────────────────────────── [copy] ─╮│
+│  in portrait and           │││ bun test                                                                   ││
+│  landscape: wrap every     ││╰────────────────────────────────────────────────────────────────────────────╯│
+│  thread name, keep the     ││Following tail                                                                │
+│  composer above the        ││                                                                              │
+│  keyboard and never cut    │╰──────────────────────────────────────────────────────────────────────────────╯
+│  a label                   │╭─● » Composer─────────────────────────────────────────────────────────────────╮
+│  ✻ · ■ Alpha repo       10m││Wrap it, then run the tests                                                   │
+│────────────────────────────││                                                                              │
 │                            ││                                                                              │
 │                            ││[send] [steer] [stop]                                                         │
 ╰────────────────────────────╯╰──────────────────────────────────────────────────────────────────────────────╯

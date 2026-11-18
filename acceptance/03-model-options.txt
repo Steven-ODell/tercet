@@ -30,7 +30,7 @@ tercet · live · threads=1 · Supervised                                       
 │                     │                                                                          │                     │
 │                     │                                                                          │                     │
 │                     │                                                                          │                     │
-│                     │j/k or ↑/↓ select · l/Enter choose/apply · h back                         │                     │
+│                     │j/k or ↑/↓ select · l/Enter choose · right-click favorite · h back        │                     │
 │                     │[ Esc Close ]                                                             │─────────────────────╯
 │                     └──────────────────────────────────────────────────────────────────────────┘─────────────────────╮
 │                            ││Message · @file · /skill · :emoji                                                       │

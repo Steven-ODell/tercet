@@ -3,12 +3,12 @@ import type { ColorInput } from "@opentui/core";
 import { useEffect, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import {
-  pickerCompact,
   rowText,
   useWheelTop,
   windowWithHint,
   wrapWords,
 } from "./model-picker";
+import { useLayout } from "./layout-context";
 import type { OrchestrationV2ThreadShell, VcsRef } from "@t3tools/contracts";
 import type { Client } from "./runtime";
 import { useClientAtom } from "./screen";
@@ -212,6 +212,7 @@ export function NewThreadPicker({
   created?: () => void;
 }) {
   const { width, height } = useTerminalDimensions();
+  const compact = useLayout().compact;
   const snapshot = useClientAtom(client, client.snapshot);
   const projects = projectChoices(snapshot?.projects ?? [], target?.projectId);
   const [cursor, setCursor] = useState(0);
@@ -252,7 +253,7 @@ export function NewThreadPicker({
         chooseSoleRow
       />
     );
-  if (pickerCompact(width, height))
+  if (compact)
     return (
       <CompactList
         width={width}
@@ -351,6 +352,7 @@ export function WorkspacePicker({
   chooseSoleRow?: boolean;
 }) {
   const { width, height } = useTerminalDimensions();
+  const compact = useLayout().compact;
   const wanted = projectId ?? target?.projectId;
   const project =
     client.registry
@@ -438,7 +440,7 @@ export function WorkspacePicker({
       setCursor((n) => Math.min(rows.length - 1, n + 1));
     if (key.name === "return" || key.name === "l") choose(cursor);
   });
-  if (pickerCompact(width, height))
+  if (compact)
     return (
       <CompactList
         width={width}
