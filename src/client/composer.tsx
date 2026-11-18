@@ -5,7 +5,7 @@ import { commandForKey, hintFor } from "./keymap";
 import { InlineImage } from "./image-preview";
 import { pendingCard, requestKey, RequestPanel } from "./requests";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { useKeyboard, usePaste } from "@opentui/react";
+import { useKeyboard, usePaste, useTerminalDimensions } from "@opentui/react";
 import { useSpellCheck } from "./spell-ui";
 import { decodePasteBytes, type BoxRenderable, type TextareaRenderable } from "@opentui/core";
 import type { RunId, ThreadId } from "@t3tools/contracts";
@@ -15,6 +15,76 @@ import { fileIcon } from "./icons";
 import { useClientAtom } from "./screen";
 import type { Client } from "./runtime";
 
+/** Rows a wrapping run of buttons needs: labels pack left to right with one space between. */
+export function wrapRows(width: number, labels: readonly string[]): number {
+  if (!labels.length) return 0;
+  let rows = 1;
+  let used = 0;
+  for (const label of labels) {
+    if (used && used + 1 + label.length > Math.max(1, width)) {
+      rows++;
+      used = label.length;
+    } else used += (used ? 1 : 0) + label.length;
+  }
+  return rows;
+}
+const textRows = (width: number, text: string) =>
+  text ? Math.ceil(text.length / Math.max(1, width)) : 0;
+/** Tap buttons of the compact media row; empty when the host offers no media action. */
+export function compactMediaLabels(
+  effects?: import("../actions").Actions,
+  micLabel = "mic",
+): string[] {
+  return [
+    ...(effects?.pasteClipboard ? ["[Paste]"] : []),
+    ...(effects?.pasteImage ? ["[Paste image]"] : []),
+    ...(effects?.pickFiles ? ["[Attach]"] : []),
+    ...(hasDictation(effects) ? [`[${micLabel}]`] : []),
+  ];
+}
+/** Tap buttons under the draft: send, steer, stop, and leaving a queued edit. */
+export function compactActionLabels(busy: boolean, edit: boolean): string[] {
+  return [
+    busy ? "[sending…]" : edit ? "[save edit]" : "[send]",
+    "[steer]",
+    "[stop]",
+    ...(edit ? ["[leave edit]"] : []),
+  ];
+}
+/** Tap buttons for the selected queued message; [next] only when there is another to pick. */
+export function compactQueueLabels(count: number): string[] {
+  return [...(count > 1 ? ["[next]"] : []), "[steer]", "[edit]", "[cancel]"];
+}
+/**
+ * Rows the compact composer needs at `width` with a one-row draft. The frame adds the rest of the
+ * draft's height. `notes` are texts that wrap under the buttons (status, errors).
+ */
+export function compactComposerRows(
+  width: number,
+  o: {
+    collapsed?: boolean;
+    media?: readonly string[];
+    actions?: readonly string[];
+    queued?: number;
+    images?: number;
+    choices?: boolean;
+    notes?: readonly string[];
+    draftRows?: number;
+  },
+): number {
+  const notes = (o.notes ?? []).reduce((sum, note) => sum + textRows(width, note), 0);
+  if (o.collapsed) return 1 + notes;
+  return (
+    (o.queued ? 1 + wrapRows(width, compactQueueLabels(o.queued)) : 0) +
+    (o.images ? 3 : 0) +
+    wrapRows(width, o.media ?? []) +
+    (o.draftRows ?? 1) +
+    (o.choices ? 2 : 0) +
+    wrapRows(width, o.actions ?? []) +
+    notes
+  );
+}
+
 export function ThreadComposer({
   client,
   effects,
@@ -22,6 +92,9 @@ export function ThreadComposer({
   enabled,
   pasteEnabled = false,
   collapsed = false,
+  compact = false,
+  width,
+  onRows,
   onInputFocus,
   onSent,
 }: {
@@ -33,6 +106,12 @@ export function ThreadComposer({
   pasteEnabled?: boolean;
   /** Show only the draft line: no queue, image, button or hint rows. A pending card still shows. */
   collapsed?: boolean;
+  /** Phone layout: short tap buttons that wrap, one selected queued message, no key hints. */
+  compact?: boolean;
+  /** Columns the composer gets (default: the terminal's), used to count wrapped rows. */
+  width?: number;
+  /** Rows the compact composer needs now, with a one-row draft (see `compactComposerRows`). */
+  onRows?: (rows: number) => void;
   /** Reveal the composer when typing or pasted text arrives. */
   onInputFocus?: () => void;
   /** A message or queued edit went out. */
@@ -89,6 +168,9 @@ export function ThreadComposer({
         enabled={enabled && !answering}
         pasteFromPane={!enabled && pasteEnabled && !answering}
         collapsed={collapsed && !card}
+        compact={compact}
+        width={width}
+        onRows={onRows}
         onInputFocus={onInputFocus}
         onSent={onSent}
       />
@@ -104,6 +186,9 @@ function Editor({
   enabled,
   pasteFromPane,
   collapsed,
+  compact,
+  width,
+  onRows,
   onInputFocus,
   onSent,
 }: {
@@ -115,9 +200,13 @@ function Editor({
   enabled: boolean;
   pasteFromPane: boolean;
   collapsed: boolean;
+  compact: boolean;
+  width?: number;
+  onRows?: (rows: number) => void;
   onInputFocus?: () => void;
   onSent?: () => void;
 }) {
+  const terminal = useTerminalDimensions();
   const images = useClientAtom(client, composer.images)[id] ?? [];
   const [mediaStatus, setMediaStatus] = useState("");
   const [mediaBusy, setMediaBusy] = useState(false);
@@ -443,9 +532,84 @@ function Editor({
     }
   });
   const queued = composer.queued(id);
+  const columns = width ?? terminal.width;
+  const status = mediaBusy ? "…" : mediaStatus || micMessage;
+  const mediaLabels = compactMediaLabels(effects, micLabel);
+  const actionLabels = compactActionLabels(busy, !!edit);
+  const notes = [status, error || completionError || spell.notice || ""].filter(Boolean);
+  const compactRows = compactComposerRows(columns, {
+    collapsed,
+    media: mediaLabels,
+    actions: actionLabels,
+    queued: queued.length,
+    images: images.length,
+    choices: choices.length > 0,
+    notes,
+  });
+  useEffect(() => {
+    if (compact) onRows?.(compactRows);
+  }, [compact, compactRows, onRows]);
+  const queuedRun = queued.length ? queued[queuedIndex % queued.length] : undefined;
+  const queuedText = (run: NonNullable<typeof queuedRun>) =>
+    client.getThread(id).projection?.messages.find((message) => message.id === run.userMessageId)
+      ?.text ?? "";
+  const tap = (action: () => void) => (event: { button: number }) => {
+    if (event.button === 0) action();
+  };
   return (
     <box ref={root} flexDirection="column" width="100%" flexGrow={1} minHeight={0}>
-      {!collapsed && (
+      {!collapsed && compact && queuedRun && (
+        <box flexShrink={0} height={1 + wrapRows(columns, compactQueueLabels(queued.length))}>
+          <text height={1} wrapMode="none" truncate fg={theme.plain}>
+            {`Queued ${(queuedIndex % queued.length) + 1}/${queued.length}: `}
+            {queuedText(queuedRun)}
+          </text>
+          <box
+            flexDirection="row"
+            flexWrap="wrap"
+            columnGap={1}
+            height={wrapRows(columns, compactQueueLabels(queued.length))}
+          >
+            {queued.length > 1 && (
+              <text
+                flexShrink={0}
+                fg={theme.plain}
+                onMouseUp={tap(() => setQueuedIndex((index) => index + 1))}
+              >
+                [next]
+              </text>
+            )}
+            <text
+              flexShrink={0}
+              fg={theme.plain}
+              onMouseUp={tap(() => void composer.promote(id, queuedRun.id))}
+            >
+              [steer]
+            </text>
+            <text
+              flexShrink={0}
+              fg={theme.plain}
+              onMouseUp={tap(() => {
+                setEdit(queuedRun.id);
+                composer.setDraft(id, queuedText(queuedRun));
+              })}
+            >
+              [edit]
+            </text>
+            <text
+              flexShrink={0}
+              fg={theme.plain}
+              onMouseUp={tap(() => {
+                void composer.cancel(id, queuedRun.id);
+                if (edit === queuedRun.id) setEdit(undefined);
+              })}
+            >
+              [cancel]
+            </text>
+          </box>
+        </box>
+      )}
+      {!collapsed && !compact && (
         <scrollbox height={queued.length ? 2 : 0} scrollY scrollX={false}>
           {queued.map((run, index) => (
             <box key={run.id} flexDirection="row">
@@ -542,7 +706,42 @@ function Editor({
           ))}
         </scrollbox>
       )}
-      {!collapsed && (
+      {!collapsed && compact && mediaLabels.length > 0 && (
+        <box
+          height={wrapRows(columns, mediaLabels)}
+          flexShrink={0}
+          flexDirection="row"
+          flexWrap="wrap"
+          columnGap={1}
+        >
+          {effects?.pasteClipboard && (
+            <text flexShrink={0} fg={theme.accent} onMouseUp={tap(() => void media("clipboard"))}>
+              [Paste]
+            </text>
+          )}
+          {effects?.pasteImage && (
+            <text flexShrink={0} fg={theme.accent} onMouseUp={tap(() => void media("paste"))}>
+              [Paste image]
+            </text>
+          )}
+          {effects?.pickFiles && (
+            <text flexShrink={0} fg={theme.accent} onMouseUp={tap(() => void media("files"))}>
+              [Attach]
+            </text>
+          )}
+          {hasDictation(effects) && (
+            <text flexShrink={0} fg={theme.accent} onMouseUp={tap(() => void media("mic"))}>
+              [{micLabel}]
+            </text>
+          )}
+        </box>
+      )}
+      {compact && status && (
+        <text flexShrink={0} fg={theme.plain}>
+          {status}
+        </text>
+      )}
+      {!collapsed && !compact && (
         <box height={1} flexDirection="row">
           {effects?.pasteClipboard && (
             <text
@@ -644,7 +843,31 @@ function Editor({
           ))}
         </scrollbox>
       )}
-      {!collapsed && (
+      {!collapsed && compact && (
+        <box
+          height={wrapRows(columns, actionLabels)}
+          flexShrink={0}
+          flexDirection="row"
+          flexWrap="wrap"
+          columnGap={1}
+        >
+          <text flexShrink={0} fg={theme.accent} onMouseUp={tap(() => !busy && void send())}>
+            {actionLabels[0]}
+          </text>
+          <text flexShrink={0} fg={theme.plain} onMouseUp={tap(steer)}>
+            [steer]
+          </text>
+          <text flexShrink={0} fg={theme.plain} onMouseUp={tap(() => void composer.stop(id))}>
+            [stop]
+          </text>
+          {edit && (
+            <text flexShrink={0} fg={theme.plain} onMouseUp={tap(() => setEdit(undefined))}>
+              [leave edit]
+            </text>
+          )}
+        </box>
+      )}
+      {!collapsed && !compact && (
         <box height={1} flexDirection="row">
           <text
             fg={theme.accent}
