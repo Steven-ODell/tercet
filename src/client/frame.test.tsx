@@ -247,14 +247,14 @@ test("narrow resize collapses sidebar, allows key/mouse reopening and recovers w
     expect(view.captureCharFrame()).toContain("Transcript fixture");
     await act(async () => view.mockInput.pressKey("b", { meta: true }));
     await view.flush();
-    expect(view.captureCharFrame()).toContain("Threads");
+    expect(view.captureCharFrame()).toContain("Thread sidebar fixture");
     await act(async () => {
       const lines = view.captureCharFrame().split("\n");
       const y = lines.findIndex((line) => line.includes("Alt+b Sidebar"));
       await view.mockMouse.click(lines[y]!.indexOf("Alt+b Sidebar") + 2, y);
     });
     await view.flush();
-    expect(view.captureCharFrame()).not.toContain("Threads");
+    expect(view.captureCharFrame()).not.toContain("Thread sidebar fixture");
     await act(async () => view.resize(120, 40));
     await view.flush();
     expect(view.captureCharFrame()).toContain("Thread sidebar fixture");
