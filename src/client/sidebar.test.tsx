@@ -795,7 +795,15 @@ test.each([
     ...client.getThread(id),
     projection: {
       turnItems: [],
-      visibleTurnItems: [],
+      visibleTurnItems: id === one.id ? [{
+        sourceThreadId: id,
+        sourceItemId: "tool",
+        visibility: "local",
+        item: {
+          id: "tool", providerThreadId: `provider-${id}`, type: "dynamic_tool",
+          status: "completed", toolName: "Read", input: "test", output: "result",
+        },
+      }] : [],
       runtimeRequests: [],
       runs: [],
       messages: [],
@@ -893,6 +901,10 @@ test.each([
     expect(frame).toContain("Cached input");
     expect(frame).toContain("Compacts at 900,000 tokens.");
     expect(frame).toContain("1.2M in · 1.1M cached · 9k out");
+    expect(frame).toContain("Loaded transcript (estimated)");
+    await act(async () => view.mockInput.pressKey("PAGEDOWN"));
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Read · 1 call · ~3");
     await act(async () => view.mockInput.pressEscape());
     await view.flush();
     expect(view.captureCharFrame()).not.toContain("Cached input");

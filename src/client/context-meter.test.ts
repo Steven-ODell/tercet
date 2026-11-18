@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test";
+import type { OrchestrationV2ProjectedTurnItem } from "@t3tools/contracts";
 
 import { allocate, chipLayout, contextDetailOf, detailLines, relativeMinutes } from "./context-meter";
+import { contextContentOf } from "./context-content";
 
 const report = (providerThreadId: string, updatedAt: string, extra: object = {}) => ({
   providerThreadId: providerThreadId as never,
@@ -112,5 +114,68 @@ describe("detailLines", () => {
     );
     expect(relativeMinutes(now - 3 * 60_000, now)).toBe("3m ago");
     expect(relativeMinutes(now + 65 * 60_000, now)).toBe("in 1h 5m");
+  });
+});
+
+const row = (
+  type: OrchestrationV2ProjectedTurnItem["item"]["type"],
+  values: object,
+  visibility: OrchestrationV2ProjectedTurnItem["visibility"] = "local",
+) => ({ visibility, item: { type, providerThreadId: "p1", status: "completed", ...values } }) as OrchestrationV2ProjectedTurnItem;
+
+describe("contextContentOf", () => {
+  it("estimates loaded messages and ranks tools with argument and result text", () => {
+    const content = contextContentOf({
+      runs: [],
+      visibleTurnItems: [
+        row("user_message", { text: "éééé" }),
+        row("assistant_message", { text: "reply" }),
+        row("reasoning", { text: "some reasoning" }),
+        row("command_execution", { input: "echo out", output: "example text" }),
+        row("dynamic_tool", { toolName: "Read", input: "test", output: "read a longer file" }),
+        row("dynamic_tool", { toolName: "Read", input: "more", outputOmitted: true, output: "ignored preview" }),
+        row("dynamic_tool", { toolName: "Other", input: { truncated: true, summary: "ignored argument preview" } }),
+      ],
+    }, "p1", true)!;
+    expect(content.categories).toEqual([
+      { name: "Tool arguments", tokens: 4 },
+      { name: "Tool results", tokens: 8 },
+      { name: "User messages", tokens: 2 },
+      { name: "Assistant messages", tokens: 2 },
+      { name: "Visible reasoning", tokens: 4 },
+    ]);
+    expect(content.tools).toEqual([
+      { name: "Read", calls: 2, tokens: 7 },
+      { name: "Shell commands", calls: 1, tokens: 5 },
+      { name: "Other", calls: 1, tokens: 0 },
+    ]);
+    expect(content.missingToolDetails).toBe(2);
+    const lines = detailLines(null, 42, 0, content).map((line) => line.text);
+    expect(lines).toContain("Loaded transcript (estimated)");
+    expect(lines).toContain("Read · 2 calls · ~7");
+    expect(lines.join(" ")).toContain("Older history is outside the loaded transcript.");
+    expect(lines.join(" ")).toContain("Some tool text unavailable for 2 calls.");
+  });
+
+  it("scopes estimates to the active provider thread since its last loaded compaction", () => {
+    const content = contextContentOf({
+      runs: [{ id: "run", providerThreadId: "p1" }] as never,
+      visibleTurnItems: [
+        row("user_message", { text: "Before compaction" }),
+        row("compaction", { summary: "seed" }),
+        row("user_message", { text: "next", providerThreadId: null, runId: "run" }),
+        row("user_message", { text: "Inherited" }, "inherited"),
+        row("compaction", { summary: "Other provider", providerThreadId: "p2" }),
+        row("assistant_message", { text: "Old provider", providerThreadId: "p2" }),
+      ],
+    }, "p1", false)!;
+    expect(content.categories).toEqual([
+      { name: "User messages", tokens: 1 },
+      { name: "Plans and summaries", tokens: 1 },
+    ]);
+    expect(content.compacted).toBe(true);
+    expect(detailLines(null, 42, 0, content).map((line) => line.text)).toContain(
+      "Since the last loaded compaction.",
+    );
   });
 });

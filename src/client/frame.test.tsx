@@ -231,6 +231,16 @@ test("narrow resize collapses sidebar, allows key/mouse reopening and recovers w
   try {
     await view.flush();
     expect(view.captureCharFrame()).toContain("Thread sidebar fixture");
+    await act(async () => view.resize(100, 32));
+    for (const panel of ["d", "f"]) {
+      await act(async () => view.mockInput.pressKey(panel, { meta: true }));
+      await view.flush();
+      expect(view.captureCharFrame()).not.toContain("Thread sidebar fixture");
+      expect(view.captureCharFrame()).toContain("Transcript fixture");
+      await act(async () => view.mockInput.pressKey(panel, { meta: true }));
+      await view.flush();
+      expect(view.captureCharFrame()).toContain("Thread sidebar fixture");
+    }
     await act(async () => view.resize(50, 24));
     await view.flush();
     expect(view.captureCharFrame()).not.toContain("Thread sidebar fixture");
@@ -301,6 +311,15 @@ test("transcript selection Copy in the full frame never arms quit", async () => 
     let lines = view.captureCharFrame().split("\n");
     const y = lines.findIndex((line) => line.includes("alpha beta"));
     const x = lines[y]!.indexOf("alpha beta");
+    await act(async () => view.mockMouse.click(x + 1, y));
+    await key("/");
+    for (const letter of "gamma") await key(letter);
+    await key("RETURN");
+    expect(view.captureCharFrame()).toContain("/gamma · 1/1");
+    await key("/");
+    for (const letter of "missing") await key(letter);
+    await key("RETURN");
+    expect(view.captureCharFrame()).toContain("No match for /missing");
     await act(async () => view.mockMouse.drag(x, y, x + 4, y));
     await view.flush();
     expect(view.renderer.getSelection()!.getSelectedText()).toBe("alpha");

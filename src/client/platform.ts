@@ -12,6 +12,7 @@ import { dirname } from "node:path";
 import { AuthStandardClientScopes } from "@t3tools/contracts";
 import { isLoopback, type Config } from "./config";
 import { messageTagFor } from "./settings";
+import { writeFavorite, type FavoriteEntry } from "./favorites-file";
 import { findT3, systemT3Host } from "./t3-command";
 import { speechStatus, transcribeSpeech } from "./speech";
 import {
@@ -133,6 +134,14 @@ export function platform(
       answerSecret(config.url, token, input),
     modelFavorites: async () =>
       Schema.decodeUnknownSync(ModelFavorites)(config.settings.defaults.favorites),
+    favoriteEntries: async () => config.settings.defaults.favorites,
+    saveFavorite: async (entry: FavoriteEntry, on: boolean, seed?: FavoriteEntry[]) => {
+      if (config.settings.defaults.favorites.length === 0)
+        for (const seeded of seed ?? []) await writeFavorite(config.settingsPath, seeded, true);
+      const favorites = await writeFavorite(config.settingsPath, entry, on);
+      config.settings.defaults.favorites = favorites;
+      return favorites;
+    },
     search: (token: string, query: string) => searchThreads(config.url, token, query),
     drafts: {
       async read() {

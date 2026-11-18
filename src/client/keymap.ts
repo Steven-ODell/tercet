@@ -294,6 +294,7 @@ export function cheatSheet(
       title: "Transcript",
       rows: [
         { keys: "h j k l w b e", label: "Move" },
+        { keys: "/  n N", label: "Find in transcript, next / previous match" },
         { keys: "gg G Ctrl+d Ctrl+u", label: "Top, bottom, half page" },
         { keys: "v V", label: "Select, select lines" },
         { keys: "y yy", label: "Yank selection, yank line" },

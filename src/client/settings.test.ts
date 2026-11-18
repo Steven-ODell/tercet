@@ -59,6 +59,22 @@ test("a missing settings file gives the defaults", async () => {
   expect(parse("// nothing yet\n{ }\n")).toEqual(defaultSettings());
 });
 
+test("favorites keep their options; entries without them stay as before", () => {
+  const settings = parse(`{"defaults": {"favorites": [
+    {"provider": "claudeAgent", "model": "claude-opus-5-5", "options": {"effort": "medium", "fastMode": false}},
+    {"provider": "codex", "model": "gpt-5.5"}
+  ]}}`);
+  expect(settings.defaults.favorites).toEqual([
+    {
+      provider: "claudeAgent",
+      model: "claude-opus-5-5",
+      options: { effort: "medium", fastMode: false },
+    },
+    { provider: "codex", model: "gpt-5.5" },
+  ]);
+  expect(Object.hasOwn(settings.defaults.favorites[1]!, "options")).toBe(false);
+});
+
 test("JSONC with comments and trailing commas fills every section", () => {
   const settings = parse(`{
   // where the server is
@@ -144,6 +160,13 @@ test("schema errors name the file, line and key", () => {
   expect(
     failure('{"defaults": {"favorites": [\n  {"provider": "codex"},\n  {"model": 3}\n]}}'),
   ).toContain(":3: defaults.favorites[1].model: expected a non-empty string, got 3");
+  expect(
+    failure(
+      '{"defaults": {"favorites": [\n  {"provider": "codex", "model": "gpt-5.5", "options": {"effort": 3}}\n]}}',
+    ),
+  ).toContain(
+    ":2: defaults.favorites[0].options.effort: expected a non-empty string or true or false, got 3",
+  );
   expect(failure('{"commands": {\n  "run": []\n}}')).toContain(
     ":2: commands.run: expected a program name or a non-empty list of arguments, got a list",
   );

@@ -13,7 +13,14 @@ import { claude } from "./usage-fixture";
 import { createClient, waitForLive, type Client } from "./runtime";
 import { AppFrame } from "./frame";
 import { defaultRuntimeMode } from "./model-defaults";
-import { catalogRows, selectionFor } from "./model-picker";
+import {
+  catalogRows,
+  effectiveFavorites,
+  favoriteEntry,
+  saveFavoriteEdit,
+  selectionFor,
+} from "./model-picker";
+import type { FavoriteEntry } from "./favorites-file";
 import { allThreads, createThreadActions } from "./thread-actions";
 import { platform } from "./platform";
 import { connectionConfig } from "./config";
@@ -249,6 +256,176 @@ test("j/k/l/h move through the model list and options; / or a letter starts the 
     expect(view.captureCharFrame()).toContain("sonnet");
     expect(view.captureCharFrame()).toContain("Sonnet 5.5");
     expect(view.captureCharFrame()).not.toContain("Opus 5.5");
+    await key("ESCAPE");
+  } finally {
+    await view.dispose();
+    await client.dispose();
+  }
+});
+
+test("effective favorites: config entries win over the resolved list; favoriteEntry matches exactly", () => {
+  const resolved = [{ provider: provider.instanceId, model: "opus-5.5" }];
+  expect(effectiveFavorites([], resolved)).toEqual(resolved);
+  const configured: FavoriteEntry[] = [
+    { provider: "codex", model: "gpt", options: { effort: "low" } },
+  ];
+  expect(effectiveFavorites(configured, resolved)).toEqual(configured);
+  expect(favoriteEntry(configured, "codex", "gpt")?.options).toEqual({ effort: "low" });
+  expect(favoriteEntry(configured, "codex", "other")).toBeUndefined();
+  expect(favoriteEntry(configured, "gpt", "codex")).toBeUndefined();
+});
+
+test("a favorite's saved options apply when chosen; without them the built-in default stays", async () => {
+  const effortModel = {
+    ...provider.models[0]!,
+    capabilities: {
+      optionDescriptors: [
+        {
+          id: "reasoningEffort",
+          label: "Effort",
+          type: "select" as const,
+          options: [
+            { id: "low", label: "Low" },
+            { id: "medium", label: "Medium" },
+            { id: "high", label: "High", isDefault: true },
+          ],
+        },
+      ],
+    },
+  };
+  const effortProvider = { ...provider, models: [effortModel, provider.models[1]!] };
+  expect(selectionFor(effortProvider, effortModel).options).toEqual([
+    { id: "reasoningEffort", value: "high" },
+  ]);
+  const client = createClient(
+    {
+      readToken: () => Effect.succeed("fake"),
+      issueToken: () => Effect.die("no"),
+      wake: () => Effect.void,
+      pause: () => Effect.never,
+      follow: () => Effect.never,
+      modelFavorites: async () => favorites,
+      favoriteEntries: async () => [
+        {
+          provider: provider.instanceId,
+          model: "opus-5.5",
+          options: { reasoningEffort: "medium" },
+        },
+      ],
+    },
+    false,
+  );
+  client.start();
+  await new Promise<void>((r) => queueMicrotask(r));
+  client.registry.set(client.providers, [effortProvider]);
+  const view = await testRender(<AppFrame client={client} />, {
+    width: 100,
+    height: 30,
+    kittyKeyboard: true,
+    exitOnCtrlC: false,
+  });
+  const key = async (name: string, meta = false) => {
+    await act(async () => {
+      view.mockInput.pressKey(name, { meta });
+    });
+    await view.flush();
+  };
+  try {
+    await key("m", true);
+    expect(view.captureCharFrame()).toContain("★ Favorites · Opus 5.5 · medium");
+    await key("RETURN");
+    expect(client.registry.get(client.newModelSelection)?.options).toEqual([
+      { id: "reasoningEffort", value: "medium" },
+    ]);
+  } finally {
+    await view.dispose();
+    await client.dispose();
+  }
+});
+
+test("saving favorite defaults sends the selection's option values and the visible list as seed", async () => {
+  const calls: [FavoriteEntry, boolean, FavoriteEntry[] | undefined][] = [];
+  const boundary = {
+    saveFavorite: async (entry: FavoriteEntry, on: boolean, seed?: FavoriteEntry[]) => {
+      calls.push([entry, on, seed]);
+      return [entry];
+    },
+  };
+  const selection = {
+    instanceId: provider.instanceId,
+    model: "opus-5.5",
+    options: [
+      { id: "reasoningEffort", value: "max" },
+      { id: "fastMode", value: true },
+    ],
+  };
+  const seed = [{ provider: provider.instanceId, model: "sonnet-5.5" }];
+  const saved = await saveFavoriteEdit(boundary, selection, true, seed);
+  expect(calls[0]).toEqual([
+    {
+      provider: provider.instanceId,
+      model: "opus-5.5",
+      options: { reasoningEffort: "max", fastMode: true },
+    },
+    true,
+    seed,
+  ]);
+  expect(saved).toEqual([calls[0]![0]]);
+  await saveFavoriteEdit(boundary, selection, false, seed);
+  expect(calls[1]).toEqual([{ provider: provider.instanceId, model: "opus-5.5" }, false, seed]);
+  expect(await saveFavoriteEdit({}, selection, true, seed)).toBeUndefined();
+});
+
+test("right-click on a model opens the favorite editor; its toggle saves through the boundary", async () => {
+  const calls: [FavoriteEntry, boolean, FavoriteEntry[] | undefined][] = [];
+  const client = createClient(
+    {
+      readToken: () => Effect.succeed("fake"),
+      issueToken: () => Effect.die("no"),
+      wake: () => Effect.void,
+      pause: () => Effect.never,
+      follow: () => Effect.never,
+      modelFavorites: async () => favorites,
+      saveFavorite: async (entry, on, seed) => {
+        calls.push([entry, on, seed]);
+        return [];
+      },
+    },
+    false,
+  );
+  client.start();
+  await new Promise<void>((r) => queueMicrotask(r));
+  client.registry.set(client.providers, [provider]);
+  const view = await testRender(<AppFrame client={client} />, {
+    width: 100,
+    height: 30,
+    kittyKeyboard: true,
+    exitOnCtrlC: false,
+  });
+  const key = async (name: string, meta = false) => {
+    await act(async () => {
+      view.mockInput.pressKey(name, { meta });
+    });
+    await view.flush();
+  };
+  try {
+    await key("m", true);
+    const lines = view.captureCharFrame().split("\n");
+    const y = lines.findIndex((l) => l.includes("★ Favorites · Opus 5.5"));
+    expect(y).toBeGreaterThan(-1);
+    await act(async () => {
+      await view.mockMouse.click(lines[y]!.indexOf("★") + 1, y, 2);
+    });
+    await view.flush();
+    expect(view.captureCharFrame()).toContain("Favorite · ");
+    expect(view.captureCharFrame()).toContain("Favorite: ★ yes");
+    expect(view.captureCharFrame()).not.toContain("Runtime:");
+    for (let i = 0; i < 3; i++) await key("ARROW_DOWN"); // past the three option rows
+    await key("RETURN"); // yes -> no
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.[0]).toEqual({ provider: provider.instanceId, model: "opus-5.5" });
+    expect(calls[0]?.[1]).toBe(false);
+    expect(view.captureCharFrame()).toContain("Removed: Opus 5.5 from favorites");
     await key("ESCAPE");
   } finally {
     await view.dispose();

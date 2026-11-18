@@ -80775,18 +80775,27 @@ import io, json, sys, wave
 from pathlib import Path
 import numpy as np
 from kokoro_onnx import Kokoro
+out = sys.stdout.buffer
+sys.stdout = sys.stderr
 home = Path(sys.argv[1])
-req = json.load(sys.stdin)
 model = Kokoro(str(home / "kokoro-v1.0.onnx"), str(home / "voices-v1.0.bin"))
-samples, rate = model.create(req["text"], voice=req["voice"], speed=float(req["speed"]), lang={"a":"en-us", "b":"en-gb"}.get(req["voice"][:1], "en-us"))
-pcm = (np.clip(samples, -1.0, 1.0) * 32767).astype("<i2").tobytes()
-audio = io.BytesIO()
-with wave.open(audio, "wb") as wav:
-    wav.setnchannels(1)
-    wav.setsampwidth(2)
-    wav.setframerate(int(rate))
-    wav.writeframes(pcm)
-sys.stdout.buffer.write(audio.getvalue())
+for line in sys.stdin.buffer:
+    try:
+        req = json.loads(line)
+        samples, rate = model.create(req["text"], voice=req["voice"], speed=float(req["speed"]), lang={"a":"en-us", "b":"en-gb"}.get(req["voice"][:1], "en-us"))
+        pcm = (np.clip(samples, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+        audio = io.BytesIO()
+        with wave.open(audio, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(int(rate))
+            wav.writeframes(pcm)
+        data = audio.getvalue()
+        head = {"ok": True, "bytes": len(data)}
+    except Exception as e:
+        data, head = b"", {"ok": False, "error": (type(e).__name__ + ": " + str(e))[:300]}
+    out.write(json.dumps(head).encode() + b"\n" + data)
+    out.flush()
 `;
 var KOKORO_MODEL_FILE = "kokoro-v1.0.onnx";
 var KOKORO_VOICES_FILE = "voices-v1.0.bin";
@@ -80836,7 +80845,195 @@ function readbackStatus(env = process.env, settingsHome = "", platform = process
   const missing = pieces.filter((piece) => !has(piece.path)).map((piece) => piece.label);
   return { ready: missing.length === 0, home: modelHome, python, missing };
 }
-async function synthesizeLocalReadback(text, settings, signal, env = process.env) {
+var MAX_AUDIO = 64 * 1024 * 1024;
+var WORKER_IDLE = 2 * 60000;
+var CANNOT_START = "Cannot start local Kokoro Python. Run `tercet readback setup`, or check KOKORO_HOME, readback.home and KOKORO_PYTHON.";
+var GENERATION_FAILED = "Local Kokoro generation failed. Run `tercet readback setup` to repair the install, and check readback.voice.";
+function createLocalWorker(options = {}) {
+  const spawnProcess = options.spawnProcess ?? spawn;
+  const idleMs = options.idleMs ?? WORKER_IDLE;
+  let current;
+  let idle;
+  let queue = Promise.resolve();
+  let exitHook = false;
+  const hold = (live, on) => {
+    for (const handle of [live.child, live.child.stdin, live.child.stdout])
+      handle?.[on ? "ref" : "unref"]?.();
+  };
+  const stopIdle = () => {
+    clearTimeout(idle);
+    idle = undefined;
+  };
+  const armIdle = () => {
+    stopIdle();
+    idle = setTimeout(() => {
+      if (current)
+        kill(current);
+    }, idleMs);
+    idle.unref?.();
+  };
+  const kill = (live) => {
+    live.dead = true;
+    if (current === live)
+      current = undefined;
+    live.pending = undefined;
+    live.child.kill();
+  };
+  const fail = (live, error) => {
+    live.dead = true;
+    if (current === live)
+      current = undefined;
+    const pending = live.pending;
+    live.pending = undefined;
+    pending?.reject(error);
+  };
+  const consume = (live) => {
+    while (!live.dead) {
+      if (live.bytes === undefined) {
+        const end = live.buffer.indexOf(10);
+        if (end < 0) {
+          if (live.buffer.length > 65536) {
+            fail(live, new Error(GENERATION_FAILED));
+            live.child.kill();
+          }
+          return;
+        }
+        let head;
+        try {
+          head = JSON.parse(live.buffer.toString("utf8", 0, end));
+        } catch {
+          head = undefined;
+        }
+        live.buffer = live.buffer.subarray(end + 1);
+        const pending2 = live.pending;
+        if (!pending2 || !head) {
+          fail(live, new Error(GENERATION_FAILED));
+          live.child.kill();
+          return;
+        }
+        if (!head.ok) {
+          live.pending = undefined;
+          pending2.reject(new Error(GENERATION_FAILED));
+          continue;
+        }
+        if (!Number.isSafeInteger(head.bytes) || head.bytes < 0) {
+          fail(live, new Error(GENERATION_FAILED));
+          live.child.kill();
+          return;
+        }
+        if (head.bytes > MAX_AUDIO) {
+          fail(live, new Error("Kokoro audio exceeds the 64 MB limit."));
+          live.child.kill();
+          return;
+        }
+        live.bytes = head.bytes;
+      }
+      const size = live.bytes;
+      if (live.buffer.length < size)
+        return;
+      const audio = live.buffer.subarray(0, size);
+      live.buffer = live.buffer.subarray(size);
+      live.bytes = undefined;
+      const pending = live.pending;
+      live.pending = undefined;
+      if (!pending)
+        continue;
+      if (audio.toString("ascii", 0, 4) !== "RIFF" || audio.toString("ascii", 8, 12) !== "WAVE")
+        pending.reject(new Error("Local Kokoro returned invalid WAV audio."));
+      else
+        pending.resolve(Buffer.from(audio));
+    }
+  };
+  const start = (command) => {
+    const child = spawnProcess(command.python, command.args, { stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
+    const live = { child, key: JSON.stringify([command.python, command.args.at(-1)]), buffer: Buffer.alloc(0), dead: false };
+    child.once("error", () => fail(live, new Error(CANNOT_START)));
+    child.once("close", () => fail(live, new Error(GENERATION_FAILED)));
+    child.stdin.on("error", () => {});
+    child.stdout.on("data", (part) => {
+      if (live.dead)
+        return;
+      live.buffer = Buffer.concat([live.buffer, part]);
+      consume(live);
+    });
+    current = live;
+    hold(live, false);
+    if (!exitHook) {
+      exitHook = true;
+      process.once("exit", () => {
+        if (current)
+          kill(current);
+      });
+    }
+    return live;
+  };
+  const ensure = (command) => {
+    const key = JSON.stringify([command.python, command.args.at(-1)]);
+    if (current && !current.dead && current.key === key && current.child.exitCode === null)
+      return current;
+    if (current)
+      kill(current);
+    return start(command);
+  };
+  const run = async (command, payload, signal) => {
+    signal.throwIfAborted();
+    stopIdle();
+    let live;
+    try {
+      live = ensure(command);
+    } catch {
+      armIdle();
+      throw new Error(CANNOT_START);
+    }
+    hold(live, true);
+    try {
+      return await new Promise((resolve, reject) => {
+        const abort = () => {
+          kill(live);
+          reject(signal.reason);
+          try {
+            hold(ensure(command), false);
+          } catch {}
+        };
+        signal.addEventListener("abort", abort, { once: true });
+        live.pending = {
+          resolve: (audio) => {
+            signal.removeEventListener("abort", abort);
+            resolve(audio);
+          },
+          reject: (error) => {
+            signal.removeEventListener("abort", abort);
+            reject(error);
+          }
+        };
+        live.child.stdin.write(JSON.stringify(payload) + `
+`);
+      });
+    } finally {
+      if (current === live)
+        hold(live, false);
+      if (current)
+        armIdle();
+    }
+  };
+  return {
+    request(command, payload, signal) {
+      const result = queue.then(() => run(command, payload, signal));
+      queue = result.catch(() => {});
+      return result;
+    },
+    close() {
+      stopIdle();
+      if (current)
+        kill(current);
+    },
+    get running() {
+      return !!current && !current.dead;
+    }
+  };
+}
+var sharedWorker = createLocalWorker();
+async function synthesizeLocalReadback(text, settings, signal, env = process.env, worker = sharedWorker) {
   const input = spokenText(text);
   if (!input)
     throw new Error("No text to read.");
@@ -80845,53 +81042,8 @@ async function synthesizeLocalReadback(text, settings, signal, env = process.env
   signal.throwIfAborted();
   if (!readbackStatus(env, settings.home).ready)
     throw new Error(READBACK_NOT_SET_UP);
-  const command = localReadbackCommand(env, settings.home);
-  return new Promise((resolve, reject) => {
-    const child = spawn(command.python, command.args, { stdio: ["pipe", "pipe", "ignore"], windowsHide: true, signal });
-    const abort = () => {
-      child.kill();
-      reject(signal.reason);
-    };
-    signal.addEventListener("abort", abort, { once: true });
-    if (signal.aborted)
-      abort();
-    const parts = [];
-    let size = 0;
-    let failure;
-    child.once("error", (error) => {
-      failure = error;
-      reject(signal.aborted ? signal.reason : new Error("Cannot start local Kokoro Python. Run `tercet readback setup`, or check KOKORO_HOME, readback.home and KOKORO_PYTHON."));
-    });
-    child.stdin.on("error", () => {});
-    child.stdout.on("data", (part) => {
-      size += part.length;
-      if (size > MAX_AUDIO) {
-        failure = new Error("Kokoro audio exceeds the 64 MB limit.");
-        child.kill();
-      } else
-        parts.push(part);
-    });
-    child.once("close", (code) => {
-      signal.removeEventListener("abort", abort);
-      if (signal.aborted) {
-        reject(signal.reason);
-        return;
-      }
-      if (failure || code !== 0) {
-        reject(new Error("Local Kokoro generation failed. Run `tercet readback setup` to repair the install, and check readback.voice."));
-        return;
-      }
-      const audio = Buffer.concat(parts);
-      if (audio.toString("ascii", 0, 4) !== "RIFF" || audio.toString("ascii", 8, 12) !== "WAVE") {
-        reject(new Error("Local Kokoro returned invalid WAV audio."));
-        return;
-      }
-      resolve(audio);
-    });
-    child.stdin.end(JSON.stringify({ text: input, voice: settings.voice, speed: settings.speed }));
-  });
+  return worker.request(localReadbackCommand(env, settings.home), { text: input, voice: settings.voice, speed: settings.speed }, signal);
 }
-var MAX_AUDIO = 64 * 1024 * 1024;
 async function synthesizeReadback(text, settings, signal, request = fetch) {
   const input = spokenText(text);
   if (!input)
@@ -81022,21 +81174,23 @@ async function playReadbackVia(audio, signal, host, via) {
     });
   });
 }
-function speechChunks(text, first = 300, rest = 700) {
+function speechChunks(text, first = 120, rest = 400) {
   const chunks = [];
-  let buffer = "";
-  for (const sentence of text.split(/(?<=[.!?])\s+|\n+/)) {
-    if (!sentence.trim())
-      continue;
-    const budget = chunks.length ? rest : first;
-    if (buffer && buffer.length + sentence.length >= budget) {
+  for (const paragraph of text.split(/\n\s*\n/)) {
+    let buffer = "";
+    for (const sentence of paragraph.split(/(?<=[.!?])\s+|\n+/)) {
+      if (!sentence.trim())
+        continue;
+      const budget = chunks.length ? rest : first;
+      if (buffer && buffer.length + 1 + sentence.length > budget) {
+        chunks.push(buffer);
+        buffer = sentence;
+      } else
+        buffer = buffer ? `${buffer} ${sentence}` : sentence;
+    }
+    if (buffer)
       chunks.push(buffer);
-      buffer = sentence;
-    } else
-      buffer = buffer ? `${buffer} ${sentence}` : sentence;
   }
-  if (buffer)
-    chunks.push(buffer);
   return chunks;
 }
 var SYNTHESIS_TIMEOUT = 2 * 60000;
@@ -82763,6 +82917,7 @@ function cheatSheet(bindings, available, targets) {
       title: "Transcript",
       rows: [
         { keys: "h j k l w b e", label: "Move" },
+        { keys: "/  n N", label: "Find in transcript, next / previous match" },
         { keys: "gg G Ctrl+d Ctrl+u", label: "Top, bottom, half page" },
         { keys: "v V", label: "Select, select lines" },
         { keys: "y yy", label: "Yank selection, yank line" },
@@ -82819,6 +82974,13 @@ var LAUNCHER_PLACEHOLDERS = {
 var RESERVED_TARGET_KEYS = ["Y", "T", "X", "F", "O", "G", "V"];
 var RESERVED_TARGET_NAMES = ["copy", "open", "tmux", "run", "send", "path", "read", "stop reading", "__readback"];
 var settingsTargetKeys = (settings) => Object.fromEntries(Object.entries(settings.targets).flatMap(([name, t]) => t.key ? [[t.key, name]] : []));
+function messageTagFor(tag, host) {
+  const template = host ? tag.ssh : tag.local;
+  if (!template)
+    return;
+  const client = host ? Object.hasOwn(tag.clients, host) ? tag.clients[host] : host : "";
+  return template.replaceAll("{client}", client) || undefined;
+}
 var defaultSettings = () => ({
   readback: { enabled: true, engine: "local", endpoint: "http://127.0.0.1:8880/v1/audio/speech", voice: "af_heart", speed: 1, home: "" },
   server: {},
@@ -82831,7 +82993,8 @@ var defaultSettings = () => ({
   commands: {},
   targets: {},
   spell: { enabled: true },
-  dictation: { language: "auto" }
+  dictation: { language: "auto" },
+  messageTag: { clients: {} }
 });
 
 class SettingsError extends Error {
@@ -83007,6 +83170,7 @@ var describe = (value) => {
 var expect = (wanted, ok) => (value, path, problem) => ok(value) ? value : problem(path, `expected ${wanted}, got ${describe(value)}`);
 var text2 = expect("a non-empty string", (v) => typeof v === "string" && v.trim() !== "");
 var bool = expect("true or false", (v) => typeof v === "boolean");
+var optionValue = expect("a non-empty string or true or false", (v) => typeof v === "boolean" || typeof v === "string" && v.trim() !== "");
 var oneOf = (options) => expect(`one of ${options.map((o) => JSON.stringify(o)).join(", ")}`, (v) => options.includes(v));
 var color = expect('a "#rrggbb" color', (v) => typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v));
 var command = expect("a program name or a non-empty list of arguments", (v) => typeof v === "string" && v.trim() !== "" || Array.isArray(v) && v.length > 0 && v.every((a) => typeof a === "string" && a !== ""));
@@ -83117,7 +83281,11 @@ var schema = struct({
     model: text2,
     mode: oneOf(RUNTIME_MODES),
     sendShortcut: oneOf(SEND_SHORTCUTS),
-    favorites: list(struct({ provider: text2, model: text2 })),
+    favorites: list(struct({
+      provider: text2,
+      model: text2,
+      options: record(/^[A-Za-z][\w.-]*$/, "option names use letters, digits, ., _ and -", optionValue)
+    })),
     sidebarWorkingShelf: bool,
     hints: bool
   }),
@@ -83149,6 +83317,11 @@ var schema = struct({
   dictation: struct({
     language: expect("a language code (2\u201316 characters)", (v) => typeof v === "string" && v.length >= 2 && v.length <= 16),
     recorder: template([])
+  }),
+  messageTag: struct({
+    local: text2,
+    ssh: text2,
+    clients: record(/^\S+$/, "client addresses have no spaces", text2)
   })
 });
 var expandPath = (path, home, dir) => path === "~" ? home : path.startsWith("~/") ? join2(home, path.slice(2)) : resolve(dir, path);
@@ -83180,7 +83353,8 @@ function parseSettings(source, path, where, warnings) {
     commands: { ...base.commands, ...raw.commands },
     targets: { ...base.targets, ...raw.targets },
     spell: { ...base.spell, ...raw.spell },
-    dictation: { ...base.dictation, ...raw.dictation }
+    dictation: { ...base.dictation, ...raw.dictation },
+    messageTag: { ...base.messageTag, ...raw.messageTag }
   };
   try {
     resolveKeymap(settings.keys, settingsTargetKeys(settings));
@@ -84483,7 +84657,7 @@ function cachedShots(shoot) {
 // src/main.tsx
 import { appendFile as appendFile2 } from "fs/promises";
 import { homedir as homedir7 } from "os";
-import { join as join9 } from "path";
+import { join as join10 } from "path";
 
 // src/terminal-lifecycle.ts
 var TERMINAL_RESET = "\x1B[?1000l\x1B[?1002l\x1B[?1003l\x1B[?1006l\x1B[?2004l\x1B[<u\x1B[?25h\x1B[?1049l";
@@ -132666,8 +132840,206 @@ function clientRpcRequiredScopes(method, input) {
   return Object.hasOwn(CLIENT_GUARDED_RPC_SCOPES, method) ? [CLIENT_GUARDED_RPC_SCOPES[method]] : [];
 }
 // src/client/platform.ts
-import { chmod, mkdir as mkdir4, readFile as readFile4, rename, writeFile as writeFile3 } from "fs/promises";
-import { dirname as dirname3 } from "path";
+import { chmod, mkdir as mkdir5, readFile as readFile5, rename as rename2, writeFile as writeFile4 } from "fs/promises";
+import { dirname as dirname4 } from "path";
+
+// src/client/favorites-file.ts
+import { randomUUID } from "crypto";
+import { mkdir as mkdir4, readFile as readFile4, rename, rm as rm3, writeFile as writeFile3 } from "fs/promises";
+import { basename, dirname as dirname3, join as join7 } from "path";
+var isObject4 = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+function readSettings(text4) {
+  let root;
+  try {
+    root = parseJsonc(text4).value;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const line = err.line;
+    throw new Error(`favorites: settings file is not valid JSON${line ? ` (line ${line})` : ""}: ${message}`);
+  }
+  if (!isObject4(root))
+    throw new Error("favorites: settings file root must be a JSON object");
+  const defaults = root.defaults;
+  if (defaults === undefined)
+    return [];
+  if (!isObject4(defaults))
+    throw new Error("favorites: defaults must be a JSON object");
+  const favorites = defaults.favorites;
+  if (favorites === undefined)
+    return [];
+  if (!Array.isArray(favorites))
+    throw new Error("favorites: defaults.favorites must be a list");
+  favorites.forEach((item, i) => {
+    if (!isObject4(item) || typeof item.provider !== "string" || typeof item.model !== "string")
+      throw new Error(`favorites: defaults.favorites[${i}] must have a provider and a model`);
+  });
+  return favorites;
+}
+function tokenize2(text4) {
+  const out = [];
+  let i = 0;
+  while (i < text4.length) {
+    const c2 = text4[i];
+    if (c2 === "/" && text4[i + 1] === "/") {
+      while (i < text4.length && text4[i] !== `
+`)
+        i++;
+    } else if (c2 === "/" && text4[i + 1] === "*") {
+      i = text4.indexOf("*/", i + 2) + 2;
+    } else if (/\s|\uFEFF/.test(c2)) {
+      i++;
+    } else if (c2 === '"') {
+      const start = i++;
+      while (text4[i] !== '"')
+        i += text4[i] === "\\" ? 2 : 1;
+      i++;
+      out.push({ kind: "string", start, end: i, value: JSON.parse(text4.slice(start, i)) });
+    } else if ("{}[]:,".includes(c2)) {
+      out.push({ kind: c2, start: i, end: ++i });
+    } else {
+      const start = i;
+      while (i < text4.length && !/[\s{}\[\]:,"]/.test(text4[i]))
+        i++;
+      out.push({ kind: "atom", start, end: i });
+    }
+  }
+  return out;
+}
+function skipValue(toks, k) {
+  if (toks[k].kind !== "{" && toks[k].kind !== "[")
+    return k + 1;
+  let depth = 0;
+  for (let j = k;; j++) {
+    const kind = toks[j].kind;
+    if (kind === "{" || kind === "[")
+      depth++;
+    else if (kind === "}" || kind === "]") {
+      depth--;
+      if (depth === 0)
+        return j + 1;
+    }
+  }
+}
+function objectAt(toks, openIdx) {
+  const items = [];
+  let j = openIdx + 1;
+  while (toks[j].kind !== "}") {
+    const keyTok = toks[j];
+    items.push({ key: keyTok.value, keyTok, valueIdx: j + 2 });
+    j = skipValue(toks, j + 2);
+    if (toks[j].kind === ",")
+      j++;
+  }
+  return { open: toks[openIdx], close: toks[j], items };
+}
+function lineIndent(text4, pos) {
+  const lineStart = pos === 0 ? 0 : text4.lastIndexOf(`
+`, pos - 1) + 1;
+  return /^[ \t]*/.exec(text4.slice(lineStart))[0];
+}
+function leadingIndent(text4, pos) {
+  const lineStart = pos === 0 ? 0 : text4.lastIndexOf(`
+`, pos - 1) + 1;
+  return /^[ \t]*$/.test(text4.slice(lineStart, pos)) ? lineIndent(text4, pos) : undefined;
+}
+function memberIndentOf(text4, obj, objIndent) {
+  const first = obj.items[0];
+  return (first && leadingIndent(text4, first.keyTok.start)) ?? `${objIndent}  `;
+}
+var formatOptions2 = (options2) => {
+  const entries3 = Object.entries(options2);
+  if (entries3.length === 0)
+    return "{}";
+  return `{ ${entries3.map(([k, v]) => `${JSON.stringify(k)}: ${JSON.stringify(v)}`).join(", ")} }`;
+};
+function formatEntry(entry) {
+  const parts2 = [`"provider": ${JSON.stringify(entry.provider)}`, `"model": ${JSON.stringify(entry.model)}`];
+  if (entry.options)
+    parts2.push(`"options": ${formatOptions2(entry.options)}`);
+  return `{ ${parts2.join(", ")} }`;
+}
+function formatList(list2, keyIndent, eol) {
+  if (list2.length === 0)
+    return "[]";
+  const inner = `${keyIndent}  `;
+  const body = list2.map((entry) => inner + formatEntry(entry)).join(`,${eol}`);
+  return `[${eol}${body}${eol}${keyIndent}]`;
+}
+function insertFirst(text4, obj, memberIndent, objIndent, memberText, eol) {
+  if (obj.items.length === 0) {
+    return text4.slice(0, obj.open.start) + `{${eol}${memberIndent}${memberText}${eol}${objIndent}}` + text4.slice(obj.close.end);
+  }
+  return text4.slice(0, obj.open.end) + `${eol}${memberIndent}${memberText},` + text4.slice(obj.open.end);
+}
+function patchFavorites(text4, entry, on2) {
+  if (text4.trim() === "") {
+    return on2 ? `{
+  "defaults": {
+    "favorites": ${formatList([entry], "    ", `
+`)}
+  }
+}
+` : text4;
+  }
+  const list2 = readSettings(text4);
+  const same2 = (f) => f.provider === entry.provider && f.model === entry.model;
+  const at = list2.findIndex(same2);
+  let next;
+  if (!on2) {
+    if (at < 0)
+      return text4;
+    next = list2.filter((f) => !same2(f));
+  } else if (at < 0) {
+    next = [...list2, entry];
+  } else {
+    next = list2.flatMap((f, i) => same2(f) ? i === at ? [entry] : [] : [f]);
+  }
+  const eol = text4.includes(`\r
+`) ? `\r
+` : `
+`;
+  const toks = tokenize2(text4);
+  const root = objectAt(toks, 0);
+  const rootIndent = lineIndent(text4, root.open.start);
+  const defaults = root.items.find((m) => m.key === "defaults");
+  if (!defaults) {
+    const mi = memberIndentOf(text4, root, rootIndent);
+    const block = `"defaults": {${eol}${mi}  "favorites": ${formatList(next, `${mi}  `, eol)}${eol}${mi}}`;
+    return insertFirst(text4, root, mi, rootIndent, block, eol);
+  }
+  const defaultsObj = objectAt(toks, defaults.valueIdx);
+  const defaultsIndent = lineIndent(text4, toks[defaults.valueIdx - 2].start);
+  const favorites = defaultsObj.items.find((m) => m.key === "favorites");
+  if (!favorites) {
+    const mi = memberIndentOf(text4, defaultsObj, defaultsIndent);
+    return insertFirst(text4, defaultsObj, mi, defaultsIndent, `"favorites": ${formatList(next, mi, eol)}`, eol);
+  }
+  const arrStart = toks[favorites.valueIdx].start;
+  const arrEnd = toks[skipValue(toks, favorites.valueIdx) - 1].end;
+  const keyIndent = lineIndent(text4, favorites.keyTok.start);
+  return text4.slice(0, arrStart) + formatList(next, keyIndent, eol) + text4.slice(arrEnd);
+}
+async function writeFavorite(path, entry, on2) {
+  const text4 = await readFile4(path, "utf8").catch((err) => {
+    if (err.code === "ENOENT")
+      return "";
+    throw err;
+  });
+  const next = patchFavorites(text4, entry, on2);
+  if (next !== text4) {
+    const dir = dirname3(path);
+    await mkdir4(dir, { recursive: true });
+    const tmp = join7(dir, `.${basename(path)}.${randomUUID()}.tmp`);
+    try {
+      await writeFile3(tmp, next, "utf8");
+      await rename(tmp, path);
+    } catch (err) {
+      await rm3(tmp, { force: true });
+      throw err;
+    }
+  }
+  return next.trim() === "" ? [] : readSettings(next);
+}
 
 // src/client/t3-command.ts
 import { existsSync } from "fs";
@@ -132675,29 +133047,29 @@ import { homedir as homedir3 } from "os";
 import { posix, win32 as win323 } from "path";
 function t3Folders(host) {
   const { env, home } = host;
-  const join7 = host.platform === "win32" ? win323.join : posix.join;
+  const join8 = host.platform === "win32" ? win323.join : posix.join;
   if (host.platform === "win32") {
     return [
-      env.APPDATA && join7(env.APPDATA, "npm"),
-      env.LOCALAPPDATA && join7(env.LOCALAPPDATA, "pnpm"),
-      env.LOCALAPPDATA && join7(env.LOCALAPPDATA, "Programs", "t3"),
-      join7(home, ".bun", "bin")
+      env.APPDATA && join8(env.APPDATA, "npm"),
+      env.LOCALAPPDATA && join8(env.LOCALAPPDATA, "pnpm"),
+      env.LOCALAPPDATA && join8(env.LOCALAPPDATA, "Programs", "t3"),
+      join8(home, ".bun", "bin")
     ].filter((folder2) => !!folder2);
   }
   return [
-    join7(home, ".local", "bin"),
-    join7(home, ".bun", "bin"),
-    join7(home, ".npm-global", "bin"),
-    join7(home, ".local", "share", "mise", "shims"),
-    join7(home, ".local", "share", "pnpm"),
+    join8(home, ".local", "bin"),
+    join8(home, ".bun", "bin"),
+    join8(home, ".npm-global", "bin"),
+    join8(home, ".local", "share", "mise", "shims"),
+    join8(home, ".local", "share", "pnpm"),
     "/opt/homebrew/bin",
     "/usr/local/bin"
   ];
 }
 function t3Candidates(host) {
-  const join7 = host.platform === "win32" ? win323.join : posix.join;
+  const join8 = host.platform === "win32" ? win323.join : posix.join;
   const names = host.platform === "win32" ? ["t3.cmd", "t3.exe"] : ["t3"];
-  return t3Folders(host).flatMap((folder2) => names.map((name) => join7(folder2, name)));
+  return t3Folders(host).flatMap((folder2) => names.map((name) => join8(folder2, name)));
 }
 function findT3(setting, host) {
   if (setting) {
@@ -137058,7 +137430,7 @@ function joinSocketFrameParts(socket) {
   return make33({
     reader: map7(socket.reader, (reader) => {
       let pending = "";
-      const join7 = (frame) => {
+      const join8 = (frame) => {
         if (typeof frame !== "string")
           return frame;
         if (frame.startsWith(PART_PREFIX)) {
@@ -137073,7 +137445,7 @@ function joinSocketFrameParts(socket) {
       };
       return {
         upgrade: reader.upgrade,
-        pull: map7(reader.pull, map4(join7))
+        pull: map7(reader.pull, map4(join8))
       };
     }),
     writer: socket.writer
@@ -144542,7 +144914,7 @@ function webThreadUrl(url, threadId) {
 // src/client/platform.ts
 async function readOptional(path) {
   try {
-    return await readFile4(path, "utf8");
+    return await readFile5(path, "utf8");
   } catch (error2) {
     if (error2.code === "ENOENT")
       return;
@@ -144577,7 +144949,7 @@ function tokenIssueArgs(config) {
     ...AuthStandardClientScopes.flatMap((scope3) => ["--scope", scope3])
   ];
 }
-function platform(config) {
+function platform(config, sshHost) {
   const draftPath = `${config.tokenFile}.drafts-${Bun.hash(config.url).toString(16)}.json`;
   const git3 = (token, operation, input) => suspend2(() => {
     try {
@@ -144608,6 +144980,15 @@ function platform(config) {
     },
     answerSecret: (token, input) => answerSecret(config.url, token, input),
     modelFavorites: async () => decodeUnknownSync2(ModelFavorites)(config.settings.defaults.favorites),
+    favoriteEntries: async () => config.settings.defaults.favorites,
+    saveFavorite: async (entry, on2, seed) => {
+      if (config.settings.defaults.favorites.length === 0)
+        for (const seeded of seed ?? [])
+          await writeFavorite(config.settingsPath, seeded, true);
+      const favorites = await writeFavorite(config.settingsPath, entry, on2);
+      config.settings.defaults.favorites = favorites;
+      return favorites;
+    },
     search: (token, query2) => searchThreads(config.url, token, query2),
     drafts: {
       async read() {
@@ -144617,13 +144998,22 @@ function platform(config) {
         return Object.fromEntries(Object.entries(parsed).filter((entry) => typeof entry[1] === "string"));
       },
       async write(drafts) {
-        await mkdir4(dirname3(draftPath), { recursive: true, mode: 448 });
+        await mkdir5(dirname4(draftPath), { recursive: true, mode: 448 });
         const temporary = `${draftPath}.${process.pid}.tmp`;
-        await writeFile3(temporary, JSON.stringify(drafts), { mode: 384 });
-        await rename(temporary, draftPath);
+        await writeFile4(temporary, JSON.stringify(drafts), { mode: 384 });
+        await rename2(temporary, draftPath);
       }
     },
     sendShortcut: async () => config.settings.defaults.sendShortcut,
+    messageTag: async () => {
+      const tag2 = config.settings.messageTag;
+      if (!tag2.local && !tag2.ssh)
+        return;
+      const host = tag2.ssh ? await sshHost?.().catch(() => {
+        return;
+      }) : undefined;
+      return messageTagFor(tag2, host);
+    },
     sidebarWorkingShelf: async () => config.settings.defaults.sidebarWorkingShelf,
     showHints: async () => config.settings.defaults.hints,
     newThreadDefaults: {
@@ -144665,11 +145055,11 @@ function platform(config) {
       if (exit3 !== 0 || !token.trim())
         throw new Error(`Token issuance failed (${t3.path}); check that t3 runs and --base-dir`);
       const credential = issuedToken(token);
-      await mkdir4(dirname3(config.tokenFile), { recursive: true, mode: 448 });
+      await mkdir5(dirname4(config.tokenFile), { recursive: true, mode: 448 });
       const temporary = `${config.tokenFile}.${process.pid}.tmp`;
-      await writeFile3(temporary, credential, { mode: 384 });
+      await writeFile4(temporary, credential, { mode: 384 });
       await chmod(temporary, 384);
-      await rename(temporary, config.tokenFile);
+      await rename2(temporary, config.tokenFile);
       return credential;
     }),
     wake: () => tryPromise2(async () => {
@@ -150531,18 +150921,20 @@ function deriveSubagentElapsedMs(agent, nowMs) {
 }
 
 // src/client/model-defaults.ts
-function selectionFor(provider2, model3, previous) {
+function selectionFor(provider2, model3, previous, favoriteOptions) {
   return {
     instanceId: provider2.instanceId,
     model: model3.slug,
     options: (model3.capabilities?.optionDescriptors ?? []).flatMap((d) => {
       const old = previous?.instanceId === provider2.instanceId && previous.model === model3.slug ? previous.options?.find((o) => o.id === d.id)?.value : undefined;
+      const favorite = favoriteOptions?.[d.id];
       let value4;
       if (d.type === "boolean") {
-        value4 = typeof old === "boolean" ? old : d.id === "fastMode" ? false : d.currentValue;
+        value4 = typeof old === "boolean" ? old : typeof favorite === "boolean" ? favorite : d.id === "fastMode" ? false : d.currentValue;
       } else {
         const preferred = ["reasoningEffort", "effort", "variant"].includes(d.id) ? "high" : d.id === "serviceTier" ? "default" : undefined;
-        value4 = typeof old === "string" && d.options.some((o) => o.id === old) ? old : d.options.find((o) => o.id === preferred)?.id ?? d.currentValue ?? d.options.find((o) => o.isDefault)?.id;
+        const fromFavorite = typeof favorite === "string" && d.options.some((o) => o.id === favorite) ? favorite : undefined;
+        value4 = typeof old === "string" && d.options.some((o) => o.id === old) ? old : fromFavorite ?? d.options.find((o) => o.id === preferred)?.id ?? d.currentValue ?? d.options.find((o) => o.isDefault)?.id;
       }
       return value4 === undefined ? [] : [{ id: d.id, value: value4 }];
     })
@@ -152945,6 +153337,23 @@ function resolveModelPreferences(settings5, legacy = {}) {
   };
 }
 // src/client/model-picker.tsx
+function effectiveFavorites(entries3, resolved) {
+  return entries3.length > 0 ? [...entries3] : resolved.map((f) => ({ provider: f.provider, model: f.model }));
+}
+function favoriteEntry(entries3, provider2, model3) {
+  return entries3.find((e) => e.provider === provider2 && e.model === model3);
+}
+function favoriteSuffix(entry) {
+  const values2 = Object.values(entry?.options ?? {}).filter((v) => v !== false).map(String);
+  return values2.length ? ` \xB7 ${values2.join("/")}` : "";
+}
+function optionValues(selection) {
+  return Object.fromEntries((selection.options ?? []).map((o) => [o.id, o.value]));
+}
+async function saveFavoriteEdit(boundary, selection, on2, seed) {
+  const base = { provider: selection.instanceId, model: selection.model };
+  return boundary.saveFavorite?.(on2 ? { ...base, options: optionValues(selection) } : base, on2, seed);
+}
 function catalogRows(providers, favorites, query2) {
   const rows = providers.flatMap((provider2) => provider2.models.map((model3) => ({
     provider: provider2,
@@ -152972,28 +153381,37 @@ function ModelPicker({
   const id2 = useClientAtom(client, client.selectedThreadId);
   const thread = snapshot2?.threads.find((t) => t.id === id2);
   const [favorites, setFavorites] = import_react43.useState([]);
+  const [entries3, setEntries] = import_react43.useState([]);
   const [error2, setError] = import_react43.useState("");
+  const [notice, setNotice] = import_react43.useState("");
   const [busy, setBusy] = import_react43.useState(false);
   const [query2, setQuery] = import_react43.useState("");
   const [filtering, setFiltering] = import_react43.useState(false);
   const [cursor, setCursor] = import_react43.useState(0);
+  const [editing, setEditing] = import_react43.useState(false);
   const [selection, setSelection] = import_react43.useState(effort ? thread?.modelSelection ?? client.registry.get(client.newModelSelection) ?? undefined : undefined);
   const [mode2, setMode] = import_react43.useState(thread?.runtimeMode ?? client.registry.get(client.newRuntimeMode) ?? "approval-required");
   import_react43.useEffect(() => {
     let stale = false;
+    const fail16 = () => {
+      if (!stale)
+        setError("Favorites could not be loaded");
+    };
     client.boundary.modelFavorites?.().then((value4) => {
       if (!stale)
         setFavorites(value4);
-    }).catch(() => {
+    }).catch(fail16);
+    client.boundary.favoriteEntries?.().then((value4) => {
       if (!stale)
-        setError("Favorites could not be loaded");
-    });
+        setEntries(value4);
+    }).catch(fail16);
     return () => {
       stale = true;
     };
   }, [client]);
   const preferences = useClientAtom(client, client.modelPreferences);
-  const rows = catalogRows(providers, resolveModelPreferences(preferences, { favorites }).favorites, query2);
+  const favoriteList = effectiveFavorites(entries3, resolveModelPreferences(preferences, { favorites }).favorites);
+  const rows = catalogRows(providers, favoriteList, query2);
   const provider2 = providers.find((p) => p.instanceId === selection?.instanceId);
   const model3 = provider2?.models.find((m) => m.slug === selection?.model);
   const descriptors = model3?.capabilities?.optionDescriptors ?? [];
@@ -153003,7 +153421,10 @@ function ModelPicker({
     "auto",
     "full-access"
   ];
-  const index3 = Math.min(cursor, Math.max(0, (selection ? descriptors.length + 3 : rows.length) - 1));
+  const pageRows = selection ? descriptors.length + 3 : rows.length;
+  const index3 = Math.min(cursor, Math.max(0, pageRows - 1));
+  const isFavorite = !!selection && favoriteList.some((f) => f.provider === selection.instanceId && f.model === selection.model);
+  const suffixOf = (row) => favoriteSuffix(favoriteEntry(entries3, row.provider.instanceId, row.model.slug));
   function choose(row) {
     if (busy)
       return;
@@ -153011,7 +153432,8 @@ function ModelPicker({
       setError("Provider unavailable or disabled");
       return;
     }
-    const chosen = selectionFor(row.provider, row.model);
+    const entry = favoriteEntry(entries3, row.provider.instanceId, row.model.slug);
+    const chosen = selectionFor(row.provider, row.model, undefined, entry?.options);
     const runtimeMode = defaultRuntimeMode(row.provider);
     if (!effort) {
       apply2(chosen, runtimeMode, row.provider, row.model);
@@ -153022,6 +153444,46 @@ function ModelPicker({
     setCursor(0);
     setQuery("");
     setError("");
+    setNotice("");
+  }
+  function editFavorite(row) {
+    if (busy)
+      return;
+    const entry = favoriteEntry(entries3, row.provider.instanceId, row.model.slug);
+    setSelection(selectionFor(row.provider, row.model, undefined, entry?.options));
+    setEditing(true);
+    setCursor(0);
+    setQuery("");
+    setError("");
+    setNotice("");
+  }
+  function leaveOptions() {
+    setSelection(undefined);
+    setEditing(false);
+    setCursor(0);
+  }
+  async function saveFavorite(chosen, on2) {
+    if (busy)
+      return;
+    if (!client.boundary.saveFavorite) {
+      setError("Favorites cannot be saved here");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const seed = favoriteList.map((f) => ({ provider: f.provider, model: f.model }));
+      const saved = await saveFavoriteEdit(client.boundary, chosen, on2, seed);
+      if (saved)
+        setEntries(saved);
+      const name = model3?.name ?? chosen.model;
+      setNotice(on2 ? `Saved: ${name} favorite defaults` : `Removed: ${name} from favorites`);
+    } catch {
+      setError("Favorite could not be saved");
+    } finally {
+      setBusy(false);
+    }
   }
   async function activate(position) {
     if (busy)
@@ -153041,11 +153503,17 @@ function ModelPicker({
           ...selection,
           options: [...(selection.options ?? []).filter((o) => o.id !== d.id), { id: d.id, value: value4 }]
         });
+    } else if (editing) {
+      if (position === descriptors.length)
+        await saveFavorite(selection, !isFavorite);
+      else if (position === descriptors.length + 1)
+        await saveFavorite(selection, true);
+      else
+        leaveOptions();
     } else if (position === descriptors.length) {
       setMode(modes[(modes.indexOf(mode2) + 1) % modes.length] ?? "approval-required");
     } else if (position === descriptors.length + 1) {
-      setSelection(undefined);
-      setCursor(0);
+      leaveOptions();
     } else {
       if (!provider2 || !model3 || !selectable(provider2)) {
         setError("Model unavailable; choose an available model");
@@ -153109,23 +153577,20 @@ function ModelPicker({
       if (name === "return" || name === "l" || name === "right")
         activate(index3);
       else if (name === "h" || name === "left") {
-        if (selection) {
-          setSelection(undefined);
-          setCursor(0);
-        }
+        if (selection)
+          leaveOptions();
       } else
-        setCursor(name === "up" || name === "k" ? Math.max(0, index3 - 1) : Math.min((selection ? descriptors.length + 3 : rows.length) - 1, index3 + 1));
+        setCursor(name === "up" || name === "k" ? Math.max(0, index3 - 1) : Math.min(pageRows - 1, index3 + 1));
     }
   });
+  const favoriteLabel = isFavorite ? "Favorite: \u2605 yes" : "Favorite: no";
   const labels2 = selection ? [
     ...descriptors.map((d) => `${d.label}: ${String(selection.options?.find((o) => o.id === d.id)?.value ?? d.currentValue ?? "default")}`),
-    `Runtime: ${mode2}`,
-    "[ Choose another model ]",
-    "[ Apply selection ]"
+    ...editing ? [favoriteLabel, "[ Save as favorite defaults ]", "[ Choose another model ]"] : [`Runtime: ${mode2}`, "[ Choose another model ]", "[ Apply selection ]"]
   ] : [];
   const notices = selection ? [] : providers.flatMap((p) => {
-    const notice = formatProviderUpdateRequiredNotice(p, query2);
-    return notice ? [{ id: p.instanceId, notice }] : [];
+    const notice2 = formatProviderUpdateRequiredNotice(p, query2);
+    return notice2 ? [{ id: p.instanceId, notice: notice2 }] : [];
   });
   const boxHeight = Math.max(8, height - 6);
   const chrome = 2 + 1 + 2 + (selection ? 0 : 3);
@@ -153145,7 +153610,7 @@ function ModelPicker({
     children: [
       /* @__PURE__ */ import_jsx_runtime.jsx("text", {
         fg: theme.accent,
-        children: selection ? `Effort and options \xB7 ${modelIcon(provider2?.driver, selection.model).glyph} ${selection.model}` : effort ? "Effort \xB7 choose model" : "Model \xB7 Favorites first"
+        children: selection ? `${editing ? "Favorite" : "Effort and options"} \xB7 ${modelIcon(provider2?.driver, selection.model).glyph} ${selection.model}` : effort ? "Effort \xB7 choose model" : "Model \xB7 Favorites first"
       }),
       !selection && /* @__PURE__ */ import_jsx_runtime.jsx("input", {
         focused: filtering,
@@ -153193,6 +153658,10 @@ function ModelPicker({
             onMouseUp: (e) => {
               if (e.button === 0)
                 choose(row);
+              else if (e.button === 2) {
+                e.preventDefault?.();
+                editFavorite(row);
+              }
             },
             children: [
               index3 === start + offset ? "\u203A " : "  ",
@@ -153207,6 +153676,10 @@ function ModelPicker({
               " \xB7",
               " ",
               row.model.name,
+              /* @__PURE__ */ import_jsx_runtime.jsx("span", {
+                fg: theme.muted,
+                children: suffixOf(row)
+              }),
               selectable(row.provider) ? "" : " (unavailable)"
             ]
           }, `${row.provider.instanceId}:${row.model.slug}`)),
@@ -153221,8 +153694,8 @@ function ModelPicker({
         ]
       }),
       /* @__PURE__ */ import_jsx_runtime.jsx("text", {
-        fg: theme.red,
-        children: error2 || (busy ? "Applying\u2026" : "j/k or \u2191/\u2193 select \xB7 l/Enter choose/apply \xB7 h back")
+        fg: error2 || !notice ? theme.red : theme.green,
+        children: error2 || (busy ? editing ? "Saving\u2026" : "Applying\u2026" : notice || (editing ? "j/k or \u2191/\u2193 select \xB7 l/Enter toggle/save \xB7 h back" : "j/k or \u2191/\u2193 select \xB7 l/Enter choose \xB7 right-click favorite \xB7 h back"))
       }),
       /* @__PURE__ */ import_jsx_runtime.jsx("text", {
         fg: theme.accent,
@@ -156032,6 +156505,11 @@ function completionTrigger(text5, cursor) {
   const match10 = /(?:^|\s)([@/:])([^\s]*)$/.exec(text5.slice(0, cursor));
   return match10 ? { prefix: match10[1], query: match10[2], start: cursor - match10[2].length - 1, end: cursor } : null;
 }
+function tagMessage(tag2, text5) {
+  if (!tag2 || text5.trimStart().startsWith("<from "))
+    return text5;
+  return text5.trim() ? `${tag2} ${text5}` : tag2;
+}
 function createComposer(client, storage) {
   const images = exports_Atom.make({}).pipe(exports_Atom.keepAlive);
   const drafts = exports_Atom.make({}).pipe(exports_Atom.keepAlive);
@@ -156058,8 +156536,8 @@ function createComposer(client, storage) {
       client.registry.set(error2, "Draft could not be saved.");
     });
   }
-  async function command2(command3, prepare) {
-    const interrupt6 = command3.type === "run.interrupt";
+  async function command2(build3, prepare) {
+    const interrupt6 = typeof build3 !== "function" && build3.type === "run.interrupt";
     if (!interrupt6 && client.registry.get(busy))
       return false;
     if (!interrupt6)
@@ -156067,7 +156545,7 @@ function createComposer(client, storage) {
     client.registry.set(error2, "");
     try {
       await prepare?.();
-      await client.dispatch(command3);
+      await client.dispatch(typeof build3 === "function" ? await build3() : build3);
       return true;
     } catch {
       client.registry.set(error2, "Command failed. Draft kept; retry when connected.");
@@ -156144,25 +156622,32 @@ function createComposer(client, storage) {
       const base = { commandId: CommandId.make(crypto.randomUUID()), threadId: id2 };
       const attachments = [];
       const unnamed = isUnnamedThread(client, id2);
-      const ok = await command2(edit ? { ...base, type: "queued-run.edit", runId: edit, text: text5 } : {
-        ...base,
-        type: "message.dispatch",
-        messageId: MessageId.make(crypto.randomUUID()),
-        text: text5,
-        attachments,
-        ...unnamed ? {
-          titleSeed: deriveThreadTitleSeed({
-            text: text5,
-            attachments: pending.map((image2) => ({
-              type: image2.upload?.type ?? "image",
-              name: image2.upload?.name ?? "clipboard.png"
-            }))
-          })
-        } : {},
-        createdBy: "user",
-        creationSource: "server",
-        ...mode2 === "steer" ? { deliveryIntent: "steer" } : {},
-        dispatchMode: { type: mode2 === "queue" ? "queue_after_active" : "start_immediately" }
+      const ok = await command2(edit ? { ...base, type: "queued-run.edit", runId: edit, text: text5 } : async () => {
+        const tag2 = await client.boundary.messageTag?.().catch(() => {
+          return;
+        });
+        return {
+          ...base,
+          type: "message.dispatch",
+          messageId: MessageId.make(crypto.randomUUID()),
+          text: tagMessage(tag2, text5),
+          attachments,
+          ...unnamed ? {
+            titleSeed: deriveThreadTitleSeed({
+              text: text5,
+              attachments: pending.map((image2) => ({
+                type: image2.upload?.type ?? "image",
+                name: image2.upload?.name ?? "clipboard.png"
+              }))
+            })
+          } : {},
+          createdBy: "user",
+          creationSource: "server",
+          ...mode2 === "steer" ? { deliveryIntent: "steer" } : {},
+          dispatchMode: {
+            type: mode2 === "queue" ? "queue_after_active" : "start_immediately"
+          }
+        };
       }, async () => {
         for (const image2 of pending) {
           image2.uploaded ??= await client.uploadImage(image2.bytes, image2.upload);
@@ -157730,6 +158215,18 @@ function toolOutputImageBlocks(value4) {
       break;
   }
   return blocks;
+}
+function omitToolOutputImageData(value4) {
+  const omit4 = (block) => {
+    const image2 = readToolOutputImage(block);
+    return image2?.data === undefined ? block : { type: "image", mimeType: image2.mimeType };
+  };
+  if (Array.isArray(value4))
+    return value4.map(omit4);
+  if (isObject2(value4) && Array.isArray(value4.content)) {
+    return { ...value4, content: value4.content.map(omit4) };
+  }
+  return omit4(value4);
 }
 
 // vendor/t3/packages/client-runtime/src/work-log/itemDetail.ts
@@ -159747,6 +160244,39 @@ function cellsOf(row) {
 }
 var isText2 = (row) => !!row && !row.separator && !row.chrome;
 var lineKey = (row) => row.id.slice(0, row.id.lastIndexOf(":"));
+function transcriptMatches(rows, query2) {
+  const hits = [];
+  if (!query2)
+    return hits;
+  for (let row = 0;row < rows.length; ) {
+    const first = row;
+    if (!isText2(rows[row])) {
+      row++;
+      continue;
+    }
+    const key5 = lineKey(rows[row]);
+    let text5 = "";
+    const ends = [];
+    while (isText2(rows[row]) && lineKey(rows[row]) === key5) {
+      text5 += rows[row++].spans.map((span) => span.text).join("");
+      ends.push(text5.length);
+    }
+    let piece = 0;
+    const position = (offset) => {
+      while (ends[piece] <= offset)
+        piece++;
+      const row2 = first + piece;
+      const within = offset - (ends[piece - 1] ?? 0);
+      let units = 0;
+      const col = cellsOf(rows[row2]).findIndex((cell) => (units += cell.length) > within);
+      return { row: row2, col };
+    };
+    for (let at = text5.indexOf(query2);at >= 0; at = text5.indexOf(query2, at + query2.length)) {
+      hits.push({ start: position(at), end: position(at + query2.length - 1) });
+    }
+  }
+  return hits;
+}
 function firstText(rows) {
   return rows.findIndex(isText2);
 }
@@ -160196,10 +160726,14 @@ function TranscriptViewport({
   const [, repaint] = import_react55.useState(0);
   const rowIndex = (id3) => anchorIndex(rows, id3, 1);
   const posOf = (at) => at && rows.length ? { row: rowIndex(at.id), col: at.col } : undefined;
+  const [matched, setMatched] = import_react55.useState();
+  const [matchLabel, setMatchLabel] = import_react55.useState("");
   const put3 = (next2, sticky = false) => {
     const row = rows[next2.row];
     if (!row)
       return;
+    setMatched(undefined);
+    setMatchLabel("");
     setTarget(row.target);
     vim.current.cursor = { id: row.id, col: next2.col };
     if (!sticky)
@@ -160231,9 +160765,35 @@ function TranscriptViewport({
     menu?.items[0]?.run();
     setMenu(undefined);
   };
+  const searchDraft = import_react55.useRef("");
+  const [searching, setSearching] = import_react55.useState(false);
+  const [query2, setQuery] = import_react55.useState("");
+  import_react55.useEffect(() => {
+    if (!enabled || !keyboardEnabled)
+      setSearching(false);
+  }, [enabled, keyboardEnabled]);
+  const jumpMatch = (term, backwards) => {
+    const hits = transcriptMatches(measuredRows, term);
+    setMatched(undefined);
+    if (!hits.length) {
+      setMatchLabel(`No match for /${term}`);
+      return;
+    }
+    const from = posOf(vim.current.cursor) ?? { row: start, col: -1 };
+    const compare3 = (pos) => pos.row - from.row || pos.col - from.col;
+    let index3 = backwards ? hits.findLastIndex((hit2) => compare3(hit2.start) < 0) : hits.findIndex((hit2) => compare3(hit2.start) > 0);
+    if (index3 < 0)
+      index3 = backwards ? hits.length - 1 : 0;
+    const hit = hits[index3];
+    put3(hit.start);
+    setMatched({ ...hit, firstRow: measuredRows[hit.start.row], lastRow: measuredRows[hit.end.row] });
+    setMatchLabel(`/${term} \xB7 ${index3 + 1}/${hits.length}`);
+  };
   const targetActions = targetKeys(effects);
   useKeyboard((key5) => {
     if (!enabled || !keyboardEnabled || key5.meta || key5.defaultPrevented)
+      return;
+    if (searching)
       return;
     if (menu) {
       if (key5.name === "escape")
@@ -160260,6 +160820,17 @@ function TranscriptViewport({
         return;
     }
     const ch = key5.ctrl ? `C-${key5.name}` : /^[\x21-\x7e]$/.test(key5.sequence) ? key5.sequence : key5.name;
+    if (ch === "/" || (ch === "n" || ch === "N") && query2) {
+      key5.preventDefault();
+      leaveVisual();
+      v.pending = undefined;
+      if (ch === "/") {
+        searchDraft.current = "";
+        flushSync2(() => setSearching(true));
+      } else
+        jumpMatch(query2, ch === "N");
+      return;
+    }
     if (ch === "R" && effects?.readback && !Object.hasOwn(targetActions, ch)) {
       const row = v.cursor ? rows[posOf(v.cursor).row] : rows.slice(start, start + viewport).findLast((row2) => !!row2.target);
       const item = items.find((item2) => String(item2.id) === (row ? rowMessage(row) : ""));
@@ -160522,7 +161093,8 @@ function TranscriptViewport({
                 row
               }, row.id);
             const index3 = start + offset;
-            const columns = range2 && selectedColumns(rows, range2, index3);
+            const mark2 = range2 ?? (matched && matched.firstRow === rows[matched.start.row] && matched.lastRow === rows[matched.end.row] ? matched : undefined);
+            const columns = mark2 && selectedColumns(rows, mark2, index3);
             const cells = /* @__PURE__ */ import_jsx_runtime.jsx(Row, {
               row,
               from: columns?.[0],
@@ -160631,31 +161203,69 @@ function TranscriptViewport({
           })
         ]
       }),
-      /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
+      /* @__PURE__ */ import_jsx_runtime.jsx("box", {
         height: 1,
         flexDirection: "row",
-        children: [
-          (history?.hasMoreHistory || history?.error || history?.loading) && /* @__PURE__ */ import_jsx_runtime.jsx("box", {
-            onMouseUp: (event) => {
-              if (enabled && event.button === 0)
-                loadEarlier?.();
-            },
-            children: /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+        children: searching ? /* @__PURE__ */ import_jsx_runtime.jsxs(import_jsx_runtime.Fragment, {
+          children: [
+            /* @__PURE__ */ import_jsx_runtime.jsx("text", {
               fg: theme.accent,
-              children: history?.loading ? "Loading earlier\u2026 " : history?.error ?? "[p Earlier] \xB7 "
+              children: "/"
+            }),
+            /* @__PURE__ */ import_jsx_runtime.jsx("input", {
+              id: "transcript-search",
+              focused: true,
+              flexGrow: 1,
+              placeholder: "Find in loaded transcript",
+              onKeyDown: (key5) => {
+                if (key5.name === "escape") {
+                  key5.preventDefault();
+                  setSearching(false);
+                }
+              },
+              onInput: (value4) => {
+                searchDraft.current = value4;
+              },
+              onSubmit: () => {
+                const term = searchDraft.current || query2;
+                setSearching(false);
+                setQuery(term);
+                if (term)
+                  jumpMatch(term, false);
+              }
             })
-          }),
-          /* @__PURE__ */ import_jsx_runtime.jsx("box", {
-            onMouseUp: (event) => {
-              if (enabled && event.button === 0)
-                setAnchor(null);
-            },
-            children: /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+          ]
+        }) : /* @__PURE__ */ import_jsx_runtime.jsxs(import_jsx_runtime.Fragment, {
+          children: [
+            matchLabel && /* @__PURE__ */ import_jsx_runtime.jsxs("text", {
               fg: theme.accent,
-              children: modeLabel + (anchor ? "[End Follow tail]" : "Following tail") + (actions.size ? " \xB7 {/} work \xB7 Enter expand" : "")
+              children: [
+                matchLabel,
+                " \xB7 "
+              ]
+            }),
+            (history?.hasMoreHistory || history?.error || history?.loading) && /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+              onMouseUp: (event) => {
+                if (enabled && event.button === 0)
+                  loadEarlier?.();
+              },
+              children: /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+                fg: theme.accent,
+                children: history?.loading ? "Loading earlier\u2026 " : history?.error ?? "[p Earlier] \xB7 "
+              })
+            }),
+            /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+              onMouseUp: (event) => {
+                if (enabled && event.button === 0)
+                  setAnchor(null);
+              },
+              children: /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+                fg: theme.accent,
+                children: modeLabel + (anchor ? "[End Follow tail]" : "Following tail") + (actions.size ? " \xB7 {/} work \xB7 Enter expand" : "")
+              })
             })
-          })
-        ]
+          ]
+        })
       }),
       menu && /* @__PURE__ */ import_jsx_runtime.jsxs(import_jsx_runtime.Fragment, {
         children: [
@@ -160695,7 +161305,10 @@ function ThreadTranscript({
   openAgent,
   threadId
 }) {
+  const renderer = useRenderer();
   useKeyboard((key5) => {
+    if (renderer.currentFocusedRenderable?.id === "transcript-search")
+      return;
     if (enabled && keyboardEnabled && key5.name === "r")
       client.retry();
   });
@@ -160826,10 +161439,130 @@ ${detail.message}` } : message;
 }
 
 // src/client/frame.tsx
-var import_react60 = __toESM(require_react(), 1);
+var import_react61 = __toESM(require_react(), 1);
+
+// src/client/context-content.ts
+function textBytes(text5) {
+  return text5 ? Buffer.byteLength(text5, "utf8") : 0;
+}
+function valueBytes(value4) {
+  return textBytes(typeof value4 === "string" ? value4 : JSON.stringify(value4 ?? undefined));
+}
+var estimateTokens = (bytes2) => Math.ceil(bytes2 / 4);
+function toolContent(item) {
+  switch (item.type) {
+    case "command_execution":
+      return {
+        name: "Shell commands",
+        input: textBytes(item.input),
+        output: item.outputOmitted ? 0 : textBytes(turnItemOutputText(item)),
+        incomplete: turnItemNeedsDetailFetch(item)
+      };
+    case "dynamic_tool": {
+      const input = item.input;
+      const summarized = typeof input === "object" && input !== null && "truncated" in input && input.truncated === true && "summary" in input && typeof input.summary === "string";
+      const output = item.outputOmitted ? null : turnItemOutputText({
+        ...item,
+        output: omitToolOutputImageData(item.output)
+      });
+      return {
+        name: item.toolName?.replace(/[\p{Cc}\p{Cf}]/gu, " ").trim() || "Unnamed tools",
+        input: summarized ? 0 : valueBytes(input),
+        output: textBytes(output),
+        incomplete: turnItemNeedsDetailFetch(item)
+      };
+    }
+    case "file_search":
+    case "web_search":
+      return {
+        name: item.type === "file_search" ? "File search" : "Web search",
+        input: textBytes(item.type === "file_search" ? item.pattern : item.patterns?.join(`
+`)),
+        output: textBytes(turnItemOutputText(item)),
+        incomplete: false
+      };
+    case "file_change":
+      return {
+        name: "File edits",
+        input: item.diffStr ? textBytes(item.diffStr) : textBytes(item.oldStr) + textBytes(item.newStr),
+        output: 0,
+        incomplete: !item.diffStr && !item.oldStr && !item.newStr
+      };
+    case "subagent":
+      return {
+        name: "Subagent messages",
+        input: textBytes(item.prompt),
+        output: textBytes(item.result),
+        incomplete: item.promptOmitted === true || item.resultOmitted === true
+      };
+    default:
+      return null;
+  }
+}
+function contextContentOf(projection, activeProviderThreadId, hasMoreHistory) {
+  if (!activeProviderThreadId)
+    return null;
+  const providerByRun = new Map(projection.runs.map((run3) => [run3.id, run3.providerThreadId]));
+  const items = projection.visibleTurnItems.flatMap(({ item, visibility }) => {
+    if (visibility !== "local")
+      return [];
+    const provider2 = item.type === "handoff" ? item.toProviderThreadId : item.providerThreadId ?? (item.runId && providerByRun.get(item.runId));
+    return provider2 === activeProviderThreadId ? [item] : [];
+  });
+  const lastCompaction = items.findLastIndex((item) => item.type === "compaction" && item.status === "completed");
+  const bytes2 = {
+    "Tool arguments": 0,
+    "Tool results": 0,
+    "User messages": 0,
+    "Assistant messages": 0,
+    "Visible reasoning": 0,
+    "Plans and summaries": 0
+  };
+  const tools = new Map;
+  let missingToolDetails = 0;
+  for (const item of items.slice(Math.max(0, lastCompaction))) {
+    const tool2 = toolContent(item);
+    if (tool2) {
+      bytes2["Tool arguments"] += tool2.input;
+      bytes2["Tool results"] += tool2.output;
+      if (tool2.incomplete)
+        missingToolDetails++;
+      const total = tools.get(tool2.name) ?? { name: tool2.name, bytes: 0, calls: 0 };
+      total.bytes += tool2.input + tool2.output;
+      total.calls++;
+      tools.set(tool2.name, total);
+      continue;
+    }
+    switch (item.type) {
+      case "user_message":
+        bytes2["User messages"] += textBytes(item.text);
+        break;
+      case "assistant_message":
+        bytes2["Assistant messages"] += textBytes(item.text);
+        break;
+      case "reasoning":
+        bytes2["Visible reasoning"] += textBytes(item.text);
+        break;
+      case "proposed_plan":
+        bytes2["Plans and summaries"] += textBytes(item.markdown);
+        break;
+      case "handoff":
+      case "compaction":
+        bytes2["Plans and summaries"] += textBytes(item.summary);
+        break;
+    }
+  }
+  return {
+    categories: Object.entries(bytes2).filter(([, size6]) => size6 > 0).map(([name, size6]) => ({ name, tokens: estimateTokens(size6) })),
+    tools: [...tools.values()].sort((a, b) => b.bytes - a.bytes || b.calls - a.calls || a.name.localeCompare(b.name)).map((tool2) => ({ name: tool2.name, calls: tool2.calls, tokens: estimateTokens(tool2.bytes) })),
+    hasMoreHistory,
+    compacted: lastCompaction >= 0,
+    missingToolDetails
+  };
+}
 
 // src/client/context-meter.tsx
-var import_react59 = __toESM(require_react(), 1);
+var import_react60 = __toESM(require_react(), 1);
 var tokensText = (value4) => formatContextWindowTokens(value4).replace(/m$/, "M");
 var num = (value4) => typeof value4 === "number" && Number.isFinite(value4) ? value4 : null;
 function latestUsage(turns) {
@@ -160995,7 +161728,7 @@ function relativeMinutes(at, now2) {
   const text5 = minutes2 >= 60 ? `${Math.floor(minutes2 / 60)}h ${minutes2 % 60}m` : `${minutes2}m`;
   return at >= now2 ? `in ${text5}` : `${text5} ago`;
 }
-function detailLines(detail, width2, now2) {
+function providerDetailLines(detail, now2) {
   if (detail === null)
     return [
       { text: "No usage reported yet.", color: theme.muted },
@@ -161048,6 +161781,49 @@ function detailLines(detail, width2, now2) {
     const digits = Math.abs(detail.cost.amount) > 0 && Math.abs(detail.cost.amount) < 0.01 ? 4 : 2;
     lines.push({ text: `Cost ${detail.cost.currency} ${detail.cost.amount.toFixed(digits)}` });
   }
+  return lines;
+}
+function transcriptDetailLines(content) {
+  const lines = [
+    { text: "" },
+    { text: "Loaded transcript (estimated)", color: theme.accent }
+  ];
+  if (!content.categories.length && !content.tools.length) {
+    lines.push({ text: "No message or tool text available.", color: theme.muted });
+    return lines;
+  }
+  for (const category of content.categories)
+    lines.push({ text: `${category.name.padEnd(20)} ~${tokensText(category.tokens)}` });
+  if (content.missingToolDetails) {
+    const count = content.missingToolDetails;
+    lines.push({
+      text: `Some tool text unavailable for ${count} ${count === 1 ? "call" : "calls"}.`,
+      color: theme.muted
+    });
+  }
+  if (content.tools.length) {
+    lines.push({ text: "" }, { text: "Top tools by loaded text", color: theme.accent });
+    for (const { name, calls, tokens } of content.tools.slice(0, 4)) {
+      const count = `${calls} ${calls === 1 ? "call" : "calls"}`;
+      lines.push({ text: `${name} \xB7 ${count}${tokens ? ` \xB7 ~${tokensText(tokens)}` : ""}` });
+    }
+  }
+  lines.push({ text: "" });
+  if (content.hasMoreHistory || content.compacted)
+    lines.push({
+      text: content.compacted ? "Since the last loaded compaction." : "Older history is outside the loaded transcript.",
+      color: theme.muted
+    });
+  lines.push({
+    text: "Estimated at 1 token per 4 UTF-8 bytes. System prompts, tool definitions and attachments are unavailable here.",
+    color: theme.muted
+  });
+  return lines;
+}
+function detailLines(detail, width2, now2, content = null) {
+  const lines = providerDetailLines(detail, now2);
+  if (content)
+    lines.push(...transcriptDetailLines(content));
   return lines.flatMap((line) => line.bar || line.swatch || Bun.stringWidth(line.text) <= width2 ? [line] : wrapWords(line.text, width2).map((text5) => ({ ...line, text: text5 })));
 }
 function wrapWords(text5, width2) {
@@ -161060,6 +161836,13 @@ function wrapWords(text5, width2) {
       row = word;
     } else
       row = next2;
+    while (Bun.stringWidth(row) > width2) {
+      const part = Bun.sliceAnsi(row, 0, width2);
+      if (!part || part === row)
+        break;
+      rows.push(part);
+      row = row.slice(part.length);
+    }
   }
   if (row)
     rows.push(row);
@@ -161067,20 +161850,31 @@ function wrapWords(text5, width2) {
 }
 function ContextDropdown({
   detail,
+  content,
   width: width2,
   height,
   now: nowOf,
   close: close2
 }) {
-  const [now2, setNow] = import_react59.useState(nowOf);
-  import_react59.useEffect(() => {
+  const [now2, setNow] = import_react60.useState(nowOf);
+  import_react60.useEffect(() => {
     const timer = setInterval(() => setNow(nowOf()), 60000);
     return () => clearInterval(timer);
   }, [nowOf]);
   const outer = Math.min(46, width2);
   const inner = Math.max(1, outer - 4);
-  const lines = detailLines(detail, inner, now2);
+  const lines = detailLines(detail, inner, now2, content);
   const boxHeight = Math.min(Math.max(3, height - 1), lines.length + 3);
+  const scroll = import_react60.useRef(null);
+  useKeyboard((key5) => {
+    if (key5.defaultPrevented || key5.ctrl || key5.meta)
+      return;
+    const direction = ["up", "pageup"].includes(key5.name) ? -1 : ["down", "pagedown"].includes(key5.name) ? 1 : 0;
+    if (!direction)
+      return;
+    key5.preventDefault();
+    scroll.current?.scrollBy(direction, key5.name.startsWith("page") ? "viewport" : "absolute");
+  });
   return /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
     position: "absolute",
     left: 0,
@@ -161116,6 +161910,7 @@ function ContextDropdown({
         paddingRight: 1,
         children: [
           /* @__PURE__ */ import_jsx_runtime.jsx("scrollbox", {
+            ref: scroll,
             scrollY: true,
             scrollX: false,
             flexGrow: 1,
@@ -161141,17 +161936,27 @@ function ContextDropdown({
               children: line.text
             }, i))
           }),
-          /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+          /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
             height: 1,
-            onMouseUp: (event) => {
-              if (event.button === 0)
-                close2();
-            },
-            children: /* @__PURE__ */ import_jsx_runtime.jsx("text", {
-              fg: theme.accent,
-              selectable: false,
-              children: "[ Esc Close ]"
-            })
+            flexDirection: "row",
+            children: [
+              /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+                onMouseUp: (event) => {
+                  if (event.button === 0)
+                    close2();
+                },
+                children: /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+                  fg: theme.accent,
+                  selectable: false,
+                  children: "[ Esc Close ]"
+                })
+              }),
+              inner >= 26 && lines.length > boxHeight - 3 ? /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+                fg: theme.muted,
+                selectable: false,
+                children: "  \u2191\u2193 Scroll"
+              }) : null
+            ]
           })
         ]
       })
@@ -161189,7 +161994,7 @@ function AppFrame({
   const selectedId = useClientAtom(client, client.selectedThreadId);
   const snapshot2 = useClientAtom(client, client.snapshot);
   useClientAtom(client, client.transcripts);
-  const [agentStack, setAgentStack] = import_react60.useState([]);
+  const [agentStack, setAgentStack] = import_react61.useState([]);
   const agentId = agentStack.at(-1) ?? null;
   const agentCard = agentId ? pendingCard(client.getThread(agentId).projection) : undefined;
   const hasCard = !!(agentId ? agentCard : selectedId && pendingCard(client.getThread(selectedId).projection));
@@ -161199,7 +162004,8 @@ function AppFrame({
   const selected = snapshot2?.threads.find((thread) => thread.id === selectedId);
   const providers = useClientAtom(client, client.providers);
   const logo = selected && selectionIcon(selected.modelSelection, providers);
-  const projection = selected ? client.getThread(selected.id).projection : undefined;
+  const transcript = selected ? client.getThread(selected.id) : undefined;
+  const projection = transcript?.projection;
   const providerThread = projection?.providerThreads?.find((thread) => thread.id === selected?.activeProviderThreadId);
   const contextDetail = selected ? contextDetailOf({
     activeProviderThreadId: selected.activeProviderThreadId,
@@ -161214,19 +162020,18 @@ function AppFrame({
     ...wrapName(`${logo?.glyph} ${selected.modelSelection.model} \xB7 effort ${effort ?? "default"}`, width2),
     ...wrapName(`${paneGlyphs.branch} ${selected.branch ?? "branch unknown"} \xB7 ${selected.worktreePath ?? snapshot2?.projects.find((p) => p.id === selected.projectId)?.workspaceRoot ?? "workspace unknown"}`, width2)
   ] : [];
-  const notice = import_react60.useContext(ServerNotice);
+  const notice = import_react61.useContext(ServerNotice);
   const noticeRows = notice ? wrapName(`! ${notice.text} [ Dismiss${hintFor("dismissNotice") === "none" ? "" : ` (${hintFor("dismissNotice")})`} ]`, width2) : [];
   const topRows = headerRows.length + noticeRows.length;
-  const [hintsShown, setHintsShown] = import_react60.useState(true);
-  import_react60.useEffect(() => {
+  const [hintsShown, setHintsShown] = import_react61.useState(true);
+  import_react61.useEffect(() => {
     client.boundary.showHints?.().then(setHintsShown).catch(() => {});
   }, [client]);
   const chromeRows = topRows + (hintsShown ? 2 : 0);
-  const [sidebarWanted, setSidebar] = import_react60.useState(!attached);
-  const [narrowSidebar, setNarrowSidebar] = import_react60.useState(false);
-  const sidebar = width2 >= 70 ? sidebarWanted : narrowSidebar;
-  const [focus, setFocusPane] = import_react60.useState(attached ? "composer" : "sidebar");
-  const [sent, setSent] = import_react60.useState(false);
+  const [sidebarWanted, setSidebar] = import_react61.useState(!attached);
+  const [narrowSidebar, setNarrowSidebar] = import_react61.useState(false);
+  const [focus, setFocusPane] = import_react61.useState(attached ? "composer" : "sidebar");
+  const [sent, setSent] = import_react61.useState(false);
   const setFocus = (next2) => {
     if (next2 === "composer")
       setSent(false);
@@ -161235,15 +162040,24 @@ function AppFrame({
   const hasQueued = !agentId && !!selectedId && !!client.getThread(selectedId).projection?.runs.some((run3) => run3.status === "queued");
   const composerCollapsed = !hasCard && !hasQueued && (!!agentId || focus !== "composer" || sent);
   const composerHeight = hasCard ? Math.min(19, Math.max(15, height - 5 - chromeRows)) : composerCollapsed ? 3 : 9;
-  const [filePath, setFilePath] = import_react60.useState();
-  const [diffTarget, setDiffTarget] = import_react60.useState();
-  const [diffSerial, setDiffSerial] = import_react60.useState(0);
-  const [editorSession, setEditorSession] = import_react60.useState();
-  const [right, setRight] = import_react60.useState(null);
-  const [queuedRun, setQueuedRun] = import_react60.useState();
-  const runThread = import_react60.useRef(selectedId);
+  const [filePath, setFilePath] = import_react61.useState();
+  const [diffTarget, setDiffTarget] = import_react61.useState();
+  const [diffSerial, setDiffSerial] = import_react61.useState(0);
+  const [editorSession, setEditorSession] = import_react61.useState();
+  const [right, setRight] = import_react61.useState(null);
+  const sidebarWidth = width2 < 100 ? 22 : 30;
+  const tuckSidebar = width2 >= 70 && (right === "files" || right === "diff") && width2 - sidebarWidth - rightWidth(right, width2) - 2 < 60;
+  const [compactSidebar, setCompactSidebar] = import_react61.useState(false);
+  import_react61.useEffect(() => setCompactSidebar(false), [right, tuckSidebar]);
+  const sidebar = width2 < 70 ? narrowSidebar : tuckSidebar ? compactSidebar : sidebarWanted;
+  import_react61.useEffect(() => {
+    if (!sidebar && focus === "sidebar")
+      setFocusPane(right ? "right" : "transcript");
+  }, [sidebar, focus, right]);
+  const [queuedRun, setQueuedRun] = import_react61.useState();
+  const runThread = import_react61.useRef(selectedId);
   runThread.current = selectedId;
-  const effects = import_react60.useMemo(() => !configured || configured.run || !client.terminalAvailable ? configured : {
+  const effects = import_react61.useMemo(() => !configured || configured.run || !client.terminalAvailable ? configured : {
     ...configured,
     run: ({ command: command2 }) => {
       setQueuedRun((last) => ({
@@ -161256,19 +162070,22 @@ function AppFrame({
       return Promise.resolve();
     }
   }, [configured, client]);
-  const [overlay, setOverlay] = import_react60.useState(null);
-  const actions = import_react60.useMemo(() => createThreadActions(client), [client]);
-  import_react60.useEffect(() => {
+  const [overlay, setOverlay] = import_react61.useState(null);
+  const activeProviderThreadId = selected?.activeProviderThreadId;
+  const hasMoreHistory = transcript?.history.hasMoreHistory ?? false;
+  const contextContent = import_react61.useMemo(() => overlay === "context" && projection ? contextContentOf(projection, activeProviderThreadId, hasMoreHistory) : null, [overlay, projection, activeProviderThreadId, hasMoreHistory]);
+  const actions = import_react61.useMemo(() => createThreadActions(client), [client]);
+  import_react61.useEffect(() => {
     client.viewThread(agentId);
   }, [client, agentId]);
-  import_react60.useEffect(() => setAgentStack([]), [selectedId]);
-  import_react60.useEffect(() => setQueuedRun(undefined), [selectedId]);
-  import_react60.useEffect(() => {
+  import_react61.useEffect(() => setAgentStack([]), [selectedId]);
+  import_react61.useEffect(() => setQueuedRun(undefined), [selectedId]);
+  import_react61.useEffect(() => {
     if (right !== "terminal")
       setQueuedRun(undefined);
   }, [right]);
   const agentCardKey = agentId && agentCard ? `${agentId}:${requestKey(agentCard)}` : undefined;
-  import_react60.useEffect(() => {
+  import_react61.useEffect(() => {
     if (agentCardKey)
       setFocus("composer");
   }, [agentCardKey]);
@@ -161281,20 +162098,20 @@ function AppFrame({
     setAgentStack((stack) => stack.slice(0, -1));
     setFocus("transcript");
   };
-  const [menuTarget, setMenuTarget] = import_react60.useState();
-  const [actionError, setActionError] = import_react60.useState("");
-  const dictation = import_react60.useMemo(() => createDictation(client, effects), [client, effects]);
-  const micMessage = import_react60.useSyncExternalStore(dictation.subscribe, dictation.getMessage);
-  import_react60.useEffect(() => () => dictation.dispose(), [dictation]);
-  import_react60.useEffect(() => onMediaNotice(setActionError), []);
-  const [quitArmed, setQuitArmed] = import_react60.useState(false);
-  import_react60.useEffect(() => {
+  const [menuTarget, setMenuTarget] = import_react61.useState();
+  const [actionError, setActionError] = import_react61.useState("");
+  const dictation = import_react61.useMemo(() => createDictation(client, effects), [client, effects]);
+  const micMessage = import_react61.useSyncExternalStore(dictation.subscribe, dictation.getMessage);
+  import_react61.useEffect(() => () => dictation.dispose(), [dictation]);
+  import_react61.useEffect(() => onMediaNotice(setActionError), []);
+  const [quitArmed, setQuitArmed] = import_react61.useState(false);
+  import_react61.useEffect(() => {
     setNarrowSidebar(false);
     if (width2 < 70)
       setFocus(right ? "right" : "transcript");
   }, [width2, right]);
-  const center = import_react60.useRef("transcript");
-  import_react60.useEffect(() => {
+  const center = import_react61.useRef("transcript");
+  import_react61.useEffect(() => {
     if (focus === "transcript" || focus === "composer")
       center.current = focus;
   }, [focus]);
@@ -161305,9 +162122,9 @@ function AppFrame({
   ];
   const cwd = selected?.worktreePath ?? snapshot2?.projects.find((p) => p.id === selected?.projectId)?.workspaceRoot;
   const busyWorkspace = (path) => (snapshot2?.threads ?? []).filter((t) => (t.worktreePath ?? snapshot2?.projects.find((p) => p.id === t.projectId)?.workspaceRoot) === path).some((t) => !!t.activeRunId || !!t.activityRunStatus || client.getThread(t.id).projection?.runs.some((run3) => !["completed", "failed", "cancelled", "interrupted", "rolled_back"].includes(run3.status)));
-  const busyWorkspaceRef = import_react60.useRef(busyWorkspace);
+  const busyWorkspaceRef = import_react61.useRef(busyWorkspace);
   busyWorkspaceRef.current = busyWorkspace;
-  const branchTarget = import_react60.useRef(undefined);
+  const branchTarget = import_react61.useRef(undefined);
   branchTarget.current = selected && cwd ? {
     projectId: selected.projectId,
     threadId: selected.id,
@@ -161317,8 +162134,8 @@ function AppFrame({
     knownWorkspaces: snapshot2?.threads.filter((t) => t.projectId === selected.projectId),
     running: busyWorkspace(cwd)
   } : undefined;
-  const branchWorkflow = import_react60.useMemo(() => createBranchWorkflow(client, () => branchTarget.current, (path) => busyWorkspaceRef.current(path)), [client]);
-  const pullRequestWorkflow = import_react60.useMemo(() => createPullRequestWorkflow(client, () => branchTarget.current), [client]);
+  const branchWorkflow = import_react61.useMemo(() => createBranchWorkflow(client, () => branchTarget.current, (path) => busyWorkspaceRef.current(path)), [client]);
+  const pullRequestWorkflow = import_react61.useMemo(() => createPullRequestWorkflow(client, () => branchTarget.current), [client]);
   const runShell = () => Promise.resolve().then(() => {
     if (!cwd || !effects?.shell)
       throw new Error("Unavailable");
@@ -161396,6 +162213,8 @@ function AppFrame({
     } else if (command2 === "sidebar") {
       if (width2 < 70)
         setNarrowSidebar(!sidebar);
+      else if (tuckSidebar)
+        setCompactSidebar(!sidebar);
       else
         setSidebar(!sidebar);
       if (focus === "sidebar")
@@ -161438,6 +162257,8 @@ function AppFrame({
     }
   };
   useKeyboard((key5) => {
+    if (renderer.currentFocusedRenderable?.id === "transcript-search")
+      return;
     const found = commandForKey(key5);
     const command2 = found === "shell" && !effects?.shell || found === "dictation" && !hasDictation(effects) || found === "attach" && !effects?.pickFiles || found === "spell" && !effects?.spell || found === "dismissNotice" && !notice ? undefined : found;
     if (command2 === "quit" && focus === "composer" && renderer.currentFocusedEditor?.hasSelection()) {
@@ -161618,7 +162439,7 @@ function AppFrame({
           children: [
             sidebar && pane("sidebar", "Threads", content.sidebar ?? /* @__PURE__ */ import_jsx_runtime.jsx(ThreadSidebar, {
               client,
-              width: (width2 < 100 ? 22 : 30) - 2,
+              width: sidebarWidth - 2,
               height: Math.max(1, height - 5 - chromeRows),
               enabled: !overlay,
               keyboardEnabled: focus === "sidebar",
@@ -161630,7 +162451,7 @@ function AppFrame({
                 setMenuTarget(allThreads(client).find((t) => t.id === id3));
                 setOverlay("menu");
               }
-            }), { width: width2 < 100 ? 22 : 30 }),
+            }), { width: sidebarWidth }),
             /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
               flexGrow: 1,
               minWidth: 0,
@@ -161657,7 +162478,7 @@ function AppFrame({
                     setFocus("right");
                   },
                   client,
-                  width: Math.max(2, width2 - (sidebar ? width2 < 100 ? 22 : 30 : 0) - (right ? rightWidth(right, width2) : 0) - 2),
+                  width: Math.max(2, width2 - (sidebar ? sidebarWidth : 0) - (right ? rightWidth(right, width2) : 0) - 2),
                   height: Math.max(2, height - 13 - chromeRows - (composerHeight - 9)),
                   enabled: !overlay,
                   keyboardEnabled: focus === "transcript"
@@ -161862,6 +162683,7 @@ function AppFrame({
         }),
         overlay === "context" && /* @__PURE__ */ import_jsx_runtime.jsx(ContextDropdown, {
           detail: contextDetail,
+          content: contextContent,
           width: width2,
           height,
           now: client.now,
@@ -162303,7 +163125,7 @@ ${found.rows.slice(0, 8).map((row) => `  ${row.shortId}  ${row.title}`).join(`
 
 // src/upgrade.ts
 import { chmodSync, existsSync as existsSync2, renameSync as renameSync2, rmSync, writeFileSync } from "fs";
-import { dirname as dirname4, join as join7 } from "path";
+import { dirname as dirname5, join as join8 } from "path";
 var REPO = "Steven-ODell/tercet";
 function assetName(platform2 = process.platform, arch = process.arch) {
   const os = { linux: "linux", darwin: "darwin", win32: "windows" }[platform2];
@@ -162384,7 +163206,7 @@ async function runUpgrade(args2, fetcher = fetch, self2 = process.execPath) {
     const bytes2 = new Uint8Array(await download.arrayBuffer());
     if (sha2563(bytes2) !== expected)
       throw new Error("the download does not match SHA256SUMS; nothing was changed");
-    const next2 = join7(dirname4(self2), `.${wanted}.new`);
+    const next2 = join8(dirname5(self2), `.${wanted}.new`);
     writeFileSync(next2, bytes2);
     if (process.platform !== "win32")
       chmodSync(next2, 493);
@@ -162409,9 +163231,9 @@ async function runUpgrade(args2, fetcher = fetch, self2 = process.execPath) {
 import { spawn as spawn4 } from "child_process";
 import { createHash } from "crypto";
 import { createReadStream, statSync as statSync2 } from "fs";
-import { mkdir as mkdir5, open as open2, rename as rename2, rm as rm3 } from "fs/promises";
+import { mkdir as mkdir6, open as open2, rename as rename3, rm as rm4 } from "fs/promises";
 import { homedir as homedir6 } from "os";
-import { join as join8, win32 as win324 } from "path";
+import { join as join9, win32 as win324 } from "path";
 import { createInterface } from "readline";
 var KOKORO_RELEASE_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0";
 var KOKORO_FILES = [
@@ -162436,7 +163258,7 @@ status prints ready, or what is missing, and exits 1 when read aloud is not read
 var megabytes = (bytes2) => `${Math.round(bytes2 / 1e6)} MB`;
 async function runSetup(options2, deps, signal) {
   const win = deps.platform === "win32";
-  const at = win ? win324.join : join8;
+  const at = win ? win324.join : join9;
   const { home } = options2;
   const venvDir = at(home, ".venv");
   const ownVenv = !deps.env.KOKORO_PYTHON;
@@ -162585,9 +163407,9 @@ function systemDeps(overrides = {}) {
       const hash2 = createHash("sha256");
       createReadStream(path).on("data", (chunk) => hash2.update(chunk)).once("error", reject).once("end", () => resolve9(hash2.digest("hex")));
     }),
-    mkdir: async (path) => void await mkdir5(path, { recursive: true }),
-    rename: rename2,
-    remove: (path) => rm3(path, { recursive: true, force: true }),
+    mkdir: async (path) => void await mkdir6(path, { recursive: true }),
+    rename: rename3,
+    remove: (path) => rm4(path, { recursive: true, force: true }),
     prompt: (question) => new Promise((resolve9) => {
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       let answered = false;
@@ -162749,7 +163571,15 @@ try {
 `);
   const appearance = config.settings.theme.preset === "auto" && !config.dumpStatus ? (await detectAppearance(process.stdin, process.stdout, process.env)).appearance : null;
   applyLook(config.settings, appearance);
-  const boundary = config.hello ? undefined : platform(config);
+  const output = async (args3) => {
+    const child = Bun.spawn(args3, { stdout: "pipe", stderr: "ignore", timeout: 3000 });
+    const text5 = await new Response(child.stdout).text();
+    if (await child.exited !== 0)
+      throw new Error(`${args3[0]} failed`);
+    return text5;
+  };
+  const sshHost = sshHostLookup(process.env, output, (path) => Bun.file(path).text());
+  const boundary = config.hello ? undefined : platform(config, sshHost);
   const client = boundary && createClient(boundary, config.managedToken);
   const check2 = async () => {
     const result3 = await checkServer(config.url);
@@ -162830,13 +163660,6 @@ ${lines.join(`
       embedded.dispose();
       await client?.dispose();
     }, kittyReset);
-    const output = async (args3) => {
-      const child = Bun.spawn(args3, { stdout: "pipe", stderr: "ignore", timeout: 3000 });
-      const text5 = await new Response(child.stdout).text();
-      if (await child.exited !== 0)
-        throw new Error(`${args3[0]} failed`);
-      return text5;
-    };
     const shootPageId = cachedShots(async (id3) => shootPage(await client.pageUrl(id3), async (args3, timeoutMs) => {
       const child = Bun.spawn(args3, { stdout: "ignore", stderr: "ignore", timeout: timeoutMs });
       return child.exited;
@@ -162849,9 +163672,9 @@ ${lines.join(`
       writeTerminal: (bytes2) => process.stdout.write(bytes2),
       clipboardLocal: clipboardLocalLookup(process.env, output, (path) => Bun.file(path).text()),
       clipboardPassthrough: ["on", "all"].includes(tmuxCapabilities.passthrough ?? ""),
-      sshHost: sshHostLookup(process.env, output, (path) => Bun.file(path).text()),
+      sshHost,
       loadImage,
-      personalDictionary: join9(settingsDir(process.env, homedir7()), "dictionary.txt")
+      personalDictionary: join10(settingsDir(process.env, homedir7()), "dictionary.txt")
     });
     const repaint = () => {
       const { columns, rows } = process.stdout;

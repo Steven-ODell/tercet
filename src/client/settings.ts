@@ -98,7 +98,8 @@ export interface Settings {
     model?: string;
     mode?: (typeof RUNTIME_MODES)[number];
     sendShortcut: (typeof SEND_SHORTCUTS)[number];
-    favorites: { provider: string; model: string }[];
+    /** `options` are model option values (`effort`, `fastMode`) a fresh selection uses before its own defaults. */
+    favorites: { provider: string; model: string; options?: Record<string, string | boolean> }[];
     sidebarWorkingShelf: boolean;
     /** The two rows of key hints at the bottom; the `hints` key toggles them. */
     hints: boolean;
@@ -385,6 +386,10 @@ const expect =
 
 const text = expect("a non-empty string", (v) => typeof v === "string" && v.trim() !== "");
 const bool = expect("true or false", (v) => typeof v === "boolean");
+const optionValue = expect(
+  "a non-empty string or true or false",
+  (v) => typeof v === "boolean" || (typeof v === "string" && v.trim() !== ""),
+);
 const oneOf = (options: readonly string[]) =>
   expect(`one of ${options.map((o) => JSON.stringify(o)).join(", ")}`, (v) =>
     options.includes(v as string),
@@ -557,7 +562,13 @@ const schema = struct({
     model: text,
     mode: oneOf(RUNTIME_MODES),
     sendShortcut: oneOf(SEND_SHORTCUTS),
-    favorites: list(struct({ provider: text, model: text })),
+    favorites: list(
+      struct({
+        provider: text,
+        model: text,
+        options: record(/^[A-Za-z][\w.-]*$/, "option names use letters, digits, ., _ and -", optionValue),
+      }),
+    ),
     sidebarWorkingShelf: bool,
     hints: bool,
   }),

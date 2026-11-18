@@ -16,6 +16,7 @@ import {
 } from "../actions";
 import type { BlockAction, Span, Target } from "./markdown";
 import {
+  flushSync,
   useSelectionHandler,
   useKeyboard,
   useRenderer,
@@ -24,6 +25,7 @@ import {
 import { FRAME_SIDE, MarkdownCache, anchorIndex, type MarkdownRow, type Message } from "./markdown";
 import {
   colAt,
+  transcriptMatches,
   firstText,
   isText,
   lastText,
@@ -378,10 +380,19 @@ export function TranscriptViewport({
   const rowIndex = (id: string) => anchorIndex(rows, id, 1);
   const posOf = (at?: { id: string; col: number }): Pos | undefined =>
     at && rows.length ? { row: rowIndex(at.id), col: at.col } : undefined;
+  const [matched, setMatched] = useState<{
+    start: Pos;
+    end: Pos;
+    firstRow: MarkdownRow;
+    lastRow: MarkdownRow;
+  }>();
+  const [matchLabel, setMatchLabel] = useState("");
   /** Move the cursor, scrolling only as far as needed to keep it in view. */
   const put = (next: Pos, sticky = false) => {
     const row = rows[next.row];
     if (!row) return;
+    setMatched(undefined);
+    setMatchLabel("");
     setTarget(row.target);
     vim.current.cursor = { id: row.id, col: next.col };
     if (!sticky) vim.current.want = next.col;
@@ -410,9 +421,34 @@ export function TranscriptViewport({
     menu?.items[0]?.run();
     setMenu(undefined);
   };
+  const searchDraft = useRef("");
+  const [searching, setSearching] = useState(false);
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    if (!enabled || !keyboardEnabled) setSearching(false);
+  }, [enabled, keyboardEnabled]);
+  const jumpMatch = (term: string, backwards: boolean) => {
+    const hits = transcriptMatches(measuredRows, term);
+    setMatched(undefined);
+    if (!hits.length) {
+      setMatchLabel(`No match for /${term}`);
+      return;
+    }
+    const from = posOf(vim.current.cursor) ?? { row: start, col: -1 };
+    const compare = (pos: Pos) => pos.row - from.row || pos.col - from.col;
+    let index = backwards
+      ? hits.findLastIndex((hit) => compare(hit.start) < 0)
+      : hits.findIndex((hit) => compare(hit.start) > 0);
+    if (index < 0) index = backwards ? hits.length - 1 : 0;
+    const hit = hits[index]!;
+    put(hit.start);
+    setMatched({ ...hit, firstRow: measuredRows[hit.start.row]!, lastRow: measuredRows[hit.end.row]! });
+    setMatchLabel(`/${term} · ${index + 1}/${hits.length}`);
+  };
   const targetActions = targetKeys(effects);
   useKeyboard((key) => {
     if (!enabled || !keyboardEnabled || key.meta || key.defaultPrevented) return;
+    if (searching) return;
     if (menu) {
       if (key.name === "escape") setMenu(undefined);
       else if (key.name === "return" || key.name === "1") chooseCopy();
@@ -440,6 +476,16 @@ export function TranscriptViewport({
       : /^[\x21-\x7e]$/.test(key.sequence)
         ? key.sequence
         : key.name;
+    if (ch === "/" || ((ch === "n" || ch === "N") && query)) {
+      key.preventDefault();
+      leaveVisual();
+      v.pending = undefined;
+      if (ch === "/") {
+        searchDraft.current = "";
+        flushSync(() => setSearching(true));
+      } else jumpMatch(query, ch === "N");
+      return;
+    }
     if (ch === "R" && effects?.readback && !Object.hasOwn(targetActions, ch)) {
       const row = v.cursor ? rows[posOf(v.cursor)!.row] : rows.slice(start, start + viewport).findLast((row) => !!row.target);
       const item = items.find((item) => String(item.id) === (row ? rowMessage(row) : ""));
@@ -708,7 +754,9 @@ export function TranscriptViewport({
           }
           if (row.separator) return <SeparatorRow key={row.id} row={row} />;
           const index = start + offset;
-          const columns = range && selectedColumns(rows, range, index);
+          const mark = range ?? (matched && matched.firstRow === rows[matched.start.row] &&
+            matched.lastRow === rows[matched.end.row] ? matched : undefined);
+          const columns = mark && selectedColumns(rows, mark, index);
           const cells = (
             <Row
               key={row.id}
@@ -831,28 +879,47 @@ export function TranscriptViewport({
         </box>
       )}
       <box height={1} flexDirection="row">
-        {(history?.hasMoreHistory || history?.error || history?.loading) && (
+        {searching ? <>
+          <text fg={theme.accent}>/</text>
+          <input id="transcript-search" focused flexGrow={1} placeholder="Find in loaded transcript"
+            onKeyDown={(key) => {
+              if (key.name === "escape") {
+                key.preventDefault();
+                setSearching(false);
+              }
+            }}
+            onInput={(value) => { searchDraft.current = value; }}
+            onSubmit={() => {
+              const term = searchDraft.current || query;
+              setSearching(false);
+              setQuery(term);
+              if (term) jumpMatch(term, false);
+            }} />
+        </> : <>
+          {matchLabel && <text fg={theme.accent}>{matchLabel} · </text>}
+          {(history?.hasMoreHistory || history?.error || history?.loading) && (
+            <box
+              onMouseUp={(event) => {
+                if (enabled && event.button === 0) loadEarlier?.();
+              }}
+            >
+              <text fg={theme.accent}>
+                {history?.loading ? "Loading earlier… " : (history?.error ?? "[p Earlier] · ")}
+              </text>
+            </box>
+          )}
           <box
             onMouseUp={(event) => {
-              if (enabled && event.button === 0) loadEarlier?.();
+              if (enabled && event.button === 0) setAnchor(null);
             }}
           >
             <text fg={theme.accent}>
-              {history?.loading ? "Loading earlier… " : (history?.error ?? "[p Earlier] · ")}
+              {modeLabel +
+                (anchor ? "[End Follow tail]" : "Following tail") +
+                (actions.size ? " · {/} work · Enter expand" : "")}
             </text>
           </box>
-        )}
-        <box
-          onMouseUp={(event) => {
-            if (enabled && event.button === 0) setAnchor(null);
-          }}
-        >
-          <text fg={theme.accent}>
-            {modeLabel +
-              (anchor ? "[End Follow tail]" : "Following tail") +
-              (actions.size ? " · {/} work · Enter expand" : "")}
-          </text>
-        </box>
+        </>}
       </box>
       {menu && (
         <>

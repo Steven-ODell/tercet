@@ -24,6 +24,39 @@ export const isText = (row: MarkdownRow | undefined): row is MarkdownRow =>
 /** Wrapped pieces of one source line share this key (`<message>:<line>`). */
 const lineKey = (row: MarkdownRow) => row.id.slice(0, row.id.lastIndexOf(":"));
 
+/** Find literal text across soft wraps and translate each match back to a Vim cursor. */
+export function transcriptMatches(rows: readonly MarkdownRow[], query: string) {
+  const hits: { start: Pos; end: Pos }[] = [];
+  if (!query) return hits;
+  for (let row = 0; row < rows.length;) {
+    const first = row;
+    if (!isText(rows[row])) {
+      row++;
+      continue;
+    }
+    const key = lineKey(rows[row]!);
+    let text = "";
+    const ends: number[] = [];
+    while (isText(rows[row]) && lineKey(rows[row]!) === key) {
+      text += rows[row++]!.spans.map((span) => span.text).join("");
+      ends.push(text.length);
+    }
+    let piece = 0;
+    const position = (offset: number): Pos => {
+      while (ends[piece]! <= offset) piece++;
+      const row = first + piece;
+      const within = offset - (ends[piece - 1] ?? 0);
+      let units = 0;
+      const col = cellsOf(rows[row]!).findIndex((cell) => (units += cell.length) > within);
+      return { row, col };
+    };
+    for (let at = text.indexOf(query); at >= 0; at = text.indexOf(query, at + query.length)) {
+      hits.push({ start: position(at), end: position(at + query.length - 1) });
+    }
+  }
+  return hits;
+}
+
 export function firstText(rows: readonly MarkdownRow[]) {
   return rows.findIndex(isText);
 }

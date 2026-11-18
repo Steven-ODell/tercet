@@ -81,6 +81,17 @@ export interface Boundary {
     input: import("@t3tools/contracts").SecretRequestAnswerInput,
   ) => Effect.Effect<unknown, unknown>;
   modelFavorites?: () => Promise<import("@t3tools/contracts").ClientSettings["favorites"]>;
+  /** The live favorites with their `options`, straight from the settings in memory. */
+  favoriteEntries?: () => Promise<import("./favorites-file").FavoriteEntry[]>;
+  /**
+   * Adds or removes one favorite in the settings file and returns the resulting list. When nothing
+   * is a favorite yet, `seed` (the list the user already sees) is written first, in order.
+   */
+  saveFavorite?: (
+    entry: import("./favorites-file").FavoriteEntry,
+    on: boolean,
+    seed?: import("./favorites-file").FavoriteEntry[],
+  ) => Promise<import("./favorites-file").FavoriteEntry[]>;
   search?: (
     token: string,
     query: string,

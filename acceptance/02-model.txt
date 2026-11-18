@@ -29,7 +29,7 @@ tercet · live · threads=1 · Supervised                                       
 │                     │  › OpenCode · Inkling 2 Small Free                                       │                     │
 │                     │  › OpenCode · LongCat 2.5 Free                                           │                     │
 │                     │  › OpenCode · MiMo-V2.6-Flash Free                                       │                     │
-│                     │  › OpenCode · MiniMax M3.1 Flash Free                                    │                     │
+│                     │  › OpenCode · Nemotron 3.5 Lightning Free                                │                     │
 │                     │j/k or ↑/↓ select · l/Enter choose/apply · h back                         │                     │
 │                     │[ Esc Close ]                                                             │─────────────────────╯
 │                     └──────────────────────────────────────────────────────────────────────────┘─────────────────────╮

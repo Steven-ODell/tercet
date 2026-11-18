@@ -5,11 +5,15 @@ import type {
   ServerProviderModel,
 } from "@t3tools/contracts";
 
-/** Defaults for a fresh model choice; editing options preserves the explicit selection. */
+/**
+ * Defaults for a fresh model choice; editing options preserves the explicit selection. A favorite's
+ * options beat the built-in defaults but not a previous selection; invalid ones are skipped.
+ */
 export function selectionFor(
   provider: ServerProvider,
   model: ServerProviderModel,
   previous?: ModelSelection,
+  favoriteOptions?: Record<string, string | boolean>,
 ): ModelSelection {
   return {
     instanceId: provider.instanceId,
@@ -19,19 +23,32 @@ export function selectionFor(
         previous?.instanceId === provider.instanceId && previous.model === model.slug
           ? previous.options?.find((o) => o.id === d.id)?.value
           : undefined;
+      const favorite = favoriteOptions?.[d.id];
       let value: string | boolean | undefined;
       if (d.type === "boolean") {
-        value = typeof old === "boolean" ? old : d.id === "fastMode" ? false : d.currentValue;
+        value =
+          typeof old === "boolean"
+            ? old
+            : typeof favorite === "boolean"
+              ? favorite
+              : d.id === "fastMode"
+                ? false
+                : d.currentValue;
       } else {
         const preferred = ["reasoningEffort", "effort", "variant"].includes(d.id)
           ? "high"
           : d.id === "serviceTier"
             ? "default"
             : undefined;
+        const fromFavorite =
+          typeof favorite === "string" && d.options.some((o) => o.id === favorite)
+            ? favorite
+            : undefined;
         value =
           typeof old === "string" && d.options.some((o) => o.id === old)
             ? old
-            : (d.options.find((o) => o.id === preferred)?.id ??
+            : (fromFavorite ??
+              d.options.find((o) => o.id === preferred)?.id ??
               d.currentValue ??
               d.options.find((o) => o.isDefault)?.id);
       }

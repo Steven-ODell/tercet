@@ -219,11 +219,16 @@ bindings. The defaults:
 | `Alt+h`, `Ctrl+j`, `Ctrl+k`, `Ctrl+l` | move between panes                               |
 | `Esc`                                 | close an overlay, or go to the next pane         |
 | `h j k l w b e`, `gg G`               | move in the transcript                           |
+| `/`, then `n` or `N`                     | find literal text in the loaded transcript, next or previous match |
 | `v V`, `y yy`                         | select, yank                                     |
 | `i a o`                               | write in the composer                            |
 | `Y`, `O`                              | copy or open the block, link or selection        |
 | `Ctrl+c` with selected text           | copy selection                                   |
 | `Ctrl+c` twice, without selection     | quit                                             |
+
+Click the Context meter or press `Alt+u` to see provider-reported usage and a breakdown of loaded transcript text. The breakdown estimates tokens for messages, visible reasoning, and tool arguments and results. It lists the four largest tools by loaded text, with call counts.
+
+Files and Diff temporarily hide the thread list when keeping it open would leave fewer than 60 columns for the transcript. Closing the panel restores your previous layout.
 
 Drag to highlight transcript text, then right-click **Copy**; completed drags also copy
 immediately. The menu preserves the selection and holds transcript scrolling while open.

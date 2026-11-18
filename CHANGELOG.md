@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Favorites: `defaults.favorites` entries take an `options` object (for example `effort`), applied when you pick that favorite in the model picker. Right-click a model to edit its favorite and save it to the settings file.
 - Local Read aloud keeps one warm Kokoro process (idle-stopped after 2 minutes) and starts with a small first piece, so speech begins in about two seconds instead of six.
 
 ## tercet 0.1.6 (2026-11-16)

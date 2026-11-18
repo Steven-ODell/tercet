@@ -31,6 +31,7 @@ import {
   type ReactNode,
 } from "react";
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
+import { contextContentOf } from "./context-content";
 import { ContextChip, contextDetailOf, ContextDropdown } from "./context-meter";
 import { paneGlyphs, selectionIcon } from "./icons";
 import { ThreadSidebar, wrapName } from "./sidebar";
@@ -99,7 +100,8 @@ export function AppFrame({
   const providers = useClientAtom(client, client.providers);
   const logo = selected && selectionIcon(selected.modelSelection, providers);
   // Upstream keeps context usage on the thread's active provider thread, not on the shell.
-  const projection = selected ? client.getThread(selected.id).projection : undefined;
+  const transcript = selected ? client.getThread(selected.id) : undefined;
+  const projection = transcript?.projection;
   const providerThread = projection?.providerThreads?.find(
     (thread) => thread.id === selected?.activeProviderThreadId,
   );
@@ -152,7 +154,6 @@ export function AppFrame({
   const chromeRows = topRows + (hintsShown ? 2 : 0);
   const [sidebarWanted, setSidebar] = useState(!attached);
   const [narrowSidebar, setNarrowSidebar] = useState(false);
-  const sidebar = width >= 70 ? sidebarWanted : narrowSidebar;
   const [focus, setFocusPane] = useState<Pane>(attached ? "composer" : "sidebar");
   // The composer shrinks to its draft line while another pane has focus or right after a send.
   // Anything that focuses it (click, key command, paste) opens it again.
@@ -181,6 +182,15 @@ export function AppFrame({
   const [diffSerial, setDiffSerial] = useState(0);
   const [editorSession, setEditorSession] = useState<EditorSession>();
   const [right, setRight] = useState<RightPanel | null>(null);
+  const sidebarWidth = width < 100 ? 22 : 30;
+  const tuckSidebar = width >= 70 && (right === "files" || right === "diff") &&
+    width - sidebarWidth - rightWidth(right, width) - 2 < 60;
+  const [compactSidebar, setCompactSidebar] = useState(false);
+  useEffect(() => setCompactSidebar(false), [right, tuckSidebar]);
+  const sidebar = width < 70 ? narrowSidebar : tuckSidebar ? compactSidebar : sidebarWanted;
+  useEffect(() => {
+    if (!sidebar && focus === "sidebar") setFocusPane(right ? "right" : "transcript");
+  }, [sidebar, focus, right]);
   // [run] without a `commands.run` setting types the block into the side terminal and presses Enter.
   const [queuedRun, setQueuedRun] = useState<QueuedRun>();
   const runThread = useRef(selectedId);
@@ -205,6 +215,14 @@ export function AppFrame({
     [configured, client],
   );
   const [overlay, setOverlay] = useState<Overlay | null>(null);
+  const activeProviderThreadId = selected?.activeProviderThreadId;
+  const hasMoreHistory = transcript?.history.hasMoreHistory ?? false;
+  const contextContent = useMemo(
+    () => overlay === "context" && projection
+      ? contextContentOf(projection, activeProviderThreadId, hasMoreHistory)
+      : null,
+    [overlay, projection, activeProviderThreadId, hasMoreHistory],
+  );
   const actions = useMemo(() => createThreadActions(client), [client]);
   useEffect(() => {
     client.viewThread(agentId);
@@ -358,6 +376,7 @@ export function AppFrame({
         );
     } else if (command === "sidebar") {
       if (width < 70) setNarrowSidebar(!sidebar);
+      else if (tuckSidebar) setCompactSidebar(!sidebar);
       else setSidebar(!sidebar);
       if (focus === "sidebar") setFocus("transcript");
     } else if (
@@ -420,6 +439,7 @@ export function AppFrame({
     }
   };
   useKeyboard((key) => {
+    if (renderer.currentFocusedRenderable?.id === "transcript-search") return;
     const found = commandForKey(key);
     // A command whose action is missing is not bound, like it is not listed in help.
     const command =
@@ -636,7 +656,7 @@ export function AppFrame({
               content.sidebar ?? (
                 <ThreadSidebar
                   client={client}
-                  width={(width < 100 ? 22 : 30) - 2}
+                  width={sidebarWidth - 2}
                   height={Math.max(1, height - 5 - chromeRows)}
                   enabled={!overlay}
                   keyboardEnabled={focus === "sidebar"}
@@ -649,7 +669,7 @@ export function AppFrame({
                   }}
                 />
               ),
-              { width: width < 100 ? 22 : 30 },
+              { width: sidebarWidth },
             )}
           <box flexGrow={1} minWidth={0} flexDirection="column" visible={width >= 70 || !right}>
             {pane(
@@ -690,7 +710,7 @@ export function AppFrame({
                     width={Math.max(
                       2,
                       width -
-                        (sidebar ? (width < 100 ? 22 : 30) : 0) -
+                        (sidebar ? sidebarWidth : 0) -
                         (right ? rightWidth(right, width) : 0) -
                         2,
                     )}
@@ -963,6 +983,7 @@ export function AppFrame({
         {overlay === "context" && (
           <ContextDropdown
             detail={contextDetail}
+            content={contextContent}
             width={width}
             height={height}
             now={client.now}

@@ -43,7 +43,10 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
     "model": "gpt-5.5",
     "mode": "full-access",
     "sendShortcut": "enter",
-    "favorites": [{ "provider": "codex", "model": "gpt-5.5" }],
+    "favorites": [
+      { "provider": "codex", "model": "gpt-5.5" },
+      { "provider": "claudeAgent", "model": "claude-opus-5-5", "options": { "effort": "medium" } },
+    ],
     "sidebarWorkingShelf": false,
     // The key hint rows at the bottom; Alt+i (the hints key) toggles them.
     "hints": true,
@@ -88,7 +91,7 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
 | `defaults.model`                                      | model slug                                                      | the thread's or project's model            | now       |
 | `defaults.mode`                                       | `approval-required`, `auto-accept-edits`, `auto`, `full-access` | per provider                               | now       |
 | `defaults.sendShortcut`                               | `enter`, `mod-enter`, `mod-enter-multiline`                     | `enter`                                    | now       |
-| `defaults.favorites`                                  | list of `{ provider, model }`                                   | `[]`                                       | now       |
+| `defaults.favorites`                                  | list of `{ provider, model, options? }`                         | `[]`                                       | now       |
 | `defaults.sidebarWorkingShelf`                        | boolean                                                         | `false`                                    | now       |
 | `defaults.hints`                                      | boolean                                                         | `true`                                     | now       |
 | `theme.preset`, `theme.accent`, `theme.link`                        | a preset name or `auto` (see Theme); `#rrggbb`                  | `cyberdream`, its own accent               | now       |
@@ -120,6 +123,26 @@ issues a new token into it or changes its permissions.
 The default token file holds the credential for the T3 server on this machine, so it is only
 used for loopback addresses (`localhost`, `127.x.x.x`, `[::1]`). A server anywhere else needs
 `https://` and a token file you name; tercet refuses to start otherwise.
+
+## Favorites
+
+Each `defaults.favorites` entry is `{ "provider": "...", "model": "..." }` plus an optional
+`options` object of model option defaults, as in the example above. Option ids come from the
+model's option list: `effort` and `fastMode` for Claude, `reasoningEffort` and `serviceTier` for
+Codex, `variant` for OpenCode. Values are a string or `true`/`false`. An option the model does not
+have, or a value it does not offer, is ignored.
+
+Choosing a favorite in the model picker (or its Effort page) starts from its `options`; options not
+listed keep the built-in defaults (High where supported, Fast off).
+
+Right-click a model in the model picker to edit its favorite: toggle the favorite, cycle its
+options, and "Save as favorite defaults" writes the entry to the settings file. Saving keeps the
+rest of the file (comments and other keys) as is; comments inside the favorites list itself are
+lost on a save.
+
+When `defaults.favorites` is non-empty it is the favorites list for tercet. When it is empty or
+absent, tercet shows the T3 server's favorites; the first favorite saved from tercet copies the
+list already shown into the file.
 
 ## Theme
 

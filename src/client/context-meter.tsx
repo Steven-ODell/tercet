@@ -1,13 +1,14 @@
 // The context meter: a bar for the selected thread's context window in the top-right corner of
-// the header, and a dropdown under it with the breakdown. The server reports totals, not the
-// categories Claude Code's /context counts, so the bar splits what it does know: cached input,
-// new input, output, free room and the auto-compact buffer.
+// the header, and a dropdown with the provider's counts and estimates from loaded transcript text.
+import type { ScrollBoxRenderable } from "@opentui/core";
+import { useKeyboard } from "@opentui/react";
 import type {
   OrchestrationV2ProviderTurn,
   OrchestrationV2ProviderTurnTokenUsage,
   ThreadTokenUsageSnapshot,
 } from "@t3tools/contracts";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { ContextContent } from "./context-content";
 import { theme, type Color } from "./theme";
 import { formatContextFillPercent, formatContextWindowTokens } from "./usage";
 
@@ -256,12 +257,7 @@ export interface DetailLine {
   readonly swatch?: ContextSlice;
 }
 
-/** The dropdown's rows for `width` inner columns. */
-export function detailLines(
-  detail: ContextDetail | null,
-  width: number,
-  now: number,
-): DetailLine[] {
+function providerDetailLines(detail: ContextDetail | null, now: number): DetailLine[] {
   if (detail === null)
     return [
       { text: "No usage reported yet.", color: theme.muted },
@@ -320,6 +316,58 @@ export function detailLines(
     const digits = Math.abs(detail.cost.amount) > 0 && Math.abs(detail.cost.amount) < 0.01 ? 4 : 2;
     lines.push({ text: `Cost ${detail.cost.currency} ${detail.cost.amount.toFixed(digits)}` });
   }
+  return lines;
+}
+
+function transcriptDetailLines(content: ContextContent): DetailLine[] {
+  const lines: DetailLine[] = [
+    { text: "" },
+    { text: "Loaded transcript (estimated)", color: theme.accent },
+  ];
+  if (!content.categories.length && !content.tools.length) {
+    lines.push({ text: "No message or tool text available.", color: theme.muted });
+    return lines;
+  }
+  for (const category of content.categories)
+    lines.push({ text: `${category.name.padEnd(20)} ~${tokensText(category.tokens)}` });
+  if (content.missingToolDetails) {
+    const count = content.missingToolDetails;
+    lines.push({
+      text: `Some tool text unavailable for ${count} ${count === 1 ? "call" : "calls"}.`,
+      color: theme.muted,
+    });
+  }
+  if (content.tools.length) {
+    lines.push({ text: "" }, { text: "Top tools by loaded text", color: theme.accent });
+    for (const { name, calls, tokens } of content.tools.slice(0, 4)) {
+      const count = `${calls} ${calls === 1 ? "call" : "calls"}`;
+      lines.push({ text: `${name} · ${count}${tokens ? ` · ~${tokensText(tokens)}` : ""}` });
+    }
+  }
+  lines.push({ text: "" });
+  if (content.hasMoreHistory || content.compacted)
+    lines.push({
+      text: content.compacted
+        ? "Since the last loaded compaction."
+        : "Older history is outside the loaded transcript.",
+      color: theme.muted,
+    });
+  lines.push({
+    text: "Estimated at 1 token per 4 UTF-8 bytes. System prompts, tool definitions and attachments are unavailable here.",
+    color: theme.muted,
+  });
+  return lines;
+}
+
+/** The dropdown's rows for `width` inner columns. */
+export function detailLines(
+  detail: ContextDetail | null,
+  width: number,
+  now: number,
+  content: ContextContent | null = null,
+): DetailLine[] {
+  const lines = providerDetailLines(detail, now);
+  if (content) lines.push(...transcriptDetailLines(content));
   // Long lines wrap by words so nothing is cut at narrow widths.
   return lines.flatMap((line) =>
     line.bar || line.swatch || Bun.stringWidth(line.text) <= width
@@ -337,6 +385,12 @@ function wrapWords(text: string, width: number) {
       rows.push(row);
       row = word;
     } else row = next;
+    while (Bun.stringWidth(row) > width) {
+      const part = Bun.sliceAnsi(row, 0, width);
+      if (!part || part === row) break;
+      rows.push(part);
+      row = row.slice(part.length);
+    }
   }
   if (row) rows.push(row);
   return rows;
@@ -345,12 +399,14 @@ function wrapWords(text: string, width: number) {
 /** The dropdown under the chip, right-aligned to the screen edge. */
 export function ContextDropdown({
   detail,
+  content,
   width,
   height,
   now: nowOf,
   close,
 }: {
   detail: ContextDetail | null;
+  content: ContextContent | null;
   width: number;
   height: number;
   now: () => number;
@@ -364,8 +420,18 @@ export function ContextDropdown({
   }, [nowOf]);
   const outer = Math.min(46, width);
   const inner = Math.max(1, outer - 4);
-  const lines = detailLines(detail, inner, now);
+  const lines = detailLines(detail, inner, now, content);
   const boxHeight = Math.min(Math.max(3, height - 1), lines.length + 3);
+  const scroll = useRef<ScrollBoxRenderable>(null);
+  useKeyboard((key) => {
+    if (key.defaultPrevented || key.ctrl || key.meta) return;
+    const direction = ["up", "pageup"].includes(key.name)
+      ? -1
+      : ["down", "pagedown"].includes(key.name) ? 1 : 0;
+    if (!direction) return;
+    key.preventDefault();
+    scroll.current?.scrollBy(direction, key.name.startsWith("page") ? "viewport" : "absolute");
+  });
   return (
     <box position="absolute" left={0} top={0} width="100%" height="100%">
       <box
@@ -394,7 +460,7 @@ export function ContextDropdown({
         paddingLeft={1}
         paddingRight={1}
       >
-        <scrollbox scrollY scrollX={false} flexGrow={1}>
+        <scrollbox ref={scroll} scrollY scrollX={false} flexGrow={1}>
           {lines.map((line, i) =>
             line.bar && detail ? (
               <text key={i}>
@@ -412,15 +478,17 @@ export function ContextDropdown({
             ),
           )}
         </scrollbox>
-        <box
-          height={1}
-          onMouseUp={(event) => {
-            if (event.button === 0) close();
-          }}
-        >
-          <text fg={theme.accent} selectable={false}>
-            [ Esc Close ]
-          </text>
+        <box height={1} flexDirection="row">
+          <box
+            onMouseUp={(event) => {
+              if (event.button === 0) close();
+            }}
+          >
+            <text fg={theme.accent} selectable={false}>[ Esc Close ]</text>
+          </box>
+          {inner >= 26 && lines.length > boxHeight - 3 ? (
+            <text fg={theme.muted} selectable={false}>{"  ↑↓ Scroll"}</text>
+          ) : null}
         </box>
       </box>
     </box>

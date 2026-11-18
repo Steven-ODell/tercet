@@ -1,6 +1,6 @@
 import { theme } from "./theme";
 import { useMemo, useState } from "react";
-import { useKeyboard } from "@opentui/react";
+import { useKeyboard, useRenderer } from "@opentui/react";
 import { hintFor } from "./keymap";
 import {
   turnItemNeedsDetailFetch,
@@ -42,7 +42,9 @@ export function ThreadTranscript({
   enabled: boolean;
   keyboardEnabled?: boolean;
 }) {
+  const renderer = useRenderer();
   useKeyboard((key) => {
+    if (renderer.currentFocusedRenderable?.id === "transcript-search") return;
     if (enabled && keyboardEnabled && key.name === "r") void client.retry();
   });
   const selectedId = useClientAtom(client, client.selectedThreadId);

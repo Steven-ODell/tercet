@@ -4,7 +4,7 @@ import { testRender } from "@opentui/react/test-utils";
 import { TranscriptViewport } from "./transcript-viewport";
 import type { Actions } from "../actions";
 import { measureMarkdown } from "./markdown";
-import { selectionText, wordBack, wordEnd, wordForward } from "./vim";
+import { selectionText, transcriptMatches, wordBack, wordEnd, wordForward } from "./vim";
 
 const text = "alpha beta-gamma\n```sh\ndocker compose up -d\n```\nlast line";
 const rows = measureMarkdown({ id: "a", kind: "assistant", text }, 40);
@@ -101,5 +101,36 @@ test("v, V, y, yy and gg/G drive the transcript like an editor", async () => {
     await act(async () => {
       await view.dispose();
     });
+  }
+});
+
+test("search finds literal text across wraps after wide graphemes", () => {
+  const rows = measureMarkdown({ id: "a", kind: "assistant", text: "head\n👩‍💻abcdefghabcdefgh" }, 6);
+  const hits = transcriptMatches(rows, "defgh");
+  expect(hits).toHaveLength(2);
+  expect(hits[0]?.start.col).toBe(4);
+});
+
+test("transcript search submits, cycles both ways and cancels", async () => {
+  const view = await testRender(<TranscriptViewport items={[{ id: "s", kind: "user", text: "head\nfirst item\nsecond item" }]} width={60} height={8} />, { width: 60, height: 8, kittyKeyboard: true });
+  const key = async (value: string) => {
+    await act(async () => view.mockInput.pressKey(value));
+    await view.flush();
+  };
+  try {
+    await key("/");
+    for (const c of "item") await key(c);
+    await key("RETURN");
+    expect(view.captureCharFrame()).toContain("/item · 1/2");
+    await key("n");
+    expect(view.captureCharFrame()).toContain("/item · 2/2");
+    await key("N");
+    expect(view.captureCharFrame()).toContain("/item · 1/2");
+    await key("/");
+    await key("ESCAPE");
+    await view.waitForFrame((frame) => !frame.includes("Find in loaded transcript"));
+    expect(view.captureCharFrame()).toContain("/item · 1/2");
+  } finally {
+    await view.dispose();
   }
 });

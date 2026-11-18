@@ -1,40 +1,40 @@
 tercet · live · threads=1 · Supervised Context 3% ▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ <live> / 262k ▾
 › opencode/flint-40b-free · effort high
 ↱ branch unknown · /tmp/tercet-sandbox.XXXXXX/work/demo-app
-╭─≡ Threads──────────────────╮╭─¶ Transcript─────────────────────╮╭─● ± Diff───────────────────────────────────────────╮
-│[h] All threads             ││──────────────────────────────────││[a All][t Turn][Esc Back][r Retry]                  │
-│                            ││[+] Thought · 1 work items        ││Full thread · whitespace ignored                    │
-│  tercet acceptance sandbox ││assistant                         ││1 files +1 −1                                       │
-│  › ? waiting · ■ demo-… now││acceptance-stream-ok              ││• acceptance-fixture.ts                             │
-│  ▸ Settled (0)             ││[read]                            ││diff --git a/acceptance-fixture.ts b/acceptance-    │
-│                            ││[+] checkpoint · completed ·      ││fixture.ts                                          │
-│                            ││checkpoint                        ││--- a/acceptance-fixture.ts                         │
-│                            ││[+] user input request · undefined││+++ b/acceptance-fixture.ts                         │
-│                            ││ · user input request             ││@@ -1 +1 @@                                         │
-│                            ││[copy]                            ││-old fixture                                        │
-│                            ││✓ yank                            ││+purple fixture                                     │
-│                            ││Following tail · {/} work · Enter ││                                                    │
-│                            ││                                  ││                                                    │
-│                            │╰──────────────────────────────────╯│                                                    │
-│                            │╭─» Composer───────────────────────╮│                                                    │
-│                            ││┌────────────────────────────────┐││                                                    │
-│                            │││Question 1/1: Acceptance        │││                                                    │
-│                            │││fixture: choose Purple          │││                                                    │
-│                            │││Answer sent; waiting for server │││                                                    │
-│                            │││update.                         │││                                                    │
-│                            │││                                │││                                                    │
-│                            │││                                │││                                                    │
-│                            │││                                │││                                                    │
-│                            │││                                │││                                                    │
-│                            │││                                │││                                                    │
-│                            │││↑/↓ Tab select · Enter answer · │││                                                    │
-│                            ││└────────────────────────────────┘││                                                    │
-│                            ││[Ctrl+v Paste]                    ││                                                    │
-│                            ││Message · @file · /skill · :emoji ││                                                    │
-│                            ││                                  ││                                                    │
-│                            ││                                  ││                                                    │
-│                            ││[Enter send / [Alt+Enter  [Ctrl+s ││[↑][↓]                                              │
-╰────────────────────────────╯╰──────────────────────────────────╯╰────────────────────────────────────────────────────╯
+╭─¶ Transcript───────────────────────────────────────────────────╮╭─● ± Diff───────────────────────────────────────────╮
+│files.                                                          ││[a All][t Turn][Esc Back][r Retry]                  │
+│                                                                ││Full thread · whitespace ignored                    │
+│────────────────────────────────────────────────────────────────││1 files +1 −1                                       │
+│[+] Thought · 1 work items                                      ││• acceptance-fixture.ts                             │
+│assistant                                                       ││diff --git a/acceptance-fixture.ts b/acceptance-    │
+│acceptance-stream-ok                                            ││fixture.ts                                          │
+│[read]                                                          ││--- a/acceptance-fixture.ts                         │
+│[+] checkpoint · completed · checkpoint                         ││+++ b/acceptance-fixture.ts                         │
+│[+] user input request · undefined · user input request         ││@@ -1 +1 @@                                         │
+│[copy]                                                          ││-old fixture                                        │
+│✓ yank                                                          ││+purple fixture                                     │
+│Following tail · {/} work · Enter expand                        ││                                                    │
+│                                                                ││                                                    │
+╰────────────────────────────────────────────────────────────────╯│                                                    │
+╭─» Composer─────────────────────────────────────────────────────╮│                                                    │
+│┌──────────────────────────────────────────────────────────────┐││                                                    │
+││Question 1/1: Acceptance fixture: choose Purple               │││                                                    │
+││Answer sent; waiting for server update.                       │││                                                    │
+││                                                              │││                                                    │
+││                                                              │││                                                    │
+││                                                              │││                                                    │
+││                                                              │││                                                    │
+││                                                              │││                                                    │
+││                                                              │││                                                    │
+││                                                              │││                                                    │
+││↑/↓ Tab select · Enter answer · Esc clear · Ctrl+g composer · │││                                                    │
+│└──────────────────────────────────────────────────────────────┘││                                                    │
+│[Ctrl+v Paste]                                                  ││                                                    │
+│Message · @file · /skill · :emoji                               ││                                                    │
+│                                                                ││                                                    │
+│                                                                ││                                                    │
+│[Enter send / queue] [Alt+Enter steer] [Ctrl+s stop]            ││[↑][↓]                                              │
+╰────────────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────────╯
 Focus: right
 Alt+o Web  Alt+l Launchers  Alt+b Sidebar  Alt+m Model  Alt+e Effort / Permissions  Ctrl+p Palette  ? Help
 Alt+i Hide hints  Alt+c Close side panel  Esc Close overlay / next pane
