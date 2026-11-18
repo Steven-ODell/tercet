@@ -55,6 +55,8 @@ test("a missing settings file gives the defaults", async () => {
   });
   expect(loaded.settings.media.protocol).toBe("auto");
   expect(loaded.settings.media.pageShots).toBe(true);
+  expect(loaded.settings.layout).toBe("auto");
+  expect(parse('{"layout": "compact"}').layout).toBe("compact");
   expect(parse("{}")).toEqual(defaultSettings());
   expect(parse("// nothing yet\n{ }\n")).toEqual(defaultSettings());
 });
@@ -146,7 +148,7 @@ test("schema errors name the file, line and key", () => {
     `settings error in ${PATH}:3: theme.colour: unknown key; theme takes preset, accent, link`,
   );
   expect(failure('{\n  "sever": {}\n}')).toBe(
-    `settings error in ${PATH}:2: sever: unknown key; the top level takes server, theme, keys, icons, defaults, launchers, media, commands, targets, spell, readback, dictation, messageTag`,
+    `settings error in ${PATH}:2: sever: unknown key; the top level takes server, theme, keys, icons, layout, defaults, launchers, media, commands, targets, spell, readback, dictation, messageTag`,
   );
   expect(failure('{\n  "defaults": {\n\n    "mode": "yolo"\n  }\n}')).toBe(
     `settings error in ${PATH}:4: defaults.mode: expected one of "approval-required", "auto-accept-edits", "auto", "full-access", got "yolo"`,
@@ -335,6 +337,9 @@ test("keys rebind commands, and a conflict names both actions on one line", () =
   );
   expect(failure('{"icons": "emoji"}')).toContain(
     'icons: expected one of "nerd", "unicode", "ascii"',
+  );
+  expect(failure('{"layout": "tiny"}')).toContain(
+    'layout: expected one of "auto", "compact", "full"',
   );
 });
 

@@ -104,6 +104,8 @@ export interface Boundary {
   sidebarWorkingShelf?: () => Promise<boolean>;
   /** Whether the key hint rows start shown. */
   showHints?: () => Promise<boolean>;
+  /** The layout mode: the `layout` setting, or TERCET_LAYOUT when set. */
+  layoutMode?: () => Promise<import("./layout").LayoutMode>;
   /** `defaults` from the settings file: the model and mode new threads start with. */
   newThreadDefaults?: import("./model-defaults").NewThreadDefaults;
   dispatch?: (
