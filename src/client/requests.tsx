@@ -1,7 +1,7 @@
 import { theme } from "./theme";
 import { hintFor } from "./keymap";
 import { useEffect, useRef, useState } from "react";
-import { useKeyboard, usePaste } from "@opentui/react";
+import { useKeyboard, usePaste, useTerminalDimensions } from "@opentui/react";
 import { decodePasteBytes, type ScrollBoxRenderable } from "@opentui/core";
 import { CommandId, type OrchestrationV2ThreadProjection, type ThreadId } from "@t3tools/contracts";
 import { derivePendingThreadRequests } from "@t3tools/client-runtime/state/thread-requests";
@@ -235,6 +235,11 @@ export function RequestPanel({
     }
   });
   const pinned = card.kind === "question" ? labels.length - 1 : -1;
+  // Phone sizes: the card keeps its 12 rows while the screen has room, then gives rows back (the
+  // choices scroll, [send] stays pinned) and the hint line fits one row.
+  const screen = useTerminalDimensions();
+  const narrow = screen.width < 70;
+  const cardHeight = Math.min(12, Math.max(7, screen.height - 8));
   const row = (label: string, n: number) => (
     <text
       key={label}
@@ -252,7 +257,13 @@ export function RequestPanel({
     </text>
   );
   return (
-    <box height={12} flexShrink={0} border borderColor={theme.accent} flexDirection="column">
+    <box
+      height={cardHeight}
+      flexShrink={0}
+      border
+      borderColor={theme.accent}
+      flexDirection="column"
+    >
       <scrollbox ref={scroll} scrollY scrollX={false} flexGrow={1}>
         <text fg={theme.accent}>
           {card.kind === "secret"
@@ -291,7 +302,9 @@ export function RequestPanel({
           : busy
             ? "Sending…"
             : error ||
-              `↑/↓ Tab select · Enter answer · Esc clear · Ctrl+g composer · ${hintFor("focusLeft")} / ${hintFor("focusRight")} panes`}
+              (narrow
+                ? "↑↓ select · Enter answer · Esc clear"
+                : `↑/↓ Tab select · Enter answer · Esc clear · Ctrl+g composer · ${hintFor("focusLeft")} / ${hintFor("focusRight")} panes`)}
       </text>
     </box>
   );

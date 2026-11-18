@@ -1,6 +1,6 @@
 import { CommandId, type VcsRef } from "@t3tools/contracts";
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { useKeyboard } from "@opentui/react";
+import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import type { Client } from "./runtime";
 import { workspaceChoices, verifiedWorkspaceChoices, type WorkspaceChoice } from "./workspace";
 import { theme } from "./theme";
@@ -143,6 +143,9 @@ export function BranchPanel({ workflow, target, close }: { workflow: BranchWorkf
   const [worktrees, setWorktrees] = useState(false);
   const [name, setName] = useState("");
   const key = target && workspaceKey(target);
+  // Phone sizes (the narrow/short thresholds of the frame): the button column becomes one wrapping row.
+  const { width, height } = useTerminalDimensions();
+  const compact = width < 70 || height < 24;
   useEffect(() => {
     setCursor(0); setCreating(false); setName("");
     if (target) void workflow.refresh(target);
@@ -166,18 +169,25 @@ export function BranchPanel({ workflow, target, close }: { workflow: BranchWorkf
     if (step) { event.preventDefault(); setCursor((n) => Math.max(0, Math.min((worktrees ? rows.length : data?.refs.length ?? 1) - 1, n + step))); }
   });
   return <box position="absolute" left={0} top={0} width="100%" height="100%" border borderColor={theme.accent} backgroundColor={theme.canvas} flexDirection="column" title="Branches">
-    <text flexShrink={0} fg={theme.accent}>{worktrees ? "Worktrees" : "Branches"}</text>
+    {!compact && <text flexShrink={0} fg={theme.accent}>{worktrees ? "Worktrees" : "Branches"}</text>}
+    {compact ? <box flexShrink={0} flexDirection="row" flexWrap="wrap">
+      <text flexShrink={0} fg={theme.accent} onMouseUp={() => { setWorktrees((value) => !value); setCursor(0); setCreating(false); }}>[w Branches / Worktrees] </text>
+      <text flexShrink={0} fg={theme.muted} onMouseUp={() => close()}>[Esc Back] </text>
+      <text flexShrink={0} fg={theme.accent} onMouseUp={() => { if (target) void workflow.refresh(target); }}>[r Refresh] </text>
+      {!creating && <text flexShrink={0} fg={theme.accent} onMouseUp={() => setCreating(true)}>{worktrees ? "[n Create worktree]" : "[n Create branch]"}</text>}
+    </box> : <>
     <text flexShrink={0} fg={theme.accent} onMouseUp={() => { setWorktrees((value) => !value); setCursor(0); setCreating(false); }}>[w Branches / Worktrees]</text>
     <text flexShrink={0} fg={theme.muted} onMouseUp={() => close()}>[Esc Back]</text>
+    </>}
     <text flexShrink={0} fg={theme.plain}>{target ? workspaceCwd(target) : "Select a thread first"}</text>
     {data && <text flexShrink={0} fg={theme.plain}>{`${data.status.refName ?? "Detached HEAD"} · ${data.status.hasWorkingTreeChanges ? "dirty" : "clean"} · ahead ${data.status.aheadCount} / behind ${data.status.behindCount}${target?.running ? " · running" : ""}`}</text>}
-    <text flexShrink={0} fg={theme.accent} onMouseUp={() => { if (target) void workflow.refresh(target); }}>[r Refresh]</text>
+    {!compact && <text flexShrink={0} fg={theme.accent} onMouseUp={() => { if (target) void workflow.refresh(target); }}>[r Refresh]</text>}
     {state.status === "loading" && <text flexShrink={0} fg={theme.muted}>Loading / action pending… Closing cannot undo a server write.</text>}
     {state.status === "error" && <text flexShrink={0} fg={theme.accent}>{state.error.message}</text>}
     {creating ? <box flexShrink={0} flexDirection="column">
       <text flexShrink={0} fg={theme.plain}>{worktrees ? "Create worktree + new branch (Enter confirms)" : "Create and switch to branch (Enter confirms, Esc cancels)"}</text>
       <input flexShrink={0} focused value={name} onInput={setName} onSubmit={() => { if (target && name.trim()) { setCreating(false); if (worktrees) void workflow.workspace(target, { branch: null, worktreePath: null }, name.trim()); else void workflow.change(target, name.trim(), true); } }} />
-    </box> : <text flexShrink={0} fg={theme.accent} onMouseUp={() => setCreating(true)}>{worktrees ? "[n Create worktree]" : "[n Create branch]"}</text>}
+    </box> : compact ? null : <text flexShrink={0} fg={theme.accent} onMouseUp={() => setCreating(true)}>{worktrees ? "[n Create worktree]" : "[n Create branch]"}</text>}
     <scrollbox minHeight={0} flexGrow={1} scrollY scrollX={false}>
       {worktrees && rows.map((row, index) => <text flexShrink={0} key={row.worktreePath ?? "root"} fg={index === cursor ? theme.strong : theme.plain} bg={index === cursor ? theme.highlight : undefined} onMouseUp={(event) => { if (event.button === 0) choose(index); }}>{`${index === cursor ? "› " : "  "}${row.branch ?? "Detached HEAD"} · ${row.worktreePath ?? target?.projectCwd}`}</text>)}
       {!worktrees && data?.refs.map((ref, index) => <text flexShrink={0} key={`${ref.isRemote}:${ref.name}`} fg={index === cursor ? theme.strong : theme.plain} bg={index === cursor ? theme.highlight : undefined} onMouseUp={(event) => { if (event.button === 0) choose(index); }}>{`${index === cursor ? "› " : "  "}${ref.current ? "* " : ""}${ref.name}${ref.worktreePath && ref.worktreePath !== (target && workspaceCwd(target)) ? ` · in ${ref.worktreePath}` : ""}`}</text>)}
