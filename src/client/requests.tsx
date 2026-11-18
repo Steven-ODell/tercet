@@ -1,4 +1,5 @@
 import { theme } from "./theme";
+import { oneViewOf, useLayout } from "./layout-context";
 import { hintFor } from "./keymap";
 import { useEffect, useRef, useState } from "react";
 import { useKeyboard, usePaste, useTerminalDimensions } from "@opentui/react";
@@ -238,7 +239,7 @@ export function RequestPanel({
   // Phone sizes: the card keeps its 12 rows while the screen has room, then gives rows back (the
   // choices scroll, [send] stays pinned) and the hint line fits one row.
   const screen = useTerminalDimensions();
-  const narrow = screen.width < 70;
+  const narrow = oneViewOf(useLayout());
   const cardHeight = Math.min(12, Math.max(7, screen.height - 8));
   const row = (label: string, n: number) => (
     <text

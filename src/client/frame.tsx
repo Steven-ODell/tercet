@@ -36,6 +36,8 @@ import { ContextChip, contextDetailOf, ContextDropdown } from "./context-meter";
 import { paneGlyphs, selectionIcon } from "./icons";
 import { ThreadSidebar, wrapName } from "./sidebar";
 import { layoutFor, type LayoutMode } from "./layout";
+import { LayoutContext } from "./layout-context";
+import { compactComposerRows } from "./composer";
 import type { Client } from "./runtime";
 import { ConnectionScreen, ServerNotice, useClientAtom } from "./screen";
 import { cheatSheet, commandForKey, hintFor, HintsShown, keymap, type Command } from "./keymap";
@@ -45,7 +47,7 @@ import { onMediaNotice } from "./media";
 type Pane = "sidebar" | "transcript" | "composer" | "right";
 type RightPanel = "files" | "diff" | "launchers" | "terminal" | "editor";
 type Overlay =
-  "pullRequests" | "branches" | "workspace" | "model" | "effort" | "palette" | "search" | "menu" | "help" | "context";
+  "pullRequests" | "branches" | "workspace" | "model" | "effort" | "palette" | "search" | "menu" | "help" | "keys" | "context";
 
 /** Outer width of the right pane. Files and diff show file contents, so they take a real share. */
 function rightWidth(kind: RightPanel, width: number) {
@@ -128,8 +130,14 @@ export function AppFrame({
       .then(setLayoutMode)
       .catch(() => {});
   }, [client]);
-  const oneView = layoutFor({ width, height, mode: layoutMode }).narrow;
-  const headerRows = selected
+  const layout = layoutFor({ width, height, mode: layoutMode });
+  // Compact: slim chrome (a tab strip and one action bar). Below 70 columns it is also one view at
+  // a time. "full" keeps the desktop columns at any size.
+  const compact = layout.compact;
+  const oneView = layout.narrow && compact;
+  // Slim chrome hides the model and branch rows on a short screen until the strip's info tap.
+  const [infoOpen, setInfoOpen] = useState(false);
+  const allHeaderRows = selected
     ? [
         ...wrapName(
           `${logo?.glyph} ${selected.modelSelection.model} · effort ${effort ?? "default"}`,
@@ -141,6 +149,8 @@ export function AppFrame({
         ),
       ]
     : [];
+  const infoToggle = compact && height < 30 && allHeaderRows.length > 0;
+  const headerRows = !compact || height >= 30 || infoOpen ? allHeaderRows : [];
   // A server tercet was not built for (client/compat.ts) gets a banner above the header rows.
   const notice = useContext(ServerNotice);
   const noticeRows = notice
@@ -159,7 +169,8 @@ export function AppFrame({
       .catch(() => {});
   }, [client]);
   // Rows outside the panes: header and banner above, the hint rows below.
-  const chromeRows = topRows + (hintsShown ? 2 : 0);
+  // The compact strip and action bar take the two rows every layout already reserves.
+  const chromeRows = topRows + (hintsShown && !compact ? 2 : 0);
   const [sidebarWanted, setSidebar] = useState(!attached);
   const [focus, setFocusPane] = useState<Pane>(attached ? "composer" : "sidebar");
   // The composer shrinks to its draft line while another pane has focus or right after a send.
@@ -175,11 +186,17 @@ export function AppFrame({
     !!selectedId &&
     !!client.getThread(selectedId).projection?.runs.some((run) => run.status === "queued");
   const composerCollapsed = !hasCard && !hasQueued && (!!agentId || focus !== "composer" || sent);
+  // The compact composer reports the rows its buttons need; the frame adds borders and a longer draft.
+  const [composerRows, setComposerRows] = useState(() => compactComposerRows(40, {}));
+  const panesRows = height - 2 - chromeRows;
   const composerHeight = hasCard
     ? Math.min(19, Math.max(15, height - 5 - chromeRows))
     : composerCollapsed
       ? 3
-      : 9;
+      : compact
+        ? // Under 14 rows (the keyboard is up) the transcript shrinks to its title row.
+          Math.max(3, panesRows < 14 ? panesRows - 2 : Math.min(composerRows + 4, panesRows - 2))
+        : 9;
   const [filePath, setFilePath] = useState<{
     threadId: typeof selectedId;
     path: string;
@@ -214,7 +231,7 @@ export function AppFrame({
     { label: "Chat", pane: "transcript" },
     ...(right ? [{ label: rightTitle, pane: "right" as const }] : []),
   ];
-  const tabsText = tabs.map((tab) => `[${tab.label}]`).join(" ");
+  const tabsText = [...tabs.map((tab) => `[${tab.label}]`), ...(infoToggle ? ["[Info]"] : [])].join(" ");
   const chipColumns = oneView
     ? width - Bun.stringWidth(tabsText) - 2
     : width - Bun.stringWidth(statusText) - (agentsText ? 2 + Bun.stringWidth(agentsText) : 0) - 2;
@@ -474,6 +491,18 @@ export function AppFrame({
       if (target) setFocus(target);
     }
   };
+  // A Menu sheet row closes the sheet first, then runs its command once no overlay is open.
+  const [pending, setPending] = useState<Command | null>(null);
+  useEffect(() => {
+    if (!pending || overlay) return;
+    setPending(null);
+    dispatch(pending);
+  }, [pending, overlay]);
+  const runFromSheet = (id: Command) => {
+    setOverlay(null);
+    if (id === "help") setOverlay("keys");
+    else if (id !== "close") setPending(id);
+  };
   useKeyboard((key) => {
     if (renderer.currentFocusedRenderable?.id === "transcript-search") return;
     const found = commandForKey(key);
@@ -564,7 +593,7 @@ export function AppFrame({
     } else setQuitArmed(false);
   });
   // The same table drives dispatch, so help lists exactly the keys that work.
-  const helpLines = cheatSheet(
+  const sheet = cheatSheet(
     keymap(),
     {
       shell: !!effects?.shell,
@@ -574,11 +603,43 @@ export function AppFrame({
       spell: !!effects?.spell,
     },
     targetKeys(effects),
-  ).flatMap((part, i) => [
+  );
+  const helpLines = sheet.flatMap((part, i) => [
     ...(i ? [{ text: "", title: false }] : []),
     { text: part.title, title: true },
     ...part.rows.map((row) => ({ text: `${row.keys.padEnd(20)}${row.label}`, title: false })),
   ]);
+  // Phone width: the reference wraps instead of clipping at the border.
+  const keyLines = compact
+    ? helpLines.flatMap((line) =>
+        (line.text ? wrapName(line.text, width - 4) : [""]).map((text) => ({ ...line, text })),
+      )
+    : helpLines;
+  const centerInner = Math.max(
+    2,
+    width - (sidebar ? sidebarWidth : 0) - (right && !oneView ? rightWidth(right, width) : 0) - 2,
+  );
+  const transcriptRows = height - chromeRows - composerHeight - 4;
+  const barItems: { label: string; run: () => void }[] = [
+    { label: "Menu", run: () => dispatch("help") },
+    { label: "Model", run: () => dispatch("model") },
+    { label: "Panels", run: () => dispatch("launchers") },
+    { label: "Threads", run: () => dispatch("sidebar") },
+    {
+      label: "Help",
+      run: () => {
+        setMenuTarget(selected);
+        setOverlay("keys");
+      },
+    },
+  ];
+  const barMessage =
+    actionError ||
+    (quitArmed
+      ? "Press Ctrl+c again to quit; any other key cancels"
+      : composerCollapsed && micMessage
+        ? micMessage
+        : "");
   const pane = (
     id: Pane,
     title: string,
@@ -622,11 +683,12 @@ export function AppFrame({
     </box>
   );
   return (
+    <LayoutContext.Provider value={layout}>
     <HintsShown.Provider value={hintsShown}>
       <box width="100%" height="100%" flexDirection="column" backgroundColor={theme.canvas}>
         <box height={1} flexShrink={0} flexDirection="row">
           {oneView ? (
-            tabs.map((tab) => (
+            [...tabs.map((tab) => (
               <box
                 key={tab.pane}
                 marginRight={1}
@@ -647,9 +709,29 @@ export function AppFrame({
                   [{tab.label}]
                 </text>
               </box>
-            ))
+            )),
+            ...(infoToggle
+              ? [
+                  <box
+                    key="info"
+                    onMouseUp={(event) => {
+                      if (event.button === 0 && !overlay) setInfoOpen(!infoOpen);
+                    }}
+                  >
+                    <text fg={infoOpen ? theme.accent : theme.muted} selectable={false}>
+                      [Info]
+                    </text>
+                  </box>,
+                ]
+              : [])]
           ) : (
-            <text fg={theme.text}>{statusText}</text>
+            <box
+              onMouseUp={(event) => {
+                if (event.button === 0 && infoToggle && !overlay) setInfoOpen(!infoOpen);
+              }}
+            >
+              <text fg={theme.text}>{statusText}</text>
+            </box>
           )}
           {!oneView && runningAgents > 0 && (
             <box
@@ -721,6 +803,7 @@ export function AppFrame({
                   height={Math.max(1, height - 5 - chromeRows)}
                   enabled={!overlay}
                   keyboardEnabled={focus === "sidebar"}
+                  wrapNames={compact}
                   onOpen={() => setFocus("transcript")}
                   onMenu={(id) => {
                     setMenuTarget(allThreads(client).find((t) => t.id === id));
@@ -743,6 +826,7 @@ export function AppFrame({
                 : "Transcript",
               content.transcript ??
                 (status === "live" || selectedId ? (
+                  <box visible={!compact || transcriptRows >= 1} height="100%">
                   <ThreadTranscript
                     effects={effects}
                     threadId={agentId ?? undefined}
@@ -782,6 +866,7 @@ export function AppFrame({
                     enabled={!overlay}
                     keyboardEnabled={focus === "transcript"}
                   />
+                  </box>
                 ) : (
                   <ConnectionScreen client={client} keyboardEnabled={!overlay} />
                 )),
@@ -806,6 +891,9 @@ export function AppFrame({
                         !(focus === "right" && (right === "terminal" || right === "editor"))
                       }
                       collapsed={composerCollapsed}
+                      compact={compact}
+                      width={centerInner}
+                      onRows={setComposerRows}
                       onSent={() => setSent(true)}
                       onInputFocus={() => setFocus("composer")}
                     />
@@ -940,15 +1028,43 @@ export function AppFrame({
               { width: rightOuter(right), visible: !oneView || focus === "right" },
             )}
         </box>
-        <text height={1} flexShrink={0} fg={theme.accent}>
-          {actionError ||
-            (quitArmed
-              ? "Press Ctrl+c again to quit; any other key cancels"
-              : composerCollapsed && micMessage
-                ? micMessage
-                : `Focus: ${focus}${hintsShown || hintFor("hints") === "none" ? "" : ` · ${hintFor("hints")} hints`}`)}
-        </text>
-        {hintsShown && (
+        {compact ? (
+          // One tappable action bar replaces the focus line and both hint rows.
+          <box height={1} flexShrink={0} flexDirection="row">
+            {barMessage ? (
+              <text
+                fg={theme.accent}
+                onMouseUp={(event) => {
+                  if (event.button !== 0) return;
+                  setActionError("");
+                  setQuitArmed(false);
+                }}
+              >
+                {barMessage}
+              </text>
+            ) : (
+              barItems.map((item) => (
+                <box
+                  key={item.label}
+                  marginRight={1}
+                  onMouseUp={(event) => {
+                    if (event.button === 0 && !overlay) item.run();
+                  }}
+                >
+                  <text fg={theme.accent} selectable={false}>
+                    [{item.label}]
+                  </text>
+                </box>
+              ))
+            )}
+          </box>
+        ) : (
+          <text height={1} flexShrink={0} fg={theme.accent}>
+            {barMessage ||
+              `Focus: ${focus}${hintsShown || hintFor("hints") === "none" ? "" : ` · ${hintFor("hints")} hints`}`}
+          </text>
+        )}
+        {hintsShown && !compact && (
           <box height={2} flexShrink={0} flexDirection="row" flexWrap="wrap">
             {keymap()
               .filter(
@@ -1031,17 +1147,81 @@ export function AppFrame({
             close={() => setOverlay(null)}
           />
         )}
-        {overlay === "help" && (
+        {overlay === "help" && compact && (
+          // The Menu sheet: every command is a row, and tapping one runs it.
+          <box
+            position="absolute"
+            left={0}
+            top={0}
+            width="100%"
+            height="100%"
+            border
+            borderStyle="rounded"
+            borderColor={theme.accent}
+            backgroundColor={theme.canvas}
+            title="Menu · tap a row"
+            flexDirection="column"
+          >
+            <scrollbox scrollY scrollX={false} flexGrow={1}>
+              {sheet[0]!.rows.map((row) => {
+                const lines = wrapName(`${row.keys.padEnd(11)} ${row.label}`, width - 4);
+                return (
+                  <box
+                    key={row.id}
+                    flexShrink={0}
+                    height={lines.length}
+                    flexDirection="column"
+                    onMouseUp={(event) => {
+                      if (event.button === 0 && row.id) runFromSheet(row.id as Command);
+                    }}
+                  >
+                    {lines.map((line, i) => (
+                      <text key={i} height={1} fg={theme.text} selectable={false}>
+                        {line}
+                      </text>
+                    ))}
+                  </box>
+                );
+              })}
+              <box
+                flexShrink={0}
+                height={1}
+                onMouseUp={(event) => {
+                  if (event.button === 0) runFromSheet("help");
+                }}
+              >
+                <text fg={theme.accent} selectable={false}>
+                  [ Key reference ]
+                </text>
+              </box>
+            </scrollbox>
+            <box
+              height={1}
+              onMouseUp={(event) => {
+                if (event.button === 0) dispatch("close");
+              }}
+            >
+              <text fg={theme.accent} selectable={false}>
+                [ Esc Close ]
+              </text>
+            </box>
+          </box>
+        )}
+        {((overlay === "help" && !compact) || overlay === "keys") && (
           <box position="absolute" left={0} top={0} width="100%" height="100%">
             <box
               position="absolute"
-              left={Math.max(0, Math.floor((width - Math.min(60, width)) / 2))}
-              top={Math.max(
-                0,
-                Math.floor((height - 4 - Math.min(height - 4, helpLines.length + 3)) / 2),
-              )}
-              width={Math.min(60, width)}
-              height={Math.min(height - 4, helpLines.length + 3)}
+              left={compact ? 0 : Math.max(0, Math.floor((width - Math.min(60, width)) / 2))}
+              top={
+                compact
+                  ? 0
+                  : Math.max(
+                      0,
+                      Math.floor((height - 4 - Math.min(height - 4, keyLines.length + 3)) / 2),
+                    )
+              }
+              width={compact ? width : Math.min(60, width)}
+              height={compact ? height : Math.min(height - 4, keyLines.length + 3)}
               border
               borderStyle="rounded"
               borderColor={theme.accent}
@@ -1050,7 +1230,7 @@ export function AppFrame({
               flexDirection="column"
             >
               <scrollbox scrollY scrollX={false} flexGrow={1}>
-                {helpLines.map((line, i) => (
+                {keyLines.map((line, i) => (
                   <text key={i} fg={line.title ? theme.accent : theme.text}>
                     {line.text}
                   </text>
@@ -1071,5 +1251,6 @@ export function AppFrame({
         )}
       </box>
     </HintsShown.Provider>
+    </LayoutContext.Provider>
   );
 }

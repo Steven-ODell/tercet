@@ -250,8 +250,9 @@ test("narrow resize collapses sidebar, allows key/mouse reopening and recovers w
     expect(view.captureCharFrame()).toContain("Thread sidebar fixture");
     await act(async () => {
       const lines = view.captureCharFrame().split("\n");
-      const y = lines.findIndex((line) => line.includes("Alt+b Sidebar"));
-      await view.mockMouse.click(lines[y]!.indexOf("Alt+b Sidebar") + 2, y);
+      // Compact frames have no hint rows: the action bar (last [Threads]) toggles the list.
+      const y = lines.findLastIndex((line) => line.includes("[Threads]"));
+      await view.mockMouse.click(lines[y]!.lastIndexOf("[Threads]") + 2, y);
     });
     await view.flush();
     expect(view.captureCharFrame()).not.toContain("Thread sidebar fixture");
