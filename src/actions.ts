@@ -15,6 +15,7 @@ export interface Actions {
   shell?(input: { cwd: string }): Promise<unknown>;
   openThread?(input: { threadId: string }): Promise<unknown>;
   pasteClipboard?(): Promise<{ type: "image"; bytes: Uint8Array } | { type: "text"; text: string }>;
+  captureRegion?(): Promise<Uint8Array | undefined>;
   pasteImage?(): Promise<Uint8Array>;
   /**
    * Opens a file dialog starting in `cwd` and reads the picked files (50 MB each at most).

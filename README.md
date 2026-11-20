@@ -64,6 +64,13 @@ reaches the computer you type on through OSC 52 if your terminal allows it. For 
 elsewhere, set an `https://` `server.url` and a `server.tokenFile` you issued yourself; tercet
 will not send this machine's token anywhere but loopback.
 
+Press **Alt+y** in the composer, sidebar or transcript to select a rectangle and attach its
+PNG to the draft you started from. Escape cancels. Rebind `keys.screenshot` in settings.
+The desktop needs a running Wayland session with `slurp` and `grim` on PATH. Over SSH,
+the PC must be able to SSH back to the client address as the desktop user without prompting
+(configure OpenSSH User/IdentityFile and trust the laptop host key). The commands run on
+the laptop and return the PNG directly. Clipboard image limits apply (2000 px / 10 MB).
+
 ## Terminals
 
 | Terminal                | Images                              | Tested                                      |

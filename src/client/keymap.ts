@@ -27,6 +27,7 @@ export const COMMANDS = [
   { id: "files", keys: "Alt+f", label: "Files" },
   { id: "diff", keys: "Alt+d", label: "Diff" },
   { id: "dictation", keys: "Alt+v", label: "Dictation", needs: "dictation" },
+  { id: "screenshot", keys: "Alt+y", label: "Attach region screenshot", needs: "screenshot" },
   { id: "attach", keys: "Alt+a", label: "Attach files", needs: "attach" },
   { id: "spell", keys: "Alt+s", label: "Spelling suggestions", needs: "spell" },
   { id: "palette", keys: "Ctrl+p", label: "Palette" },
@@ -63,7 +64,7 @@ export interface Binding {
   chord?: Chord;
   /** How the key is written in hints and help, e.g. "Alt+t" or "Ctrl+c ×2". */
   hint: string;
-  needs?: "shell" | "dictation" | "notice" | "attach" | "spell";
+  needs?: "shell" | "dictation" | "notice" | "screenshot" | "attach" | "spell";
 }
 
 /**
@@ -273,6 +274,7 @@ export function cheatSheet(
     shell?: boolean;
     dictation?: boolean;
     notice?: boolean;
+    screenshot?: boolean;
     attach?: boolean;
     spell?: boolean;
   },

@@ -1158,3 +1158,31 @@ test("the platform boundary tags per send: local with no SSH client, ssh with a 
   const sshOnly = parseSettings('{"messageTag":{"ssh":"<ssh {client}>"}}', "settings.json", where);
   expect(await platform({ ...base, settings: sshOnly }, lookup).messageTag()).toBeUndefined();
 });
+
+test("region capture preserves text on cancel and stages a late PNG in its original draft", async () => {
+  const h = await composerFixture();
+  const pending = Promise.withResolvers<Uint8Array>();
+  let calls = 0;
+  const effects = { copy() {}, captureRegion: async () => ++calls === 1 ? undefined : pending.promise };
+  const view = await testRender(<ThreadComposer client={h.client} effects={effects} enabled />, {
+    width: 120, height: 30, kittyKeyboard: true, exitOnCtrlC: false,
+  });
+  try {
+    await act(async () => view.mockInput.pasteBracketedText("draft text"));
+    await view.waitForFrame(frame => frame.includes("draft text"));
+    await act(async () => view.mockInput.pressKey("y", { meta: true }));
+    expect(view.captureCharFrame()).not.toContain("clipboard.png");
+    await act(async () => view.mockInput.pressKey("y", { meta: true }));
+    expect(calls).toBe(2);
+    await act(async () => h.client.registry.set(h.client.selectedThreadId, ThreadId.make("other")));
+    await act(async () => pending.resolve(Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64")));
+    expect(view.captureCharFrame()).not.toContain("clipboard.png");
+    await act(async () => h.client.registry.set(h.client.selectedThreadId, id));
+    await view.waitForFrame(frame => frame.includes("clipboard.png") && frame.includes("draft text"));
+    expect(h.commands).toHaveLength(0);
+  } finally {
+    await act(async () => view.renderer.destroy());
+    await h.client.dispose();
+  }
+});

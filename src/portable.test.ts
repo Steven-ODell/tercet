@@ -757,3 +757,23 @@ test("missing SSH client copies the URL without opening on the host", async () =
   expect(await fake.log()).toEqual([]);
   expect(terminal.at(-1)).toContain(Buffer.from("https://example.com/").toString("base64"));
 });
+
+test("region selection routes PNG output to the caller, locally or over SSH", async () => {
+  const fake = await fakePath(["grim", "slurp", "ssh"], { WAYLAND_DISPLAY: "wayland-test" });
+  await Bun.write(fake.dir + "/sh", "#!/bin/sh\nexec /bin/sh \"$@\"\n");
+  await chmod(fake.dir + "/sh", 0o755);
+  await fake.output("slurp", "1,2 30x40");
+  await fake.output("grim", PNG);
+  let via: string | undefined;
+  const { actions } = build(fake.host, defaultSettings(), { sshHost: async () => via });
+  expect(await actions.captureRegion!()).toEqual(PNG);
+  expect(await fake.log()).toContain("grim -g 1,2 30x40 -");
+  await writeFile(fake.dir + "/slurp", "#!/bin/sh\nexit 1\n");
+  expect(await actions.captureRegion!()).toBeUndefined();
+  via = "laptop";
+  await fake.output("ssh", PNG);
+  expect(await actions.captureRegion!()).toEqual(PNG);
+  expect((await fake.log()).join("\n")).toContain("ConnectTimeout=5 laptop sh -c");
+  await fake.fail("ssh");
+  await expect(actions.captureRegion!()).rejects.toThrow("ssh broke");
+});

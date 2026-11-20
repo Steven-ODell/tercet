@@ -17,6 +17,7 @@ export async function runKeys(env = process.env, home = homedir()) {
       {
         shell: !!effects.shell,
         dictation: hasDictation(effects),
+        screenshot: !!effects.captureRegion,
         attach: !!effects.pickFiles,
         spell: !!effects.spell,
       },

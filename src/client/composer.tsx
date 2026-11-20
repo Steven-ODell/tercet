@@ -221,7 +221,7 @@ function Editor({
     : micState === "transcribing"
       ? "Transcribing"
       : "mic";
-  async function media(kind: "paste" | "clipboard" | "mic" | "files") {
+  async function media(kind: "screenshot" | "paste" | "clipboard" | "mic" | "files") {
     if (kind === "mic") {
       setMediaStatus("");
       onInputFocus?.();
@@ -233,7 +233,11 @@ function Editor({
     setMediaBusy(true);
     setMediaStatus("");
     try {
-      if (kind === "clipboard") {
+      if (kind === "screenshot") {
+        const png = await effects?.captureRegion?.();
+        if (!png) return;
+        composer.attach(id, png);
+      } else if (kind === "clipboard") {
         if (!effects?.pasteClipboard) throw new Error("unavailable");
         const value = await effects.pasteClipboard();
         if (value.type === "image") composer.attach(id, value.bytes);
@@ -257,7 +261,7 @@ function Editor({
     } catch (error) {
       const reason = error instanceof Error && error.message !== "unavailable" ? error.message : "";
       setMediaStatus(
-        kind === "files"
+        kind === "files" || kind === "screenshot"
           ? `Attach failed${reason && ` (${reason})`}.`
           : `Paste unavailable${reason && ` (${reason})`}: copy text or a PNG up to 2000px / 10 MB.`,
       );
@@ -429,6 +433,12 @@ function Editor({
       key.preventDefault();
       onInputFocus?.();
       void media("clipboard");
+      return;
+    }
+    if ((enabled || pasteFromPane) && commandForKey(key) === "screenshot" && effects?.captureRegion) {
+      key.preventDefault();
+      if (!enabled) onInputFocus?.();
+      void media("screenshot");
       return;
     }
     // Attach, like a paste, works from another pane and brings focus here.

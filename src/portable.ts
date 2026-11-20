@@ -257,12 +257,23 @@ const sshArgs = (host: string) => [
  * WAYLAND_DISPLAY, so it borrows the desktop's socket from XDG_RUNTIME_DIR (else DISPLAY=:0).
  * Starts in that machine's home; prints one path per line and exits 1 on Cancel, like the local ones.
  */
-export const REMOTE_PICKER = `export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+const WAYLAND_SESSION = `export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 if [ -z "\${WAYLAND_DISPLAY:-}" ]; then
   for s in "$XDG_RUNTIME_DIR"/wayland-*; do
     if [ -S "$s" ]; then export WAYLAND_DISPLAY="\${s##*/}"; break; fi
   done
-fi
+fi`;
+
+const REGION_CAPTURE = `${WAYLAND_SESSION}
+region=$(slurp) || {
+  status=$?
+  [ "$status" = 1 ] && exit 0
+  exit "$status"
+}
+[ -n "$region" ] || exit 0
+exec grim -g "$region" -`;
+
+export const REMOTE_PICKER = `${WAYLAND_SESSION}
 [ -n "\${WAYLAND_DISPLAY:-}\${DISPLAY:-}" ] || export DISPLAY=:0
 if command -v zenity >/dev/null 2>&1; then
   exec zenity --file-selection --multiple --title="Attach files" --separator='
@@ -762,6 +773,22 @@ export function hostActions(deps: HostDeps): Actions {
   }
   if (opener) {
     actions.openPath = (path) => open(path, { url: path, path });
+  }
+  if ((host.which("slurp") && host.which("grim")) ||
+      ((deps.sshHost || host.env.SSH_CONNECTION || host.env.TMUX) && host.which("ssh"))) {
+    actions.captureRegion = async () => {
+      const via = await deps.sshHost?.();
+      if (!via) {
+        const local = deps.clipboardLocal ? await deps.clipboardLocal()
+          : !host.env.SSH_CONNECTION && !host.env.TMUX && !host.env.SSH_TTY && !host.env.SSH_CLIENT;
+        if (!local) throw new Error("Cannot identify desktop for capture");
+      }
+      const args = via
+        ? [...sshArgs(via), `sh -c ${shellQuote(REGION_CAPTURE)}`]
+        : ["sh", "-c", REGION_CAPTURE];
+      const png = await runArgs(host, args, { capture: true });
+      return png.length ? png : undefined;
+    };
   }
   const picker = pickerChain(settings, host);
   // Over SSH the dialog opens where you type and the files come from there, so the action exists

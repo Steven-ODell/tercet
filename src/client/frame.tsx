@@ -378,7 +378,7 @@ export function AppFrame({
       return;
     }
     // The composer runs attach itself (it owns the draft), from wherever a paste would land.
-    if (command === "attach" || command === "spell") return;
+    if (command === "screenshot" || command === "attach" || command === "spell") return;
     if (command === "hints") {
       setHintsShown(!hintsShown);
       return;
@@ -510,6 +510,7 @@ export function AppFrame({
     const command =
       (found === "shell" && !effects?.shell) ||
       (found === "dictation" && !hasDictation(effects)) ||
+      (found === "screenshot" && !effects?.captureRegion) ||
       (found === "attach" && !effects?.pickFiles) ||
       (found === "spell" && !effects?.spell) ||
       (found === "dismissNotice" && !notice)
@@ -599,6 +600,7 @@ export function AppFrame({
       shell: !!effects?.shell,
       dictation: hasDictation(effects),
       notice: !!notice,
+      screenshot: !!effects?.captureRegion,
       attach: !!effects?.pickFiles,
       spell: !!effects?.spell,
     },
