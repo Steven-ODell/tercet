@@ -162960,7 +162960,6 @@ function AppFrame({
   const agentThread = agentId ? snapshot2?.threads.find((thread) => thread.id === agentId) ?? client.registry.get(client.archives).find((thread) => thread.id === agentId) : undefined;
   const selected = snapshot2?.threads.find((thread) => thread.id === selectedId);
   const providers = useClientAtom(client, client.providers);
-  const logo = selected && selectionIcon(selected.modelSelection, providers);
   const transcript = selected ? client.getThread(selected.id) : undefined;
   const projection = transcript?.projection;
   const providerThread = projection?.providerThreads?.find((thread) => thread.id === selected?.activeProviderThreadId);
@@ -162969,7 +162968,11 @@ function AppFrame({
     providerThread,
     providerTurns: projection?.providerTurns
   }) : null;
-  const effort = selected?.modelSelection.options?.find((option3) => ["reasoningEffort", "effort", "variant"].includes(option3.id))?.value;
+  const agentParentId = agentStack.at(-2) ?? selectedId;
+  const agentRecord = agentId ? (agentParentId ? client.getThread(agentParentId).projection : undefined)?.subagents?.find((agent) => agent.childThreadId === agentId) : undefined;
+  const modelSelection2 = agentId ? agentRecord?.modelSelection ?? (agentRecord?.model && agentThread?.modelSelection.model !== agentRecord.model ? { instanceId: agentRecord.providerInstanceId, model: agentRecord.model } : agentThread?.modelSelection) : selected?.modelSelection;
+  const modelLogo = modelSelection2 && selectionIcon(modelSelection2, providers);
+  const effort = modelSelection2?.options?.find((option3) => ["reasoningEffort", "effort", "variant"].includes(option3.id))?.value;
   const statusText = `tercet \xB7 ${status2} \xB7 threads=${count}${selected ? ` \xB7 ${runtimeModeLabels[selected.runtimeMode] ?? selected.runtimeMode}` : ""}`;
   const agentsText = runningAgents > 0 ? `${runningAgents} ${runningAgents === 1 ? "agent" : "agents"} running` : "";
   const [layoutMode, setLayoutMode] = import_react63.useState("auto");
@@ -162981,7 +162984,7 @@ function AppFrame({
   const oneView = layout.narrow && compact2;
   const [infoOpen, setInfoOpen] = import_react63.useState(false);
   const allHeaderRows = selected ? [
-    ...wrapName(`${logo?.glyph} ${selected.modelSelection.model} \xB7 effort ${effort ?? "default"}`, width2),
+    ...wrapName(`${modelLogo?.glyph} ${agentId ? "agent \xB7 " : ""}${modelSelection2?.model ?? "model unknown"} \xB7 effort ${effort ?? "default"}`, width2),
     ...wrapName(`${paneGlyphs.branch} ${selected.branch ?? "branch unknown"} \xB7 ${selected.worktreePath ?? snapshot2?.projects.find((p) => p.id === selected.projectId)?.workspaceRoot ?? "workspace unknown"}`, width2)
   ] : [];
   const infoToggle = compact2 && height < 30 && allHeaderRows.length > 0;
@@ -163473,13 +163476,13 @@ function AppFrame({
             height: 1,
             flexShrink: 0,
             fg: contextDetail?.level === "full" ? theme.red : theme.accent,
-            children: logo && row.startsWith(logo.glyph) ? /* @__PURE__ */ import_jsx_runtime.jsxs(import_jsx_runtime.Fragment, {
+            children: modelLogo && row.startsWith(modelLogo.glyph) ? /* @__PURE__ */ import_jsx_runtime.jsxs(import_jsx_runtime.Fragment, {
               children: [
                 /* @__PURE__ */ import_jsx_runtime.jsx("span", {
-                  fg: logo.color,
-                  children: logo.glyph
+                  fg: modelLogo.color,
+                  children: modelLogo.glyph
                 }),
-                row.slice(logo.glyph.length)
+                row.slice(modelLogo.glyph.length)
               ]
             }) : row
           }, row)),

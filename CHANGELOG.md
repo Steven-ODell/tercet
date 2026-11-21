@@ -10,6 +10,10 @@ Works with T3 Code servers >=0.1.9 <0.2.0, tested on 0.1.9.
 - Alt+y selects a screen region (`slurp` + `grim` on Wayland) and attaches the PNG to the draft; over SSH it captures on the machine you type on. Rebind with `keys.screenshot`.
 - `messageTag` adds an optional source prefix to sent messages (for example which machine you typed on); off unless `local` or `ssh` is set.
 - The context meter's dropdown shows the provider's counts and estimates from the loaded transcript.
+- An agent's read-only view shows that agent's model and effort in the model row, not the parent thread's.
+
+tercet's version (0.1.7) and the T3 server version it works with (0.1.9) are separate numbers;
+`tercet upgrade` only compares tercet releases.
 
 Validation: typecheck, 655 tests passed (20 skipped), bundle freshness passed; live acceptance
 matches all snapshots (02-model rerecorded for the current OpenCode catalog).

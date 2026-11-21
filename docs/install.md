@@ -24,6 +24,10 @@ tercet 0.1.0
 T3 server: >=0.1.9 <0.2.0, tested on 0.1.9
 ```
 
+The two numbers are separate: tercet's own releases count 0.1.0, 0.1.1, ... while the second
+line is the T3 Code server release it talks to. `tercet upgrade` compares only tercet versions,
+so a server at 0.1.9 never makes a tercet 0.1.7 look old or new.
+
 ## 1. Prebuilt binary (no Bun)
 
 One file holding tercet, the Bun runtime and the terminal renderer. Releases carry a binary for
