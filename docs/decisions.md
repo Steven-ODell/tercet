@@ -454,3 +454,23 @@ P10 release/publication gates remain paused.
 - Desktop is unchanged: 120x40 acceptance screens are identical, and thread titles still
   truncate on desktop; wrapping is compact-only.
 
+
+## Batch call rows (2026-11-21)
+
+- Tools the model sent in one model call show as one collapsible `[+] Batch call · 2 web searches`
+  row (id `batch/<thread>/<first item>`), collapsed by default; expanding it shows the usual
+  per-tool rows. A single tool keeps its row. Purpose: see at a glance whether an agent batched
+  its tool calls (fewer model calls cost less).
+- Only directly adjacent tool items in one run and source thread can share a batch. Key:
+  `nativeItemRef.fingerprint = "claude-message:<assistant message id>"`, which a patched T3 server
+  (the maintainer's fork) stamps on Claude tool items. `fingerprint` is an existing optional
+  field upstream, so no contract change and the vendored schema still decodes it.
+- Fallback when neither item has a key (upstream T3, older items, other providers): timing. The
+  next tool started less than 800 ms after the previous one finished, or while it was still
+  running. Checked against the Claude logs for 229 adjacent tool pairs in 12 threads: 0 false
+  merges, but 12 of 50 real batches were missed (Claude Code streams tool blocks and runs them
+  one after another, so gaps inside one message reached 10 s). That is why the exact key wins
+  whenever it is present.
+- Batches sit inside the outer work group as one unit; the outer "N work items" count stays per
+  item. A batch with a failed tool or an html-render page is shown on its own (like a failed tool
+  today), marked `· FAILED`.
