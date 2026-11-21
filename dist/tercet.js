@@ -161044,9 +161044,64 @@ function groupSummary(rows) {
   summaries.set(items[0], { items, summary });
   return summary;
 }
+var batchLabels = new WeakMap;
+var batchKey = (item) => {
+  const fingerprint = item.nativeItemRef?.fingerprint;
+  return typeof fingerprint === "string" && fingerprint.startsWith("claude-message:") ? fingerprint : null;
+};
+function epochMs(value4) {
+  if (value4 == null)
+    return null;
+  if (typeof value4 === "string") {
+    const ms2 = Date.parse(value4);
+    return Number.isNaN(ms2) ? null : ms2;
+  }
+  if (value4 instanceof Date)
+    return value4.getTime();
+  const ms = value4.epochMilliseconds;
+  return typeof ms === "number" ? ms : null;
+}
+var isToolCall = (item) => isKnownItem(item) && grouped.has(item.type) && item.type !== "reasoning";
+function sameModelCall(a, b) {
+  if (!isToolCall(a.item) || !isToolCall(b.item))
+    return false;
+  if (a.item.runId !== b.item.runId || a.sourceThreadId !== b.sourceThreadId)
+    return false;
+  const keyA = batchKey(a.item);
+  const keyB = batchKey(b.item);
+  if (keyA || keyB)
+    return keyA === keyB;
+  const started = epochMs(b.item.startedAt);
+  if (started === null)
+    return false;
+  const completed = epochMs(a.item.completedAt);
+  return completed === null || started - completed < 800;
+}
+var plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+function batchLabel(rows) {
+  const items = rows.map((r) => r.item);
+  const cached3 = batchLabels.get(items[0]);
+  if (cached3 && cached3.items.length === items.length && cached3.items.every((x, i) => x === items[i]))
+    return cached3;
+  const counts = new Map;
+  for (const item of items) {
+    const [key5, one, many] = item.type === "web_search" ? ["web_search", "web search", "web searches"] : item.type === "command_execution" ? ["command", "command", "commands"] : item.type === "file_change" ? ["file_change", "file change", "file changes"] : item.type === "file_search" ? ["file_search", "file search", "file searches"] : item.type === "dynamic_tool" && item.toolName ? [`tool:${item.toolName}`, `${item.toolName} call`, `${item.toolName} calls`] : ["tool", "tool call", "tool calls"];
+    const count = counts.get(key5);
+    if (count)
+      count.n++;
+    else
+      counts.set(key5, { n: 1, one, many });
+  }
+  const result3 = {
+    items,
+    label: [...counts.values()].map((c2) => plural(c2.n, c2.one, c2.many)).join(", "),
+    failed: items.some((item) => workEntryIndicatesToolFailure(entryOf(item)))
+  };
+  batchLabels.set(items[0], result3);
+  return result3;
+}
 function workMessages(rows, expanded) {
   const result3 = [];
-  let pending = [];
   const emitItem = (row) => {
     const id3 = `${row.sourceThreadId}/${row.sourceItemId}`;
     const item = row.item;
@@ -161077,7 +161132,12 @@ function workMessages(rows, expanded) {
         kind: item.type === "user_message" ? "user" : "assistant",
         text: [
           item.text,
-          ...(item.attachments ?? []).map((a) => `![${a.name.replace(/[[\]\n]/g, " ")}](${a.type === "image" ? `tercet-image:${encodeURIComponent(JSON.stringify({ id: a.id, mime: a.mimeType }))}` : fileSourceText({ id: a.id, mime: a.mimeType, name: a.name, size: a.sizeBytes })})`)
+          ...(item.attachments ?? []).map((a) => `![${a.name.replace(/[[\]\n]/g, " ")}](${a.type === "image" ? `tercet-image:${encodeURIComponent(JSON.stringify({ id: a.id, mime: a.mimeType }))}` : fileSourceText({
+            id: a.id,
+            mime: a.mimeType,
+            name: a.name,
+            size: a.sizeBytes
+          })})`)
         ].join(`
 `)
       });
@@ -161091,31 +161151,57 @@ function workMessages(rows, expanded) {
       text: expanded.has(id3) ? itemDetail(item) : ""
     });
   };
-  const flush = () => {
-    if (!pending.length)
-      return;
-    const id3 = `work/${pending[0].sourceThreadId}/${pending[0].sourceItemId}`;
-    const summary = groupSummary(pending);
+  const emitUnit = (unit) => {
+    if (unit.length === 1)
+      return emitItem(unit[0]);
+    const id3 = `batch/${unit[0].sourceThreadId}/${unit[0].sourceItemId}`;
+    const batch3 = batchLabel(unit);
     result3.push({
       id: id3,
       compact: true,
       action: true,
-      kind: `${expanded.has(id3) ? "[-]" : "[+]"} ${summary.summary} \xB7 ${pending.length} work items${summary.hasFailure ? " \xB7 FAILED" : ""}`,
+      kind: `${expanded.has(id3) ? "[-]" : "[+]"} Batch call \xB7 ${batch3.label}${batch3.failed ? " \xB7 FAILED" : ""}`,
       text: ""
     });
     if (expanded.has(id3))
-      pending.forEach(emitItem);
+      unit.forEach(emitItem);
+  };
+  let pending = [];
+  const flush = () => {
+    if (!pending.length)
+      return;
+    const rows2 = pending.flat();
+    const id3 = `work/${rows2[0].sourceThreadId}/${rows2[0].sourceItemId}`;
+    const summary = groupSummary(rows2);
+    result3.push({
+      id: id3,
+      compact: true,
+      action: true,
+      kind: `${expanded.has(id3) ? "[-]" : "[+]"} ${summary.summary} \xB7 ${rows2.length} work items${summary.hasFailure ? " \xB7 FAILED" : ""}`,
+      text: ""
+    });
+    if (expanded.has(id3))
+      pending.forEach(emitUnit);
     pending = [];
   };
+  const units = [];
   for (const row of rows) {
-    const prev = pending.at(-1);
-    if (prev && (prev.item.runId !== row.item.runId || prev.sourceThreadId !== row.sourceThreadId))
+    const last = units.at(-1);
+    if (last && sameModelCall(last.at(-1), row))
+      last.push(row);
+    else
+      units.push([row]);
+  }
+  for (const unit of units) {
+    const first = unit[0];
+    const prev = pending.at(-1)?.[0];
+    if (prev && (prev.item.runId !== first.item.runId || prev.sourceThreadId !== first.sourceThreadId))
       flush();
-    if (isGroupable(row.item))
-      pending.push(row);
+    if (unit.every((r) => isGroupable(r.item)))
+      pending.push(unit);
     else {
       flush();
-      emitItem(row);
+      emitUnit(unit);
     }
   }
   flush();
