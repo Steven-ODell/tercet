@@ -82744,6 +82744,7 @@ var COMMANDS = [
   { id: "files", keys: "Alt+f", label: "Files" },
   { id: "diff", keys: "Alt+d", label: "Diff" },
   { id: "dictation", keys: "Alt+v", label: "Dictation", needs: "dictation" },
+  { id: "screenshot", keys: "Alt+y", label: "Attach region screenshot", needs: "screenshot" },
   { id: "attach", keys: "Alt+a", label: "Attach files", needs: "attach" },
   { id: "spell", keys: "Alt+s", label: "Spelling suggestions", needs: "spell" },
   { id: "palette", keys: "Ctrl+p", label: "Palette" },
@@ -83553,12 +83554,21 @@ var sshArgs = (host) => [
   "ConnectTimeout=5",
   host
 ];
-var REMOTE_PICKER = `export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+var WAYLAND_SESSION = `export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 if [ -z "\${WAYLAND_DISPLAY:-}" ]; then
   for s in "$XDG_RUNTIME_DIR"/wayland-*; do
     if [ -S "$s" ]; then export WAYLAND_DISPLAY="\${s##*/}"; break; fi
   done
-fi
+fi`;
+var REGION_CAPTURE = `${WAYLAND_SESSION}
+region=$(slurp) || {
+  status=$?
+  [ "$status" = 1 ] && exit 0
+  exit "$status"
+}
+[ -n "$region" ] || exit 0
+exec grim -g "$region" -`;
+var REMOTE_PICKER = `${WAYLAND_SESSION}
 [ -n "\${WAYLAND_DISPLAY:-}\${DISPLAY:-}" ] || export DISPLAY=:0
 if command -v zenity >/dev/null 2>&1; then
   exec zenity --file-selection --multiple --title="Attach files" --separator='
@@ -83998,6 +84008,19 @@ function hostActions(deps) {
   }
   if (opener) {
     actions.openPath = (path) => open(path, { url: path, path });
+  }
+  if (host.which("slurp") && host.which("grim") || (deps.sshHost || host.env.SSH_CONNECTION || host.env.TMUX) && host.which("ssh")) {
+    actions.captureRegion = async () => {
+      const via = await deps.sshHost?.();
+      if (!via) {
+        const local = deps.clipboardLocal ? await deps.clipboardLocal() : !host.env.SSH_CONNECTION && !host.env.TMUX && !host.env.SSH_TTY && !host.env.SSH_CLIENT;
+        if (!local)
+          throw new Error("Cannot identify desktop for capture");
+      }
+      const args = via ? [...sshArgs(via), `sh -c ${shellQuote(REGION_CAPTURE)}`] : ["sh", "-c", REGION_CAPTURE];
+      const png = await runArgs(host, args, { capture: true });
+      return png.length ? png : undefined;
+    };
   }
   const picker = pickerChain(settings, host);
   const remote = !picker?.name.startsWith("launchers") && deps.sshHost && host.which("ssh");
@@ -92238,6 +92261,7 @@ var READ_ONLY_POLICY = {
   shell: "block",
   openThread: "block",
   pasteClipboard: "block",
+  captureRegion: "block",
   pasteImage: "block",
   pickFiles: "block",
   toggleDictation: "block",
@@ -145296,7 +145320,7 @@ async function detectAppearance(input, output, env) {
   return fromEnv ? { appearance: fromEnv, source: "COLORFGBG" } : { appearance: null, source: "no answer from the terminal" };
 }
 // package.json
-var version = "0.1.6";
+var version = "0.1.7";
 
 // src/doctor.ts
 var TERCET_VERSION = version;
@@ -157716,7 +157740,12 @@ function Editor({
     setMediaBusy(true);
     setMediaStatus("");
     try {
-      if (kind === "clipboard") {
+      if (kind === "screenshot") {
+        const png = await effects?.captureRegion?.();
+        if (!png)
+          return;
+        composer.attach(id2, png);
+      } else if (kind === "clipboard") {
         if (!effects?.pasteClipboard)
           throw new Error("unavailable");
         const value4 = await effects.pasteClipboard();
@@ -157744,7 +157773,7 @@ function Editor({
       setMediaStatus("\u2713");
     } catch (error3) {
       const reason = error3 instanceof Error && error3.message !== "unavailable" ? error3.message : "";
-      setMediaStatus(kind === "files" ? `Attach failed${reason && ` (${reason})`}.` : `Paste unavailable${reason && ` (${reason})`}: copy text or a PNG up to 2000px / 10 MB.`);
+      setMediaStatus(kind === "files" || kind === "screenshot" ? `Attach failed${reason && ` (${reason})`}.` : `Paste unavailable${reason && ` (${reason})`}: copy text or a PNG up to 2000px / 10 MB.`);
     } finally {
       mediaLock.current = false;
       setMediaBusy(false);
@@ -157920,6 +157949,13 @@ function Editor({
       key5.preventDefault();
       onInputFocus?.();
       media3("clipboard");
+      return;
+    }
+    if ((enabled || pasteFromPane) && commandForKey(key5) === "screenshot" && effects?.captureRegion) {
+      key5.preventDefault();
+      if (!enabled)
+        onInputFocus?.();
+      media3("screenshot");
       return;
     }
     if ((enabled || pasteFromPane) && commandForKey(key5) === "attach" && effects?.pickFiles) {
@@ -163117,7 +163153,7 @@ function AppFrame({
       notice?.dismiss();
       return;
     }
-    if (command2 === "attach" || command2 === "spell")
+    if (command2 === "screenshot" || command2 === "attach" || command2 === "spell")
       return;
     if (command2 === "hints") {
       setHintsShown(!hintsShown);
@@ -163216,7 +163252,7 @@ function AppFrame({
     if (renderer.currentFocusedRenderable?.id === "transcript-search")
       return;
     const found = commandForKey(key5);
-    const command2 = found === "shell" && !effects?.shell || found === "dictation" && !hasDictation(effects) || found === "attach" && !effects?.pickFiles || found === "spell" && !effects?.spell || found === "dismissNotice" && !notice ? undefined : found;
+    const command2 = found === "shell" && !effects?.shell || found === "dictation" && !hasDictation(effects) || found === "screenshot" && !effects?.captureRegion || found === "attach" && !effects?.pickFiles || found === "spell" && !effects?.spell || found === "dismissNotice" && !notice ? undefined : found;
     if (command2 === "quit" && focus === "composer" && renderer.currentFocusedEditor?.hasSelection()) {
       setQuitArmed(false);
       return;
@@ -163271,6 +163307,7 @@ function AppFrame({
     shell: !!effects?.shell,
     dictation: hasDictation(effects),
     notice: !!notice,
+    screenshot: !!effects?.captureRegion,
     attach: !!effects?.pickFiles,
     spell: !!effects?.spell
   }, targetKeys(effects));
@@ -163866,6 +163903,7 @@ async function runKeys(env = process.env, home = homedir5()) {
     const sheet = cheatSheet(keymap(), {
       shell: !!effects.shell,
       dictation: hasDictation(effects),
+      screenshot: !!effects.captureRegion,
       attach: !!effects.pickFiles,
       spell: !!effects.spell
     }, targetKeys(effects));

@@ -1,10 +1,18 @@
 # Changelog
 
-## Unreleased
+## tercet 0.1.7 (2026-11-21)
+
+Works with T3 Code servers >=0.1.9 <0.2.0, tested on 0.1.9.
 
 - Phone layout: under 70 columns or 24 rows tercet switches to a compact layout (one view at a time with tappable tabs, a one-row action bar, a Menu sheet with every command, wrapped thread names, full-screen pickers). Set it with `layout` (`auto`, `compact`, `full`) or `TERCET_LAYOUT`.
 - Favorites: `defaults.favorites` entries take an `options` object (for example `effort`), applied when you pick that favorite in the model picker. Right-click a model to edit its favorite and save it to the settings file.
 - Local Read aloud keeps one warm Kokoro process (idle-stopped after 2 minutes) and starts with a small first piece, so speech begins in about two seconds instead of six.
+- Alt+y selects a screen region (`slurp` + `grim` on Wayland) and attaches the PNG to the draft; over SSH it captures on the machine you type on. Rebind with `keys.screenshot`.
+- `messageTag` adds an optional source prefix to sent messages (for example which machine you typed on); off unless `local` or `ssh` is set.
+- The context meter's dropdown shows the provider's counts and estimates from the loaded transcript.
+
+Validation: typecheck, 655 tests passed (20 skipped), bundle freshness passed; live acceptance
+matches all snapshots (02-model rerecorded for the current OpenCode catalog).
 
 ## tercet 0.1.6 (2026-11-16)
 
