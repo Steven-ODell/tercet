@@ -1,5 +1,8 @@
 import { htmlRenderFromToolItem } from "@t3tools/shared/toolOutput";
-import type { OrchestrationV2ThreadProjection, OrchestrationV2TurnItem } from "@t3tools/contracts";
+import type {
+  OrchestrationV2ThreadProjection,
+  OrchestrationV2TurnItem,
+} from "@t3tools/contracts";
 import {
   contextCompactionLabel,
   summarizeToolGroup,
@@ -8,11 +11,15 @@ import {
 } from "@t3tools/client-runtime/work-log/presentation";
 import { commandDisplayText } from "@t3tools/client-runtime/work-log/command-label";
 import { extractToolActivityPresentation } from "@t3tools/client-runtime/work-log/tool-presentation";
-import { toolCallLines, turnItemOutputText } from "@t3tools/client-runtime/work-log/item-detail";
+import {
+  toolCallLines,
+  turnItemOutputText,
+} from "@t3tools/client-runtime/work-log/item-detail";
 import type { Message } from "./markdown";
 import { fileSourceText } from "./media";
 import { pageShotsOn, pageSource } from "./page-shot";
-export type WorkRow = OrchestrationV2ThreadProjection["visibleTurnItems"][number];
+export type WorkRow =
+  OrchestrationV2ThreadProjection["visibleTurnItems"][number];
 const grouped = new Set([
   "command_execution",
   "reasoning",
@@ -53,13 +60,26 @@ export const isKnownItem = (item: { type?: unknown }) =>
   typeof item.type === "string" && Object.hasOwn(KNOWN_ITEM_TYPES, item.type);
 /** One line of an unknown item's own fields (ids and bookkeeping left out), capped at 300. */
 export function rawSummary(item: object): string {
-  const skip = new Set(["id", "type", "status", "runId", "nodeId", "createdAt", "updatedAt"]);
-  const fields = Object.entries(item).filter(([key, value]) => !skip.has(key) && value != null);
+  const skip = new Set([
+    "id",
+    "type",
+    "status",
+    "runId",
+    "nodeId",
+    "createdAt",
+    "updatedAt",
+  ]);
+  const fields = Object.entries(item).filter(
+    ([key, value]) => !skip.has(key) && value != null,
+  );
   if (!fields.length) return "(no other fields)";
   let text: string;
   try {
     text = fields
-      .map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`)
+      .map(
+        ([key, value]) =>
+          `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`,
+      )
       .join(", ");
   } catch {
     text = fields.map(([key]) => key).join(", ");
@@ -99,7 +119,9 @@ export function itemLabel(item: OrchestrationV2TurnItem): string {
       return item.type.replaceAll("_", " ");
   }
 }
-export function workEntry(item: OrchestrationV2TurnItem): WorkLogPresentationEntry {
+export function workEntry(
+  item: OrchestrationV2TurnItem,
+): WorkLogPresentationEntry {
   return {
     id: String(item.id),
     createdAt: "",
@@ -151,7 +173,9 @@ export function itemDetail(item: OrchestrationV2TurnItem): string {
     }
     case "file_change":
       return (
-        item.diffStr ?? item.changes?.map((c) => JSON.stringify(c)).join("\n") ?? itemLabel(item)
+        item.diffStr ??
+        item.changes?.map((c) => JSON.stringify(c)).join("\n") ??
+        itemLabel(item)
       );
     case "file_search":
     case "web_search":
@@ -161,7 +185,10 @@ export function itemDetail(item: OrchestrationV2TurnItem): string {
         .filter(Boolean)
         .join("\n");
     case "checkpoint":
-      return item.files.map((f) => JSON.stringify(f)).join("\n") || "No changed files";
+      return (
+        item.files.map((f) => JSON.stringify(f)).join("\n") ||
+        "No changed files"
+      );
     case "todo_list":
       return item.steps.map((s) => `${s.status}: ${s.text}`).join("\n");
     case "user_input_request":
@@ -218,10 +245,94 @@ function groupSummary(rows: readonly WorkRow[]) {
   summaries.set(items[0]!, { items, summary });
   return summary;
 }
+const batchLabels = new WeakMap<
+  object,
+  { items: readonly object[]; label: string; failed: boolean }
+>();
+const batchKey = (item: OrchestrationV2TurnItem) => {
+  const fingerprint = (
+    item as { nativeItemRef?: { fingerprint?: unknown } | null }
+  ).nativeItemRef?.fingerprint;
+  return typeof fingerprint === "string" &&
+    fingerprint.startsWith("claude-message:")
+    ? fingerprint
+    : null;
+};
+/** Epoch ms of a decoded DateTime.Utc, an ISO string or a Date; null when unset or unreadable. */
+function epochMs(value: unknown): number | null {
+  if (value == null) return null;
+  if (typeof value === "string") {
+    const ms = Date.parse(value);
+    return Number.isNaN(ms) ? null : ms;
+  }
+  if (value instanceof Date) return value.getTime();
+  const ms = (value as { epochMilliseconds?: unknown }).epochMilliseconds;
+  return typeof ms === "number" ? ms : null;
+}
+const isToolCall = (item: OrchestrationV2TurnItem) =>
+  isKnownItem(item) && grouped.has(item.type) && item.type !== "reasoning";
+/** Directly adjacent tool calls from one model call: the Claude message id, else timing. */
+function sameModelCall(a: WorkRow, b: WorkRow) {
+  if (!isToolCall(a.item) || !isToolCall(b.item)) return false;
+  if (a.item.runId !== b.item.runId || a.sourceThreadId !== b.sourceThreadId)
+    return false;
+  const keyA = batchKey(a.item);
+  const keyB = batchKey(b.item);
+  if (keyA || keyB) return keyA === keyB;
+  const started = epochMs(b.item.startedAt);
+  if (started === null) return false;
+  const completed = epochMs(a.item.completedAt);
+  return completed === null || started - completed < 800;
+}
+const plural = (n: number, one: string, many = `${one}s`) =>
+  `${n} ${n === 1 ? one : many}`;
+function batchLabel(rows: readonly WorkRow[]) {
+  const items = rows.map((r) => r.item);
+  const cached = batchLabels.get(items[0]!);
+  if (
+    cached &&
+    cached.items.length === items.length &&
+    cached.items.every((x, i) => x === items[i])
+  )
+    return cached;
+  const counts = new Map<string, { n: number; one: string; many: string }>();
+  for (const item of items) {
+    const [key, one, many] =
+      item.type === "web_search"
+        ? ["web_search", "web search", "web searches"]
+        : item.type === "command_execution"
+          ? ["command", "command", "commands"]
+          : item.type === "file_change"
+            ? ["file_change", "file change", "file changes"]
+            : item.type === "file_search"
+              ? ["file_search", "file search", "file searches"]
+              : item.type === "dynamic_tool" && item.toolName
+                ? [
+                    `tool:${item.toolName}`,
+                    `${item.toolName} call`,
+                    `${item.toolName} calls`,
+                  ]
+                : ["tool", "tool call", "tool calls"];
+    const count = counts.get(key);
+    if (count) count.n++;
+    else counts.set(key, { n: 1, one, many });
+  }
+  const result = {
+    items,
+    label: [...counts.values()]
+      .map((c) => plural(c.n, c.one, c.many))
+      .join(", "),
+    failed: items.some((item) => workEntryIndicatesToolFailure(entryOf(item))),
+  };
+  batchLabels.set(items[0]!, result);
+  return result;
+}
 /** Contiguous work stays within a run and source thread; visible events split groups. */
-export function workMessages(rows: readonly WorkRow[], expanded: ReadonlySet<string>): Message[] {
+export function workMessages(
+  rows: readonly WorkRow[],
+  expanded: ReadonlySet<string>,
+): Message[] {
   const result: Message[] = [];
-  let pending: WorkRow[] = [];
   const emitItem = (row: WorkRow) => {
     const id = `${row.sourceThreadId}/${row.sourceItemId}`;
     const item = row.item;
@@ -229,7 +340,8 @@ export function workMessages(rows: readonly WorkRow[], expanded: ReadonlySet<str
       // A type this build does not know (a newer server, or a renderer gap): label and fields,
       // always shown, never an empty row.
       const raw = item as { type?: unknown; status?: unknown };
-      const type = typeof raw.type === "string" && raw.type ? raw.type : "untyped";
+      const type =
+        typeof raw.type === "string" && raw.type ? raw.type : "untyped";
       result.push({
         id,
         compact: true,
@@ -245,7 +357,9 @@ export function workMessages(rows: readonly WorkRow[], expanded: ReadonlySet<str
           id: `${id}/page`,
           kind: "Rendered page",
           text: `[open](${pageSource(page.attachmentId)})${
-            pageShotsOn() ? `\n![Rendered page](${pageSource(page.attachmentId)})` : ""
+            pageShotsOn()
+              ? `\n![Rendered page](${pageSource(page.attachmentId)})`
+              : ""
           }`,
         });
     }
@@ -261,7 +375,12 @@ export function workMessages(rows: readonly WorkRow[], expanded: ReadonlySet<str
               `![${a.name.replace(/[[\]\n]/g, " ")}](${
                 a.type === "image"
                   ? `tercet-image:${encodeURIComponent(JSON.stringify({ id: a.id, mime: a.mimeType }))}`
-                  : fileSourceText({ id: a.id, mime: a.mimeType, name: a.name, size: a.sizeBytes })
+                  : fileSourceText({
+                      id: a.id,
+                      mime: a.mimeType,
+                      name: a.name,
+                      size: a.sizeBytes,
+                    })
               })`,
           ),
         ].join("\n"),
@@ -277,28 +396,55 @@ export function workMessages(rows: readonly WorkRow[], expanded: ReadonlySet<str
       text: expanded.has(id) ? itemDetail(item) : "",
     });
   };
-  const flush = () => {
-    if (!pending.length) return;
-    const id = `work/${pending[0]!.sourceThreadId}/${pending[0]!.sourceItemId}`;
-    const summary = groupSummary(pending);
+  // A unit is one row, or a batch: 2+ tool calls the model sent in one call.
+  const emitUnit = (unit: WorkRow[]) => {
+    if (unit.length === 1) return emitItem(unit[0]!);
+    const id = `batch/${unit[0]!.sourceThreadId}/${unit[0]!.sourceItemId}`;
+    const batch = batchLabel(unit);
     result.push({
       id,
       compact: true,
       action: true,
-      kind: `${expanded.has(id) ? "[-]" : "[+]"} ${summary.summary} · ${pending.length} work items${summary.hasFailure ? " · FAILED" : ""}`,
+      kind: `${expanded.has(id) ? "[-]" : "[+]"} Batch call · ${batch.label}${batch.failed ? " · FAILED" : ""}`,
       text: "",
     });
-    if (expanded.has(id)) pending.forEach(emitItem);
+    if (expanded.has(id)) unit.forEach(emitItem);
+  };
+  let pending: WorkRow[][] = [];
+  const flush = () => {
+    if (!pending.length) return;
+    const rows = pending.flat();
+    const id = `work/${rows[0]!.sourceThreadId}/${rows[0]!.sourceItemId}`;
+    const summary = groupSummary(rows);
+    result.push({
+      id,
+      compact: true,
+      action: true,
+      kind: `${expanded.has(id) ? "[-]" : "[+]"} ${summary.summary} · ${rows.length} work items${summary.hasFailure ? " · FAILED" : ""}`,
+      text: "",
+    });
+    if (expanded.has(id)) pending.forEach(emitUnit);
     pending = [];
   };
+  const units: WorkRow[][] = [];
   for (const row of rows) {
-    const prev = pending.at(-1);
-    if (prev && (prev.item.runId !== row.item.runId || prev.sourceThreadId !== row.sourceThreadId))
+    const last = units.at(-1);
+    if (last && sameModelCall(last.at(-1)!, row)) last.push(row);
+    else units.push([row]);
+  }
+  for (const unit of units) {
+    const first = unit[0]!;
+    const prev = pending.at(-1)?.[0];
+    if (
+      prev &&
+      (prev.item.runId !== first.item.runId ||
+        prev.sourceThreadId !== first.sourceThreadId)
+    )
       flush();
-    if (isGroupable(row.item)) pending.push(row);
+    if (unit.every((r) => isGroupable(r.item))) pending.push(unit);
     else {
       flush();
-      emitItem(row);
+      emitUnit(unit);
     }
   }
   flush();
