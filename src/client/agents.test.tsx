@@ -59,6 +59,12 @@ const threads = [
     status: "waiting",
     latestRunId: "run-1",
     pendingRuntimeRequest: { id: "rq", kind: "user_input", createdAt: at(10) },
+    // No subagent record on the parent, so the view falls back to the child shell's model.
+    modelSelection: {
+      instanceId: "codex",
+      model: "gpt-6.1-mini",
+      options: [{ id: "reasoningEffort", value: "high" }],
+    },
   }),
   child("done-child", "Finished helper", "parent", "subagent", {
     createdAt: at(900),
@@ -78,6 +84,8 @@ const parentProjection = {
       id: "sa-1",
       childThreadId: "native-child",
       title: "Review files",
+      providerInstanceId: "claudeAgent",
+      model: "claude-sonnet-5-5",
       status: "running",
       startedAt: at(65),
       completedAt: null,
@@ -320,12 +328,17 @@ test("launcher lists agents; A then Enter opens one read-only and Esc returns, s
     await h.view.waitForFrame((f) => f.includes("Agent · Review files · read-only"));
     expect(h.frame()).toContain("Native agent says hi");
     expect(h.frame()).toContain("Read-only agent view");
+    // The model row shows the agent's model from the parent's record, not the parent's model.
+    expect(h.frame()).toContain("agent · claude-sonnet-5-5 · effort default");
+    expect(h.frame()).not.toContain("gpt-6.1-sol");
     expect(h.client.registry.get(h.client.selectedThreadId)).toBe(parentId);
     expect(h.client.registry.get(h.client.viewedThreadId)).toBe(nativeId);
     expect(h.followed).toEqual(["parent", "native-child"]);
     expect(h.sidebar()).not.toContain("Review files");
     await h.key("ESCAPE");
     expect(h.frame()).not.toContain("read-only");
+    expect(h.frame()).toContain("gpt-6.1-sol");
+    expect(h.frame()).not.toContain("claude-sonnet-5-5");
     expect(h.client.registry.get(h.client.viewedThreadId)).toBeNull();
     expect(h.client.registry.get(h.client.selectedThreadId)).toBe(parentId);
     // Nothing was sent to any thread by looking.
@@ -359,6 +372,7 @@ test("a delegated agent's pending question is answered in place and goes to that
     await h.key("RETURN");
     await h.view.waitForFrame((f) => f.includes("Pick a runner"));
     expect(h.frame()).toContain("Agent · Fix tests · read-only");
+    expect(h.frame()).toContain("agent · gpt-6.1-mini · effort high");
     await h.key("1"); // Vitest
     await h.key("3"); // Submit answer (2 is Other)
     expect(h.commands).toMatchObject([

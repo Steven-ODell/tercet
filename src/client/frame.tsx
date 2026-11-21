@@ -101,7 +101,6 @@ export function AppFrame({
     : undefined;
   const selected = snapshot?.threads.find((thread) => thread.id === selectedId);
   const providers = useClientAtom(client, client.providers);
-  const logo = selected && selectionIcon(selected.modelSelection, providers);
   // Upstream keeps context usage on the thread's active provider thread, not on the shell.
   const transcript = selected ? client.getThread(selected.id) : undefined;
   const projection = transcript?.projection;
@@ -115,7 +114,23 @@ export function AppFrame({
         providerTurns: projection?.providerTurns,
       })
     : null;
-  const effort = selected?.modelSelection.options?.find((option) =>
+  // While an agent is open its own model fills the model row; the parent's is one Esc away.
+  // The parent's subagent record knows what the agent asked for (a native subagent's child
+  // shell carries the parent's selection); the child shell is the fallback.
+  const agentParentId = agentStack.at(-2) ?? selectedId;
+  const agentRecord = agentId
+    ? (agentParentId ? client.getThread(agentParentId).projection : undefined)?.subagents?.find(
+        (agent) => agent.childThreadId === agentId,
+      )
+    : undefined;
+  const modelSelection = agentId
+    ? (agentRecord?.modelSelection ??
+      (agentRecord?.model && agentThread?.modelSelection.model !== agentRecord.model
+        ? { instanceId: agentRecord.providerInstanceId, model: agentRecord.model }
+        : agentThread?.modelSelection))
+    : selected?.modelSelection;
+  const modelLogo = modelSelection && selectionIcon(modelSelection, providers);
+  const effort = modelSelection?.options?.find((option) =>
     ["reasoningEffort", "effort", "variant"].includes(option.id),
   )?.value;
   // The top row: status on the left, the context chip on the right in whatever room is left.
@@ -140,7 +155,7 @@ export function AppFrame({
   const allHeaderRows = selected
     ? [
         ...wrapName(
-          `${logo?.glyph} ${selected.modelSelection.model} · effort ${effort ?? "default"}`,
+          `${modelLogo?.glyph} ${agentId ? "agent · " : ""}${modelSelection?.model ?? "model unknown"} · effort ${effort ?? "default"}`,
           width,
         ),
         ...wrapName(
@@ -783,10 +798,10 @@ export function AppFrame({
             flexShrink={0}
             fg={contextDetail?.level === "full" ? theme.red : theme.accent}
           >
-            {logo && row.startsWith(logo.glyph) ? (
+            {modelLogo && row.startsWith(modelLogo.glyph) ? (
               <>
-                <span fg={logo.color}>{logo.glyph}</span>
-                {row.slice(logo.glyph.length)}
+                <span fg={modelLogo.color}>{modelLogo.glyph}</span>
+                {row.slice(modelLogo.glyph.length)}
               </>
             ) : (
               row
