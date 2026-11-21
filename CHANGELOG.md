@@ -1,5 +1,15 @@
 # Changelog
 
+## tercet 0.1.8 (2026-11-21)
+
+Works with T3 Code servers >=0.1.9 <0.2.0, tested on 0.1.9.
+
+- Tool calls the model sent together in one model call now show as one collapsible row, for example `[+] Batch call · 2 web searches`. Enter or a click expands it to the usual per-tool rows; a call with a single tool keeps its own row. This shows at a glance whether an agent batched its tools or called them one after another. A failed tool marks the batch `· FAILED`.
+- Batches are exact when the server stamps the model call on each tool item (`nativeItemRef.fingerprint`, `claude-message:<id>`). Otherwise tercet groups tools by timing: the next one started before, or within 800 ms of, the previous one finishing. Timing can miss a batch whose tools ran one after another, but never joins separate calls.
+
+Validation: typecheck, 662 tests passed (20 skipped), bundle freshness passed; live acceptance
+matches all snapshots.
+
 ## tercet 0.1.7 (2026-11-21)
 
 Works with T3 Code servers >=0.1.9 <0.2.0, tested on 0.1.9.
