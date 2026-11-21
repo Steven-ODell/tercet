@@ -18,12 +18,12 @@ vendored upstream schema still decodes it.
   Touches: ~/Projects/Side/t3code-wt/batch-call/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts (+ its test file)
   Files: ClaudeAdapterV2.ts buildToolCallArtifacts (~4337), its 4 callers (~5625, 5674, 5862, 7636), ActiveClaudeToolCall, the tool_use block handling of assistant SDK messages
   Done when: new adapter test (2 tool_use blocks in one assistant message -> both items share fingerprint "claude-message:<id>"; a later message's tool gets a different one) passes + existing ClaudeAdapterV2 tests pass + server typecheck
-- [ ] 2. Tercet: Batch call rows in workMessages
+- [x] 2. Tercet: Batch call rows in workMessages
   Tier: worker
   After: -
   Touches: src/client/work-log.ts, src/client/work-log.test.tsx
   Files: work-log.ts workMessages (~222-306), isGroupable, groupSummary, summarizeToolGroup import; work-log.test.tsx style
   Done when: `bun test src/client/work-log.test.tsx` passes with the acceptance cases; `bun run typecheck` clean
-- [ ] 3. Coordinator: merge, scripts/check, decisions.md entry, snapshot of the example thread collapsed + expanded
+- [x] 3. Coordinator: merge, scripts/check, decisions.md entry, snapshot of the example thread collapsed + expanded
   Tier: coordinator
   After: 1,2
