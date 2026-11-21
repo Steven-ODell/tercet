@@ -112,9 +112,7 @@ test.each(Object.entries(fixtures))(
         });
         await view.flush();
       }
-      expect(view.captureCharFrame()).toContain(
-        itemDetail(fixture.item).split("\n")[0]!,
-      );
+      expect(view.captureCharFrame()).toContain(itemDetail(fixture.item).split("\n")[0]!);
     } finally {
       await act(async () => {
         await view.dispose();
@@ -163,11 +161,7 @@ test("mouse expands group then item and collapses both; keyboard cycles and togg
 });
 test("groups split at visible events, runs and source threads, errors never hide, fallback stays visible", () => {
   const command = row("command_execution", fixtures.command_execution, "cmd");
-  const failed = row(
-    "command_execution",
-    { ...fixtures.command_execution, exitCode: 1 },
-    "failed",
-  );
+  const failed = row("command_execution", { ...fixtures.command_execution, exitCode: 1 }, "failed");
   const notice = row("system_notice", fixtures.system_notice);
   const otherRun = row("reasoning", { text: "Other", runId: "other" });
   const inherited = {
@@ -235,9 +229,7 @@ test("selected-thread detail is lazy, shows loading/failure, retries and caches 
   const DateTime = await import("effect/DateTime");
   let calls = 0;
   const pending =
-    Promise.withResolvers<
-      import("@t3tools/contracts").OrchestrationV2GetTurnItemResult
-    >();
+    Promise.withResolvers<import("@t3tools/contracts").OrchestrationV2GetTurnItemResult>();
   const fixture = row("command_execution", {
     input: "echo fetched",
     outputOmitted: true,
@@ -266,9 +258,7 @@ test("selected-thread detail is lazy, shows loading/failure, retries and caches 
         expect(String(input.threadId)).toBe("thread");
         expect(String(input.itemId)).toBe("command_execution");
         calls++;
-        return calls === 1
-          ? Effect.fail("offline")
-          : Effect.promise(() => pending.promise);
+        return calls === 1 ? Effect.fail("offline") : Effect.promise(() => pending.promise);
       },
     },
     false,
@@ -380,9 +370,7 @@ test("a subagent with its own thread reads [open] and carries the prompt; withou
     ],
     new Set(),
   );
-  expect(withChild[0]!.kind).toBe(
-    "[open] subagent · completed · Review the changed files",
-  );
+  expect(withChild[0]!.kind).toBe("[open] subagent · completed · Review the changed files");
   const without = workMessages(
     [row("subagent", { prompt: "Review", childThreadId: null })],
     new Set(),
@@ -397,43 +385,27 @@ const at = (start: string, end: string | null) => ({
   startedAt: `2026-11-21T10:00:${start}Z`,
   completedAt: end === null ? null : `2026-11-21T10:00:${end}Z`,
 });
-const kinds = (messages: ReturnType<typeof workMessages>) =>
-  messages.map((m) => m.kind);
+const kinds = (messages: ReturnType<typeof workMessages>) => messages.map((m) => m.kind);
 
 test("single tool calls render exactly as before, with no batch row", () => {
   const rows = [
-    row(
-      "command_execution",
-      { ...fixtures.command_execution, ...msg("A") },
-      "a",
-    ),
+    row("command_execution", { ...fixtures.command_execution, ...msg("A") }, "a"),
     row("web_search", { ...fixtures.web_search, ...msg("B") }, "b"),
   ];
   const plain = rows.map((r) => {
-    const { nativeItemRef: _, ...item } = r.item as unknown as Record<
-      string,
-      unknown
-    >;
+    const { nativeItemRef: _, ...item } = r.item as unknown as Record<string, unknown>;
     return { ...r, item } as unknown as WorkRow;
   });
   const open = new Set(["work/thread/a"]);
-  expect(kinds(workMessages(rows, open))).toEqual(
-    kinds(workMessages(plain, open)),
-  );
-  expect(
-    workMessages(rows, open).some((m) => String(m.id).startsWith("batch/")),
-  ).toBe(false);
+  expect(kinds(workMessages(rows, open))).toEqual(kinds(workMessages(plain, open)));
+  expect(workMessages(rows, open).some((m) => String(m.id).startsWith("batch/"))).toBe(false);
 });
 
 test("tools from one model call form one collapsed Batch call row that expands to each tool", () => {
   const rows = [
     row("web_search", { ...fixtures.web_search, ...msg("A") }, "s1"),
     row("web_search", { ...fixtures.web_search, ...msg("A") }, "s2"),
-    row(
-      "command_execution",
-      { ...fixtures.command_execution, ...msg("A") },
-      "c1",
-    ),
+    row("command_execution", { ...fixtures.command_execution, ...msg("A") }, "c1"),
   ];
   const group = new Set(["work/thread/s1"]);
   const collapsed = workMessages(rows, group);
@@ -450,22 +422,13 @@ test("tools from one model call form one collapsed Batch call row that expands t
   const open = workMessages(rows, new Set([...group, "batch/thread/s1"]));
   expect(kinds(open).slice(1)).toEqual([
     "[-] Batch call · 2 web searches, 1 command",
-    ...rows.map(
-      (r) =>
-        kinds(
-          workMessages([r], new Set(["work/thread/" + r.sourceItemId])),
-        )[1]!,
-    ),
+    ...rows.map((r) => kinds(workMessages([r], new Set(["work/thread/" + r.sourceItemId])))[1]!),
   ]);
   const reads = workMessages(
     [
       row("dynamic_tool", { ...fixtures.dynamic_tool, ...msg("R") }, "r1"),
       row("dynamic_tool", { ...fixtures.dynamic_tool, ...msg("R") }, "r2"),
-      row(
-        "dynamic_tool",
-        { ...fixtures.dynamic_tool, toolName: undefined, ...msg("R") },
-        "r3",
-      ),
+      row("dynamic_tool", { ...fixtures.dynamic_tool, toolName: undefined, ...msg("R") }, "r3"),
     ],
     new Set(["work/thread/r1"]),
   );
@@ -475,11 +438,7 @@ test("tools from one model call form one collapsed Batch call row that expands t
 test("ToolSearch then two searches from another message batch only the searches", () => {
   const rows = [
     row("reasoning", { text: "think" }, "r1"),
-    row(
-      "dynamic_tool",
-      { toolName: "ToolSearch", input: {}, output: "ok", ...msg("A") },
-      "t",
-    ),
+    row("dynamic_tool", { toolName: "ToolSearch", input: {}, output: "ok", ...msg("A") }, "t"),
     row("web_search", { ...fixtures.web_search, ...msg("B") }, "w1"),
     row("web_search", { ...fixtures.web_search, ...msg("B") }, "w2"),
     row("reasoning", { text: "more" }, "r2"),
@@ -505,47 +464,26 @@ test("ToolSearch then two searches from another message batch only the searches"
 test("without a message id, overlapping tools batch and tools 2s apart do not", () => {
   const overlap = workMessages(
     [
-      row(
-        "command_execution",
-        { ...fixtures.command_execution, ...at("01.000", "03.000") },
-        "a",
-      ),
-      row(
-        "command_execution",
-        { ...fixtures.command_execution, ...at("01.100", "02.000") },
-        "b",
-      ),
+      row("command_execution", { ...fixtures.command_execution, ...at("01.000", "03.000") }, "a"),
+      row("command_execution", { ...fixtures.command_execution, ...at("01.100", "02.000") }, "b"),
     ],
     new Set(["work/thread/a"]),
   );
   expect(overlap[1]!.kind).toBe("[+] Batch call · 2 commands");
   const apart = workMessages(
     [
-      row(
-        "command_execution",
-        { ...fixtures.command_execution, ...at("01.000", "02.000") },
-        "a",
-      ),
-      row(
-        "command_execution",
-        { ...fixtures.command_execution, ...at("04.000", "05.000") },
-        "b",
-      ),
+      row("command_execution", { ...fixtures.command_execution, ...at("01.000", "02.000") }, "a"),
+      row("command_execution", { ...fixtures.command_execution, ...at("04.000", "05.000") }, "b"),
     ],
     new Set(["work/thread/a"]),
   );
   expect(apart.some((m) => m.kind.includes("Batch call"))).toBe(false);
   // DateTime.Utc values decoded from the wire batch the same as ISO strings.
-  const DateTime =
-    require("effect/DateTime") as typeof import("effect/DateTime");
+  const DateTime = require("effect/DateTime") as typeof import("effect/DateTime");
   const utc = (s: string) => DateTime.makeUnsafe(`2026-11-21T10:00:${s}Z`);
   const decoded = workMessages(
     [
-      row(
-        "file_change",
-        { ...fixtures.file_change, startedAt: utc("01"), completedAt: null },
-        "a",
-      ),
+      row("file_change", { ...fixtures.file_change, startedAt: utc("01"), completedAt: null }, "a"),
       row(
         "file_change",
         {
@@ -574,11 +512,7 @@ test("differing message ids never batch, even when the tools overlap", () => {
         { ...fixtures.command_execution, ...msg("B"), ...at("01", "02") },
         "b",
       ),
-      row(
-        "command_execution",
-        { ...fixtures.command_execution, ...at("01", "02") },
-        "c",
-      ),
+      row("command_execution", { ...fixtures.command_execution, ...at("01", "02") }, "c"),
     ],
     new Set(["work/thread/a"]),
   );
@@ -604,21 +538,13 @@ test("a batch inside an expanded work group toggles by mouse", async () => {
   try {
     await view.flush();
     await click(0);
-    expect(view.captureCharFrame()).toContain(
-      "[+] Batch call · 2 web searches",
-    );
+    expect(view.captureCharFrame()).toContain("[+] Batch call · 2 web searches");
     expect(view.captureCharFrame()).not.toContain("web search · completed");
     await click(2);
-    expect(view.captureCharFrame()).toContain(
-      "[-] Batch call · 2 web searches",
-    );
-    expect(
-      view.captureCharFrame().split("web search · completed"),
-    ).toHaveLength(3);
+    expect(view.captureCharFrame()).toContain("[-] Batch call · 2 web searches");
+    expect(view.captureCharFrame().split("web search · completed")).toHaveLength(3);
     await click(2);
-    expect(view.captureCharFrame()).toContain(
-      "[+] Batch call · 2 web searches",
-    );
+    expect(view.captureCharFrame()).toContain("[+] Batch call · 2 web searches");
     expect(view.captureCharFrame()).not.toContain("web search · completed");
   } finally {
     await act(async () => {
@@ -630,16 +556,8 @@ test("a batch inside an expanded work group toggles by mouse", async () => {
 test("a failed tool in a batch marks the batch FAILED and stands outside the work group", () => {
   const rows = [
     row("reasoning", { text: "think" }, "r"),
-    row(
-      "command_execution",
-      { ...fixtures.command_execution, ...msg("A") },
-      "ok",
-    ),
-    row(
-      "command_execution",
-      { ...fixtures.command_execution, exitCode: 1, ...msg("A") },
-      "bad",
-    ),
+    row("command_execution", { ...fixtures.command_execution, ...msg("A") }, "ok"),
+    row("command_execution", { ...fixtures.command_execution, exitCode: 1, ...msg("A") }, "bad"),
   ];
   const collapsed = workMessages(rows, new Set());
   expect(collapsed[0]!.kind).toEndWith("· 1 work items");
