@@ -12,7 +12,7 @@ Carrier: `nativeItemRef.fingerprint = "claude-message:<msg id>"`. That field is 
 OrchestrationV2ProviderRef upstream and in the fork, so neither repo's contracts change and the
 vendored upstream schema still decodes it.
 
-- [ ] 1. Fork: Claude adapter stamps the assistant message id on tool items
+- [x] 1. Fork: Claude adapter stamps the assistant message id on tool items
   Tier: worker
   After: -
   Touches: ~/Projects/Side/t3code-wt/batch-call/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts (+ its test file)
