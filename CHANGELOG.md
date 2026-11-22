@@ -1,5 +1,15 @@
 # Changelog
 
+## tercet 0.1.9 (2026-11-22)
+
+Works with T3 Code servers >=0.1.9 <0.2.0, tested on 0.1.9.
+
+Changes since v0.1.8:
+
+- acceptance: re-record 02-model for the current OpenCode catalog (d005df3)
+- Model catalog watch and defaults.autoFavorites: new models appear without restarting (496559f)
+- Sidebar: ✓ settle cell, running rows white with icon-only status (e5ab38e)
+
 ## tercet 0.1.8 (2026-11-21)
 
 Works with T3 Code servers >=0.1.9 <0.2.0, tested on 0.1.9.
