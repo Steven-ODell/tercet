@@ -60,5 +60,12 @@ jobs:
       - run: bun install --frozen-lockfile
       # Clones upstream's main and rewrites vendor/t3 in this throwaway checkout only.
       - run: scripts/sync-upstream main
-      - run: bun install
+      # Upstream's own dependency versions: its vendored packages import gt-i18n and need the effect
+      # release its catalog pins, and the lockfile here knows neither.
+      - name: match upstream's dependency versions
+        run: |
+          up="${XDG_CACHE_HOME:-$HOME/.cache}/tercet/upstream-main"
+          effect=$(sed -n 's/^  effect: \([0-9][^ ]*\)$/\1/p' "$up/pnpm-workspace.yaml" | head -1)
+          i18n=$(jq -r '.dependencies["gt-i18n"] // empty' "$up/packages/shared/package.json")
+          bun add --dev ${effect:+"effect@$effect"} ${i18n:+"gt-i18n@$i18n"}
       - run: bun run typecheck

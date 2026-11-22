@@ -149965,7 +149965,8 @@ function RequestPanel({
     setError("");
     try {
       if (card.kind === "secret") {
-        const input = secretRequestAnswerInput(card.item, choice === 0 ? { type: "save", secret: value4.current } : { type: "decline" });
+        const save = { type: "save", secret: value4.current, values: { "": value4.current } };
+        const input = secretRequestAnswerInput(card.item, choice === 0 ? save : { type: "decline" });
         if (!input)
           return;
         value4.current = "";

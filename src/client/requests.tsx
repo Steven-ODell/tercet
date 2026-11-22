@@ -150,10 +150,10 @@ export function RequestPanel({
     setError("");
     try {
       if (card.kind === "secret") {
-        const input = secretRequestAnswerInput(
-          card.item,
-          choice === 0 ? { type: "save", secret: value.current } : { type: "decline" },
-        );
+        // A variable, not a literal: pinned releases take `secret`, newer upstream takes `values`,
+        // and a non-literal object satisfies both without an excess-property error.
+        const save = { type: "save" as const, secret: value.current, values: { "": value.current } };
+        const input = secretRequestAnswerInput(card.item, choice === 0 ? save : { type: "decline" });
         if (!input) return;
         value.current = "";
         setCustomText("");

@@ -14,17 +14,19 @@ test("SSH capture requires an explicit recorder and PCM sanitization rejects non
   ]);
 });
 test("recorder stop flushes PCM and cancel terminates the child", async () => {
+  // The grace must outlast the child's startup: a slow runner (macOS CI) can take over 100 ms to
+  // run the script, and a SIGINT before its handler exists kills it with no audio.
   const host = systemHost();
   const script =
     'process.stdout.write(Buffer.alloc(640)); process.on("SIGINT",()=>process.exit(0)); setInterval(()=>{},1000)';
   const recording = await startRecording(host, [process.execPath, "-e", script], {
-    startGraceMs: 100,
+    startGraceMs: 1500,
   });
   const pcm = await recording.stop();
   expect(pcm.length).toBe(640);
   expect(await recording.stop()).toBe(pcm);
   const second = await startRecording(host, [process.execPath, "-e", script], {
-    startGraceMs: 100,
+    startGraceMs: 1500,
   });
   second.cancel();
   second.cancel();
