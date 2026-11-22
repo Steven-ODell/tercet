@@ -30,6 +30,7 @@ import {
   pageUrl,
   mediaUrl,
   answerSecret,
+  refreshModelCatalog,
   searchThreads,
   followShell,
   followThread,
@@ -134,6 +135,8 @@ export function platform(
     },
     answerSecret: (token: string, input: import("@t3tools/contracts").SecretRequestAnswerInput) =>
       answerSecret(config.url, token, input),
+    refreshModels: (token: string) => refreshModelCatalog(config.url, token),
+    autoFavorites: async () => config.settings.defaults.autoFavorites,
     modelFavorites: async () =>
       Schema.decodeUnknownSync(ModelFavorites)(config.settings.defaults.favorites),
     favoriteEntries: async () => config.settings.defaults.favorites,

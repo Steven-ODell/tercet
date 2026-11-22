@@ -83009,7 +83009,7 @@ var defaultSettings = () => ({
   keys: {},
   icons: "unicode",
   layout: "auto",
-  defaults: { sendShortcut: "enter", favorites: [], sidebarWorkingShelf: false, hints: true },
+  defaults: { sendShortcut: "enter", favorites: [], autoFavorites: [], sidebarWorkingShelf: false, hints: true },
   launchers: {},
   media: { protocol: "auto", video: "player", pageShots: true },
   commands: {},
@@ -83309,6 +83309,7 @@ var schema = struct({
       model: text2,
       options: record(/^[A-Za-z][\w.-]*$/, "option names use letters, digits, ., _ and -", optionValue)
     })),
+    autoFavorites: list(struct({ provider: text2, model: text2 })),
     sidebarWorkingShelf: bool,
     hints: bool
   }),
@@ -144851,6 +144852,9 @@ function completeComposer(url, token, cwd, prefix, query2, instanceId) {
 function searchThreads(url, token, query2) {
   return withConnection(url, token, (session) => session.client[ORCHESTRATION_V2_WS_METHODS.searchThreads]({ query: query2, limit: 50 }));
 }
+function refreshModelCatalog(url, token) {
+  return withConnection(url, token, (session) => session.client[WS_METHODS.serverRefreshProviders]({ modelCatalogOnly: true }));
+}
 function answerSecret(url, token, input) {
   return withConnection(url, token, (session) => session.client[WS_METHODS.secretsAnswerRequest](input));
 }
@@ -145026,6 +145030,8 @@ function platform(config, sshHost, env = process.env) {
       read: (token, input) => fileMethods.read(config.url, token, input)
     },
     answerSecret: (token, input) => answerSecret(config.url, token, input),
+    refreshModels: (token) => refreshModelCatalog(config.url, token),
+    autoFavorites: async () => config.settings.defaults.autoFavorites,
     modelFavorites: async () => decodeUnknownSync2(ModelFavorites)(config.settings.defaults.favorites),
     favoriteEntries: async () => config.settings.defaults.favorites,
     saveFavorite: async (entry, on2, seed) => {
@@ -148472,6 +148478,13 @@ function createClient(boundary, managedToken, now2 = Date.now) {
           return Promise.reject(new Error("Files unavailable; reconnect and retry"));
         return runtime2.runPromise(boundary.files.read(token, input));
       }
+    },
+    async refreshModels() {
+      if (!token || !boundary.refreshModels)
+        return;
+      await runtime2.runPromise(boundary.refreshModels(token)).catch(() => {
+        return;
+      });
     },
     answerSecret(input) {
       if (!token || !boundary.answerSecret)
@@ -152202,15 +152215,27 @@ async function saveFavoriteEdit(boundary, selection, on2, seed) {
   const base = { provider: selection.instanceId, model: selection.model };
   return boundary.saveFavorite?.(on2 ? { ...base, options: optionValues(selection) } : base, on2, seed);
 }
-function catalogRows(providers, favorites, query2) {
+function matchesPattern(pattern, slug) {
+  const escaped = pattern.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"));
+  return new RegExp(`^${escaped.join(".*")}$`).test(slug);
+}
+function catalogRows(providers, favorites, query2, auto = []) {
+  const rank2 = (provider2, slug) => {
+    const listed = favorites.findIndex((f) => f.provider === provider2.instanceId && f.model === slug);
+    if (listed >= 0)
+      return listed;
+    const matched = auto.some((a) => a.provider === provider2.instanceId && matchesPattern(a.model, slug));
+    return matched ? favorites.length : -1;
+  };
   const rows = providers.flatMap((provider2) => provider2.models.map((model3) => ({
     provider: provider2,
     model: model3,
-    favorite: favorites.some((f) => f.provider === provider2.instanceId && f.model === model3.slug)
+    favorite: rank2(provider2, model3.slug) >= 0,
+    rank: rank2(provider2, model3.slug)
   })));
   const matches = rows.filter((row) => `${resolveProviderInstanceDisplayName(row.provider)} ${row.model.name} ${row.model.slug}`.toLowerCase().includes(query2.toLowerCase()));
   return [
-    ...matches.filter((r) => r.favorite).sort((a, b) => favorites.findIndex((f) => f.provider === a.provider.instanceId && f.model === a.model.slug) - favorites.findIndex((f) => f.provider === b.provider.instanceId && f.model === b.model.slug)),
+    ...matches.filter((r) => r.favorite).sort((a, b) => a.rank - b.rank),
     ...matches.filter((r) => !r.favorite)
   ];
 }
@@ -152231,6 +152256,7 @@ function ModelPicker({
   const thread = snapshot2?.threads.find((t) => t.id === id2);
   const [favorites, setFavorites] = import_react34.useState([]);
   const [entries3, setEntries] = import_react34.useState([]);
+  const [auto, setAuto] = import_react34.useState([]);
   const [error2, setError] = import_react34.useState("");
   const [notice, setNotice] = import_react34.useState("");
   const [busy, setBusy] = import_react34.useState(false);
@@ -152254,13 +152280,18 @@ function ModelPicker({
       if (!stale)
         setEntries(value4);
     }).catch(fail16);
+    client.boundary.autoFavorites?.().then((value4) => {
+      if (!stale)
+        setAuto(value4);
+    }).catch(fail16);
+    client.refreshModels();
     return () => {
       stale = true;
     };
   }, [client]);
   const preferences = useClientAtom(client, client.modelPreferences);
   const favoriteList = effectiveFavorites(entries3, resolveModelPreferences(preferences, { favorites }).favorites);
-  const rows = catalogRows(providers, favoriteList, query2);
+  const rows = catalogRows(providers, favoriteList, query2, auto);
   const provider2 = providers.find((p) => p.instanceId === selection?.instanceId);
   const model3 = provider2?.models.find((m) => m.slug === selection?.model);
   const descriptors = model3?.capabilities?.optionDescriptors ?? [];
@@ -163053,6 +163084,7 @@ function ContextDropdown({
 }
 
 // src/client/frame.tsx
+var MODEL_WATCH_MS = 5 * 60 * 1000;
 function rightWidth(kind2, width2) {
   if (kind2 === "terminal" || kind2 === "editor")
     return Math.max(24, Math.floor(width2 * 0.5));
@@ -163091,6 +163123,11 @@ function AppFrame({
   const agentThread = agentId ? snapshot2?.threads.find((thread) => thread.id === agentId) ?? client.registry.get(client.archives).find((thread) => thread.id === agentId) : undefined;
   const selected = snapshot2?.threads.find((thread) => thread.id === selectedId);
   const providers = useClientAtom(client, client.providers);
+  import_react63.useEffect(() => {
+    client.refreshModels();
+    const timer = setInterval(() => void client.refreshModels(), MODEL_WATCH_MS);
+    return () => clearInterval(timer);
+  }, [client]);
   const transcript = selected ? client.getThread(selected.id) : undefined;
   const projection = transcript?.projection;
   const providerThread = projection?.providerThreads?.find((thread) => thread.id === selected?.activeProviderThreadId);

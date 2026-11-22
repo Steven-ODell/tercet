@@ -80,6 +80,10 @@ export interface Boundary {
     token: string,
     input: import("@t3tools/contracts").SecretRequestAnswerInput,
   ) => Effect.Effect<unknown, unknown>;
+  /** Asks the server to re-read model catalogs; the new providers arrive on the config stream. */
+  refreshModels?: (token: string) => Effect.Effect<unknown, unknown>;
+  /** `defaults.autoFavorites` patterns, straight from the settings in memory. */
+  autoFavorites?: () => Promise<import("./model-picker").FavoriteRef[]>;
   modelFavorites?: () => Promise<import("@t3tools/contracts").ClientSettings["favorites"]>;
   /** The live favorites with their `options`, straight from the settings in memory. */
   favoriteEntries?: () => Promise<import("./favorites-file").FavoriteEntry[]>;
@@ -443,6 +447,11 @@ export function createClient(
           return Promise.reject(new Error("Files unavailable; reconnect and retry"));
         return runtime.runPromise(boundary.files.read(token, input));
       },
+    },
+    /** Best effort: offline or an older server just leaves the catalog as it is. */
+    async refreshModels() {
+      if (!token || !boundary.refreshModels) return;
+      await runtime.runPromise(boundary.refreshModels(token)).catch(() => undefined);
     },
     answerSecret(input: import("@t3tools/contracts").SecretRequestAnswerInput) {
       if (!token || !boundary.answerSecret) return Promise.reject(new Error("Offline"));

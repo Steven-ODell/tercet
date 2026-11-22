@@ -103,6 +103,12 @@ export interface Settings {
     sendShortcut: (typeof SEND_SHORTCUTS)[number];
     /** `options` are model option values (`effort`, `fastMode`) a fresh selection uses before its own defaults. */
     favorites: { provider: string; model: string; options?: Record<string, string | boolean> }[];
+    /**
+     * Models that count as favorites without being listed: `provider` is a provider instance id and
+     * `model` may use `*` as a wildcard, e.g. `llama-local/*`. A new model that matches shows up in
+     * the picker's favorites as soon as the server reports it.
+     */
+    autoFavorites: { provider: string; model: string }[];
     sidebarWorkingShelf: boolean;
     /** The two rows of key hints at the bottom; the `hints` key toggles them. */
     hints: boolean;
@@ -170,7 +176,7 @@ export const defaultSettings = (): Settings => ({
   keys: {},
   icons: "unicode",
   layout: "auto",
-  defaults: { sendShortcut: "enter", favorites: [], sidebarWorkingShelf: false, hints: true },
+  defaults: { sendShortcut: "enter", favorites: [], autoFavorites: [], sidebarWorkingShelf: false, hints: true },
   launchers: {},
   media: { protocol: "auto", video: "player", pageShots: true },
   commands: {},
@@ -574,6 +580,7 @@ const schema = struct({
         options: record(/^[A-Za-z][\w.-]*$/, "option names use letters, digits, ., _ and -", optionValue),
       }),
     ),
+    autoFavorites: list(struct({ provider: text, model: text })),
     sidebarWorkingShelf: bool,
     hints: bool,
   }),

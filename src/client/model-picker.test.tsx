@@ -15,6 +15,7 @@ import { AppFrame } from "./frame";
 import { defaultRuntimeMode } from "./model-defaults";
 import {
   catalogRows,
+  matchesPattern,
   effectiveFavorites,
   favoriteEntry,
   saveFavoriteEdit,
@@ -80,6 +81,29 @@ test("favorites retain settings order and exact instance routing; options belong
       options: [{ id: "fastMode", value: true }],
     }).options,
   ).toEqual([]);
+});
+
+test("autoFavorites patterns pick up new models after the listed favorites, in catalog order", () => {
+  const local = {
+    ...provider,
+    instanceId: ProviderInstanceId.make("opencode"),
+    models: ["opencode/free-a", "llama-local/qwen3.8-9b", "ollama/phi", "llama-local/inkling-2-mini"].map(
+      (slug) => ({ slug, name: slug, isCustom: false, capabilities: null }),
+    ),
+  };
+  const listed = [{ provider: "opencode", model: "opencode/free-a" }];
+  const auto = [{ provider: "opencode", model: "llama-local/*" }];
+  const rows = catalogRows([local], listed, "", auto);
+  expect(rows.map((r) => [r.model.slug, r.favorite])).toEqual([
+    ["opencode/free-a", true],
+    ["llama-local/qwen3.8-9b", true],
+    ["llama-local/inkling-2-mini", true],
+    ["ollama/phi", false],
+  ]);
+  // A pattern only applies to its own provider, and `.` in it is literal.
+  expect(catalogRows([provider], [], "", auto).some((r) => r.favorite)).toBe(false);
+  expect(matchesPattern("gpt-6.*", "gpt-6.2-sol")).toBe(true);
+  expect(matchesPattern("gpt-6.*", "gpt-6x2")).toBe(false);
 });
 
 test("keyboard and pointer model/options/runtime selection, cancellation, errors and new-thread defaults", async () => {

@@ -222,18 +222,38 @@ export async function saveFavoriteEdit(
   );
 }
 
+/** True when `slug` matches `pattern`, where `*` stands for any run of characters. */
+export function matchesPattern(pattern: string, slug: string) {
+  const escaped = pattern.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"));
+  return new RegExp(`^${escaped.join(".*")}$`).test(slug);
+}
+
+/**
+ * Favorites first (in settings order), then models matching an `autoFavorites` pattern in catalog
+ * order, then everything else.
+ */
 export function catalogRows(
   providers: readonly ServerProvider[],
   favorites: readonly FavoriteRef[],
   query: string,
+  auto: readonly FavoriteRef[] = [],
 ) {
+  const rank = (provider: ServerProvider, slug: string) => {
+    const listed = favorites.findIndex(
+      (f) => f.provider === provider.instanceId && f.model === slug,
+    );
+    if (listed >= 0) return listed;
+    const matched = auto.some(
+      (a) => a.provider === provider.instanceId && matchesPattern(a.model, slug),
+    );
+    return matched ? favorites.length : -1;
+  };
   const rows = providers.flatMap((provider) =>
     provider.models.map((model) => ({
       provider,
       model,
-      favorite: favorites.some(
-        (f) => f.provider === provider.instanceId && f.model === model.slug,
-      ),
+      favorite: rank(provider, model.slug) >= 0,
+      rank: rank(provider, model.slug),
     })),
   );
   const matches = rows.filter((row) =>
@@ -242,19 +262,7 @@ export function catalogRows(
       .includes(query.toLowerCase()),
   );
   return [
-    ...matches
-      .filter((r) => r.favorite)
-      .sort(
-        (a, b) =>
-          favorites.findIndex(
-            (f) =>
-              f.provider === a.provider.instanceId && f.model === a.model.slug,
-          ) -
-          favorites.findIndex(
-            (f) =>
-              f.provider === b.provider.instanceId && f.model === b.model.slug,
-          ),
-      ),
+    ...matches.filter((r) => r.favorite).sort((a, b) => a.rank - b.rank),
     ...matches.filter((r) => !r.favorite),
   ];
 }
@@ -289,6 +297,7 @@ export function ModelPicker({
   const thread = snapshot?.threads.find((t) => t.id === id);
   const [favorites, setFavorites] = useState<ClientSettings["favorites"]>([]);
   const [entries, setEntries] = useState<FavoriteEntry[]>([]);
+  const [auto, setAuto] = useState<FavoriteRef[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -328,6 +337,14 @@ export function ModelPicker({
         if (!stale) setEntries(value);
       })
       .catch(fail);
+    void client.boundary
+      .autoFavorites?.()
+      .then((value) => {
+        if (!stale) setAuto(value);
+      })
+      .catch(fail);
+    // Opening the picker re-reads the server's model catalogs; new models arrive on the config stream.
+    void client.refreshModels();
     return () => {
       stale = true;
     };
@@ -337,7 +354,7 @@ export function ModelPicker({
     entries,
     resolveModelPreferences(preferences, { favorites }).favorites,
   );
-  const rows = catalogRows(providers, favoriteList, query);
+  const rows = catalogRows(providers, favoriteList, query, auto);
   const provider = providers.find(
     (p) => p.instanceId === selection?.instanceId,
   );

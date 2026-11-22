@@ -183,6 +183,17 @@ export function searchThreads(url: string, token: string, query: string) {
   );
 }
 
+/**
+ * A model picker opened (or the periodic watch fired): the server re-reads provider model catalogs
+ * that changed, such as new OpenCode, Ollama or llama.cpp models, and the config stream carries the
+ * result into `client.providers`.
+ */
+export function refreshModelCatalog(url: string, token: string) {
+  return withConnection(url, token, (session) =>
+    session.client[WS_METHODS.serverRefreshProviders]({ modelCatalogOnly: true }),
+  );
+}
+
 export function answerSecret(
   url: string,
   token: string,

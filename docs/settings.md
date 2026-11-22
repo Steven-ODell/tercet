@@ -92,6 +92,7 @@ Command-line flags (`--url`, `--base-dir`, `--token-file`) win over the file. Se
 | `defaults.mode`                                       | `approval-required`, `auto-accept-edits`, `auto`, `full-access` | per provider                               | now       |
 | `defaults.sendShortcut`                               | `enter`, `mod-enter`, `mod-enter-multiline`                     | `enter`                                    | now       |
 | `defaults.favorites`                                  | list of `{ provider, model, options? }`                         | `[]`                                       | now       |
+| `defaults.autoFavorites`                               | list of `{ provider, model }` (`*` wildcard in `model`)         | `[]`                                       | now       |
 | `defaults.sidebarWorkingShelf`                        | boolean                                                         | `false`                                    | now       |
 | `defaults.hints`                                      | boolean                                                         | `true`                                     | now       |
 | `layout`                                              | `auto`, `compact`, `full` (see Layout)                          | `auto`                                     | now       |
@@ -144,6 +145,28 @@ lost on a save.
 When `defaults.favorites` is non-empty it is the favorites list for tercet. When it is empty or
 absent, tercet shows the T3 server's favorites; the first favorite saved from tercet copies the
 list already shown into the file.
+
+### Auto favorites and model discovery
+
+`defaults.autoFavorites` lists models that count as favorites without naming each one. `provider`
+is a provider instance id and `model` may use `*` as a wildcard:
+
+```jsonc
+"autoFavorites": [
+  { "provider": "opencode", "model": "llama-local/*" },  // llama.cpp models served through OpenCode
+  { "provider": "opencode", "model": "ollama/*" },
+  { "provider": "claudeAgent", "model": "claude-fable-*" },
+  { "provider": "codex", "model": "gpt-6.*" }
+]
+```
+
+Matching models show in the favorites group, after the ones in `favorites` and in the server's
+catalog order, with the model's own default options. To drop one, remove or narrow the pattern.
+
+Tercet asks the server to re-read its model catalogs when it starts, every 5 minutes, and each time
+the model picker opens, so a model you add to OpenCode, Ollama or llama.cpp, or one a provider
+releases, appears without restarting anything. An older server, or one that is offline, just keeps
+the catalog it has.
 
 ## Layout
 

@@ -13,6 +13,9 @@ import { pendingCard, requestKey, RequestPanel } from "./requests";
 import { useAgentRows } from "./agents";
 import { formatSubagentDisplayTitle } from "@t3tools/client-runtime/state/subagent-display";
 import { ModelPicker } from "./model-picker";
+
+/** How often tercet asks the server to re-read model catalogs while it is open. */
+const MODEL_WATCH_MS = 5 * 60 * 1000;
 import { ThreadPalette } from "./thread-palette";
 import { createDictation } from "./dictation";
 import { hasDictation } from "../actions";
@@ -101,6 +104,13 @@ export function AppFrame({
     : undefined;
   const selected = snapshot?.threads.find((thread) => thread.id === selectedId);
   const providers = useClientAtom(client, client.providers);
+  // Watch the model catalogs: a model added to OpenCode, Ollama, llama.cpp or a provider shows up
+  // without opening the picker.
+  useEffect(() => {
+    void client.refreshModels();
+    const timer = setInterval(() => void client.refreshModels(), MODEL_WATCH_MS);
+    return () => clearInterval(timer);
+  }, [client]);
   // Upstream keeps context usage on the thread's active provider thread, not on the shell.
   const transcript = selected ? client.getThread(selected.id) : undefined;
   const projection = transcript?.projection;

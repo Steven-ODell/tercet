@@ -50,6 +50,7 @@ test("a missing settings file gives the defaults", async () => {
   expect(loaded.settings.defaults).toEqual({
     sendShortcut: "enter",
     favorites: [],
+    autoFavorites: [],
     sidebarWorkingShelf: false,
     hints: true,
   });
@@ -111,6 +112,7 @@ test("JSONC with comments and trailing commas fills every section", () => {
     mode: "full-access",
     sendShortcut: "mod-enter",
     favorites: [{ provider: "codex", model: "gpt-5.5" }],
+    autoFavorites: [],
     sidebarWorkingShelf: true,
     hints: false,
   });
