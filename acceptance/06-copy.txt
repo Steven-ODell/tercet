@@ -5,7 +5,7 @@ tercet · live · threads=1 · Supervised Context 3% ▰▰▰▱▱▱▱▱▱
 │[h] All threads             ││user                                                                                    │
 │                            ││Reply exactly acceptance-stream-ok. Do not use tools or change files.                   │
 │  tercet acceptance sandbox ││                                                                                        │
-│  › · ■ demo-app         now││────────────────────────────────────────────────────────────────────────────────────────│
+│  › · ■ demo-app       ✓ now││────────────────────────────────────────────────────────────────────────────────────────│
 │  ▸ Settled (0)             ││[+] Thought · 1 work items                                                              │
 │                            ││assistant                                                                               │
 │                            ││acceptance-stream-ok                                                                    │

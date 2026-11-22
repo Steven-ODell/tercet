@@ -151460,7 +151460,7 @@ function threadBadge(thread, visited = 0) {
   if (status2 === "failed")
     return "\xD7 failed";
   if (["preparing", "queued", "starting", "running"].includes(status2))
-    return "\u25B6 running";
+    return "\u25B6";
   if (thread.latestVisibleMessage?.role === "assistant" && stamp(thread.latestVisibleMessage.updatedAt) > Math.max(stamp(thread.lastVisitedAt), visited))
     return "\u25CF unread";
   return "\xB7";
@@ -151471,7 +151471,9 @@ function wrapName(text5, width2) {
 `)) {
     let row = "";
     let cells = 0;
-    for (const { segment } of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(line)) {
+    for (const { segment } of new Intl.Segmenter(undefined, {
+      granularity: "grapheme"
+    }).segment(line)) {
       const size6 = Bun.stringWidth(segment);
       if (cells + size6 > Math.max(2, width2) && row) {
         rows.push(row);
@@ -151528,7 +151530,11 @@ function sidebarEntries(snapshot2, options2 = {}) {
   } = options2;
   const projects = new Map(snapshot2.projects.map((project2) => [
     String(project2.id),
-    { title: project2.title, color: projectColor(project2), glyph: projectGlyph(project2) }
+    {
+      title: project2.title,
+      color: projectColor(project2),
+      glyph: projectGlyph(project2)
+    }
   ]));
   const requests = pendingSubagentRequestsByThread(snapshot2.threads);
   const shells = snapshot2.threads.filter((thread) => !thread.deletedAt).map((thread) => presentThreadShell(SINGLE_ENVIRONMENT, thread, requests.get(thread.id) ?? null));
@@ -151552,7 +151558,11 @@ function sidebarEntries(snapshot2, options2 = {}) {
     return [];
   const row = (shell2) => {
     const icon9 = selectionIcon(shell2.source.modelSelection, providers);
+    const badge = waiting2?.has(shell2.id) ? "? waiting" : threadBadge(shell2.source, visited?.get(shell2.id));
+    const snoozedNow = effectiveSnoozed(shell2, { now: now2 });
     return {
+      running: badge === "\u25B6",
+      settleable: shell2.settledOverride !== "settled" && !snoozedNow,
       key: shell2.id,
       thread: shell2.source,
       project: projects.get(shell2.projectId)?.title ?? shell2.projectId,
@@ -151561,7 +151571,7 @@ function sidebarEntries(snapshot2, options2 = {}) {
       modelIcon: icon9,
       timeLabel: sidebarTimeLabel(shell2.settledOverride === "settled" && !effectiveSnoozed(shell2, { now: now2 }) ? resolveSettledThreadTimestamp(shell2) : shell2.latestUserMessageAt ?? shell2.updatedAt, Date.parse(now2)),
       text: `${shell2.pinnedAt ? "\u25C6 " : ""}${shell2.title}
-${icon9.glyph} ${waiting2?.has(shell2.id) ? "? waiting" : threadBadge(shell2.source, visited?.get(shell2.id))}`
+${icon9.glyph} ${badge}`
     };
   };
   const shelfRows = (shelf, threads) => (expanded.has(shelf) ? threads : threads.filter((shell2) => shell2.id === selected)).map(row);
@@ -151600,7 +151610,9 @@ function truncateName(text5, width2) {
     return line;
   let row = "";
   let cells = 0;
-  for (const { segment } of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(line)) {
+  for (const { segment } of new Intl.Segmenter(undefined, {
+    granularity: "grapheme"
+  }).segment(line)) {
     const size6 = Bun.stringWidth(segment);
     if (cells + size6 > Math.max(1, width2) - 1)
       break;
@@ -151610,6 +151622,7 @@ function truncateName(text5, width2) {
   return `${row}\u2026`;
 }
 var MENU_CELL = "[\u2026]";
+var SETTLE_CELL = "\u2713";
 function wrapWords(text5, width2) {
   const rows = [];
   let row = "";
@@ -151631,7 +151644,8 @@ function wrapWords(text5, width2) {
 function wrappedSidebarRows(entries3, width2, menuKey) {
   return entries3.flatMap((entry, index3) => {
     const glyph = entry.modelIcon?.glyph;
-    const timeWidth = entry.timeLabel ? Bun.stringWidth(entry.timeLabel) + 1 : 0;
+    const settle = entry.settleable === true && entry.thread !== undefined;
+    const timeWidth = (entry.timeLabel ? Bun.stringWidth(entry.timeLabel) + 1 : 0) + (settle ? 2 : 0);
     const menu = entry.thread !== undefined && entry.key === menuKey;
     const plain = (text5, extra = {}) => ({
       entry,
@@ -151669,12 +151683,14 @@ function wrappedSidebarRows(entries3, width2, menuKey) {
       const tailRow = rows[rows.length - 1];
       const used = Bun.stringWidth(tailRow.lead + tailRow.text + tailRow.projectText);
       const labelWidth = Bun.stringWidth(entry.timeLabel);
-      const pad = " ".repeat(Math.max(0, width2 - used - labelWidth));
-      if (used + timeWidth <= width2)
-        tailRow.timeText = pad + entry.timeLabel;
-      else
-        rows.push(plain("", { timeText: " ".repeat(Math.max(0, width2 - labelWidth)) + entry.timeLabel }));
+      const fits = used + timeWidth <= width2;
+      const target2 = fits ? tailRow : plain("");
+      target2.timeText = settle ? entry.timeLabel : " ".repeat(Math.max(0, fits ? width2 - used - labelWidth : width2 - labelWidth)) + entry.timeLabel;
+      if (!fits)
+        rows.push(target2);
     }
+    if (settle)
+      rows[rows.length - 1].settleText = SETTLE_CELL;
     if (entry.thread !== undefined && entries3[index3 + 1]?.thread !== undefined)
       rows.push(plain("\u2500".repeat(Math.max(1, width2)), { rule: true }));
     return rows;
@@ -151685,7 +151701,8 @@ function sidebarRows(entries3, width2, options2 = {}) {
     return wrappedSidebarRows(entries3, width2, options2.menuKey);
   return entries3.flatMap((entry, index3) => {
     const glyph = entry.modelIcon?.glyph;
-    const timeWidth = entry.timeLabel ? Bun.stringWidth(entry.timeLabel) + 1 : 0;
+    const settle = entry.settleable === true && entry.thread !== undefined;
+    const timeWidth = (entry.timeLabel ? Bun.stringWidth(entry.timeLabel) + 1 : 0) + (settle ? 2 : 0);
     const lines = entry.text.split(`
 `);
     const rows = lines.map((line, at) => {
@@ -151722,8 +151739,10 @@ function sidebarRows(entries3, width2, options2 = {}) {
     }
     if (entry.timeLabel) {
       const space = width2 - Bun.stringWidth(last.lead + last.text + last.projectText);
-      last.timeText = " ".repeat(Math.max(0, space - Bun.stringWidth(entry.timeLabel))) + entry.timeLabel;
+      last.timeText = settle ? entry.timeLabel : " ".repeat(Math.max(0, space - Bun.stringWidth(entry.timeLabel))) + entry.timeLabel;
     }
+    if (settle)
+      last.settleText = SETTLE_CELL;
     return withRule();
   });
 }
@@ -151735,6 +151754,7 @@ function ThreadSidebar({
   enabled,
   keyboardEnabled,
   onMenu,
+  onSettle,
   onOpen,
   wrapNames = false,
   tapOpens = false
@@ -151861,6 +151881,10 @@ function ThreadSidebar({
         onMenu(current2.thread.id);
       }
     }
+    if (key5.name === "s" && onSettle && current2?.thread && current2.settleable) {
+      key5.preventDefault();
+      onSettle(current2.thread.id);
+    }
     if (key5.name === "h")
       toggle();
     if (key5.name === "u" && footerHeader)
@@ -151912,7 +151936,7 @@ function ThreadSidebar({
         },
         children: [
           rows.slice(top, top + viewport).map((row, index3) => {
-            const fg = row.rule ? theme.rule : row.entry.thread ? row.entry.thread.id === selected ? theme.strong : theme.text : theme.muted;
+            const fg = row.rule ? theme.rule : row.entry.thread ? row.entry.running ? theme.plain : row.entry.thread.id === selected ? theme.strong : theme.text : theme.muted;
             const bg = !row.rule && row.entry.key === (keyboardEnabled ? current2?.key : cursor) ? theme.highlight : undefined;
             const press = row.rule ? undefined : (event) => {
               if (enabled && event.button === 0) {
@@ -151926,22 +151950,22 @@ function ThreadSidebar({
             const body = /* @__PURE__ */ import_jsx_runtime.jsxs(import_jsx_runtime.Fragment, {
               children: [
                 row.lead ? /* @__PURE__ */ import_jsx_runtime.jsx("span", {
-                  fg: row.entry.modelIcon?.color,
+                  fg: row.entry.running ? theme.plain : row.entry.modelIcon?.color,
                   children: row.lead
                 }) : null,
                 row.text,
                 row.projectText ? /* @__PURE__ */ import_jsx_runtime.jsx("span", {
-                  fg: row.entry.projectColor,
+                  fg: row.entry.running ? theme.plain : row.entry.projectColor,
                   children: row.projectText
                 }) : null,
-                row.timeText ? /* @__PURE__ */ import_jsx_runtime.jsx("span", {
-                  fg: theme.muted,
+                row.timeText && row.settleText === undefined ? /* @__PURE__ */ import_jsx_runtime.jsx("span", {
+                  fg: row.entry.running ? theme.plain : theme.muted,
                   children: row.timeText
                 }) : null
               ]
             });
             const key5 = `${row.entry.key}:${top + index3}`;
-            if (row.menuText === undefined)
+            if (row.menuText === undefined && row.settleText === undefined)
               return /* @__PURE__ */ import_jsx_runtime.jsx("text", {
                 height: 1,
                 selectable: false,
@@ -151963,7 +151987,28 @@ function ThreadSidebar({
                   bg,
                   children: body
                 }),
-                /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+                row.settleText !== undefined ? /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+                  height: 1,
+                  width: Bun.stringWidth(row.settleText) + (row.timeText ? 2 : 0),
+                  selectable: false,
+                  fg: theme.accent,
+                  bg,
+                  onMouseUp: (event) => {
+                    event.stopPropagation();
+                    if (enabled && event.button === 0 && row.entry.thread)
+                      onSettle?.(row.entry.thread.id);
+                  },
+                  children: row.timeText ? ` ${row.settleText} ` : row.settleText
+                }) : null,
+                row.settleText !== undefined && row.timeText ? /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+                  height: 1,
+                  width: Bun.stringWidth(row.timeText),
+                  selectable: false,
+                  fg: row.entry.running ? theme.plain : theme.muted,
+                  bg,
+                  children: row.timeText
+                }) : null,
+                row.menuText !== undefined ? /* @__PURE__ */ import_jsx_runtime.jsx("text", {
                   height: 1,
                   width: Bun.stringWidth(row.menuText),
                   selectable: false,
@@ -151975,7 +152020,7 @@ function ThreadSidebar({
                       onMenu?.(row.entry.thread.id);
                   },
                   children: row.menuText
-                })
+                }) : null
               ]
             }, key5);
           }),
@@ -163586,6 +163631,10 @@ function AppFrame({
                 wrapNames: compact2,
                 tapOpens: oneView,
                 onOpen: () => setFocus("transcript"),
+                onSettle: (id3) => {
+                  const thread = allThreads(client).find((t) => t.id === id3);
+                  actions.run("settle", thread).catch((error2) => setActionError(String(error2?.message ?? error2)));
+                },
                 onMenu: (id3) => {
                   setMenuTarget(allThreads(client).find((t) => t.id === id3));
                   setOverlay("menu");

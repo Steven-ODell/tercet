@@ -45,7 +45,7 @@ export function threadBadge(thread: Thread, visited = 0) {
   const status = thread.activityRunStatus ?? thread.status;
   if (thread.pendingRuntimeRequest || status === "waiting") return "? waiting";
   if (status === "failed") return "× failed";
-  if (["preparing", "queued", "starting", "running"].includes(status)) return "▶ running";
+  if (["preparing", "queued", "starting", "running"].includes(status)) return "▶";
   if (
     thread.latestVisibleMessage?.role === "assistant" &&
     stamp(thread.latestVisibleMessage.updatedAt) > Math.max(stamp(thread.lastVisitedAt), visited)
@@ -60,9 +60,9 @@ export function wrapName(text: string, width: number): string[] {
   for (const line of text.replaceAll("\t", " ").split("\n")) {
     let row = "";
     let cells = 0;
-    for (const { segment } of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(
-      line,
-    )) {
+    for (const { segment } of new Intl.Segmenter(undefined, {
+      granularity: "grapheme",
+    }).segment(line)) {
       const size = Bun.stringWidth(segment);
       if (cells + size > Math.max(2, width) && row) {
         rows.push(row);
@@ -87,6 +87,10 @@ export interface SidebarEntry {
   /** The thread's model logo. `text` carries its glyph at the start of the status line. */
   modelIcon?: Icon;
   timeLabel?: string;
+  /** A live run: the whole row is drawn in plain white and the status is just `▶`. */
+  running?: boolean;
+  /** Gets a `✓` cell that settles the thread (not on settled or snoozed rows). */
+  settleable?: boolean;
   shelf?: SidebarShelf;
   /** Key of the first thread a Show more row reveals. */
   more?: string;
@@ -155,7 +159,11 @@ export function sidebarEntries(
   const projects = new Map(
     snapshot.projects.map((project) => [
       String(project.id),
-      { title: project.title, color: projectColor(project), glyph: projectGlyph(project) },
+      {
+        title: project.title,
+        color: projectColor(project),
+        glyph: projectGlyph(project),
+      },
     ]),
   );
   const requests = pendingSubagentRequestsByThread(snapshot.threads);
@@ -198,7 +206,13 @@ export function sidebarEntries(
 
   const row = (shell: EnvironmentThreadShell): SidebarEntry => {
     const icon = selectionIcon(shell.source.modelSelection, providers);
+    const badge = waiting?.has(shell.id)
+      ? "? waiting"
+      : threadBadge(shell.source, visited?.get(shell.id));
+    const snoozedNow = effectiveSnoozed(shell, { now });
     return {
+      running: badge === "▶",
+      settleable: shell.settledOverride !== "settled" && !snoozedNow,
       key: shell.id,
       thread: shell.source,
       project: projects.get(shell.projectId)?.title ?? shell.projectId,
@@ -211,9 +225,7 @@ export function sidebarEntries(
           : (shell.latestUserMessageAt ?? shell.updatedAt),
         Date.parse(now),
       ),
-      text: `${shell.pinnedAt ? "◆ " : ""}${shell.title}\n${icon.glyph} ${
-        waiting?.has(shell.id) ? "? waiting" : threadBadge(shell.source, visited?.get(shell.id))
-      }`,
+      text: `${shell.pinnedAt ? "◆ " : ""}${shell.title}\n${icon.glyph} ${badge}`,
     };
   };
   // A collapsed shelf never hides the open thread, as on web.
@@ -275,9 +287,9 @@ export function truncateName(text: string, width: number): string {
   if (Bun.stringWidth(line) <= width) return line;
   let row = "";
   let cells = 0;
-  for (const { segment } of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(
-    line,
-  )) {
+  for (const { segment } of new Intl.Segmenter(undefined, {
+    granularity: "grapheme",
+  }).segment(line)) {
     const size = Bun.stringWidth(segment);
     if (cells + size > Math.max(1, width) - 1) break;
     row += segment;
@@ -292,6 +304,8 @@ export interface SidebarRow {
   text: string;
   projectText: string;
   timeText: string;
+  /** The `✓` settle cell on a thread's last row, just left of the age. */
+  settleText?: string;
   rule: boolean;
   /** Compact only: the tappable thread-menu cell at the right end of the first title row. */
   menuText?: string;
@@ -303,6 +317,7 @@ export interface SidebarRowsOptions {
   menuKey?: string | undefined;
 }
 const MENU_CELL = "[…]";
+const SETTLE_CELL = "✓";
 
 /** wrapName that breaks between words; only a word wider than the row is split inside. */
 function wrapWords(text: string, width: number): string[] {
@@ -331,7 +346,10 @@ function wrappedSidebarRows(
 ): SidebarRow[] {
   return entries.flatMap((entry, index) => {
     const glyph = entry.modelIcon?.glyph;
-    const timeWidth = entry.timeLabel ? Bun.stringWidth(entry.timeLabel) + 1 : 0;
+    const settle = entry.settleable === true && entry.thread !== undefined;
+    // Room kept on the last row: the age, and the settle cell with its gap.
+    const timeWidth =
+      (entry.timeLabel ? Bun.stringWidth(entry.timeLabel) + 1 : 0) + (settle ? 2 : 0);
     const menu = entry.thread !== undefined && entry.key === menuKey;
     const plain = (text: string, extra: Partial<SidebarRow> = {}): SidebarRow => ({
       entry,
@@ -369,13 +387,16 @@ function wrappedSidebarRows(
       const tailRow = rows[rows.length - 1]!;
       const used = Bun.stringWidth(tailRow.lead + tailRow.text + tailRow.projectText);
       const labelWidth = Bun.stringWidth(entry.timeLabel);
-      const pad = " ".repeat(Math.max(0, width - used - labelWidth));
-      if (used + timeWidth <= width) tailRow.timeText = pad + entry.timeLabel;
-      else
-        rows.push(
-          plain("", { timeText: " ".repeat(Math.max(0, width - labelWidth)) + entry.timeLabel }),
-        );
+      const fits = used + timeWidth <= width;
+      const target = fits ? tailRow : plain("");
+      // Under a settle cell the layout pads between the text and the cell; no padding here.
+      target.timeText = settle
+        ? entry.timeLabel
+        : " ".repeat(Math.max(0, fits ? width - used - labelWidth : width - labelWidth)) +
+          entry.timeLabel;
+      if (!fits) rows.push(target);
     }
+    if (settle) rows[rows.length - 1]!.settleText = SETTLE_CELL;
     if (entry.thread !== undefined && entries[index + 1]?.thread !== undefined)
       rows.push(plain("─".repeat(Math.max(1, width)), { rule: true }));
     return rows;
@@ -394,7 +415,9 @@ export function sidebarRows(
   if (options.wrapNames) return wrappedSidebarRows(entries, width, options.menuKey);
   return entries.flatMap((entry, index) => {
     const glyph = entry.modelIcon?.glyph;
-    const timeWidth = entry.timeLabel ? Bun.stringWidth(entry.timeLabel) + 1 : 0;
+    const settle = entry.settleable === true && entry.thread !== undefined;
+    const timeWidth =
+      (entry.timeLabel ? Bun.stringWidth(entry.timeLabel) + 1 : 0) + (settle ? 2 : 0);
     const lines = entry.text.split("\n");
     const rows = lines.map((line, at) => {
       const text = truncateName(
@@ -438,9 +461,11 @@ export function sidebarRows(
     }
     if (entry.timeLabel) {
       const space = width - Bun.stringWidth(last.lead + last.text + last.projectText);
-      last.timeText =
-        " ".repeat(Math.max(0, space - Bun.stringWidth(entry.timeLabel))) + entry.timeLabel;
+      last.timeText = settle
+        ? entry.timeLabel
+        : " ".repeat(Math.max(0, space - Bun.stringWidth(entry.timeLabel))) + entry.timeLabel;
     }
+    if (settle) (last as SidebarRow).settleText = SETTLE_CELL;
     return withRule();
   });
 }
@@ -455,6 +480,7 @@ export function ThreadSidebar({
   enabled,
   keyboardEnabled,
   onMenu,
+  onSettle,
   onOpen,
   wrapNames = false,
   tapOpens = false,
@@ -465,6 +491,8 @@ export function ThreadSidebar({
   enabled: boolean;
   keyboardEnabled: boolean;
   onMenu?: (id: import("@t3tools/contracts").ThreadId) => void;
+  /** The `✓` cell was clicked: settle this thread (the same action as the thread menu's). */
+  onSettle?: (id: import("@t3tools/contracts").ThreadId) => void;
   /** `l` or Right opened a thread: the frame moves focus into the transcript. */
   onOpen?: () => void;
   /** Compact: wrapped names, and a tappable `[…]` thread menu on the highlighted row. */
@@ -622,6 +650,10 @@ export function ThreadSidebar({
         onMenu(current.thread.id);
       }
     }
+    if (key.name === "s" && onSettle && current?.thread && current.settleable) {
+      key.preventDefault();
+      onSettle(current.thread.id);
+    }
     if (key.name === "h") toggle();
     if (key.name === "u" && footerHeader) setLimitsOpen((open) => !open);
     if (key.name === "return" || key.name === "l" || key.name === "right") {
@@ -674,9 +706,11 @@ export function ThreadSidebar({
           const fg = row.rule
             ? theme.rule
             : row.entry.thread
-              ? row.entry.thread.id === selected
-                ? theme.strong
-                : theme.text
+              ? row.entry.running
+                ? theme.plain
+                : row.entry.thread.id === selected
+                  ? theme.strong
+                  : theme.text
               : theme.muted;
           const bg =
             !row.rule && row.entry.key === (keyboardEnabled ? current?.key : cursor)
@@ -694,39 +728,79 @@ export function ThreadSidebar({
               };
           const body = (
             <>
-              {row.lead ? <span fg={row.entry.modelIcon?.color}>{row.lead}</span> : null}
+              {row.lead ? (
+                <span fg={row.entry.running ? theme.plain : row.entry.modelIcon?.color}>
+                  {row.lead}
+                </span>
+              ) : null}
               {row.text}
-              {row.projectText ? <span fg={row.entry.projectColor}>{row.projectText}</span> : null}
-              {row.timeText ? <span fg={theme.muted}>{row.timeText}</span> : null}
+              {row.projectText ? (
+                <span fg={row.entry.running ? theme.plain : row.entry.projectColor}>
+                  {row.projectText}
+                </span>
+              ) : null}
+              {row.timeText && row.settleText === undefined ? (
+                <span fg={row.entry.running ? theme.plain : theme.muted}>{row.timeText}</span>
+              ) : null}
             </>
           );
           const key = `${row.entry.key}:${top + index}`;
-          if (row.menuText === undefined)
+          if (row.menuText === undefined && row.settleText === undefined)
             return (
               <text key={key} height={1} selectable={false} fg={fg} bg={bg} onMouseUp={press}>
                 {body}
               </text>
             );
-          // The `[…]` cell is its own target: a tap opens the thread menu instead of the thread.
+          // The `[…]` and `✓` cells are their own targets: a tap opens the thread menu, or settles
+          // the thread, instead of opening it.
           return (
             <box key={key} height={1} flexDirection="row" onMouseUp={press}>
               <text height={1} flexGrow={1} selectable={false} fg={fg} bg={bg}>
                 {body}
               </text>
-              <text
-                height={1}
-                width={Bun.stringWidth(row.menuText)}
-                selectable={false}
-                fg={theme.accent}
-                bg={bg}
-                onMouseUp={(event) => {
-                  event.stopPropagation();
-                  if (enabled && event.button === 0 && row.entry.thread)
-                    onMenu?.(row.entry.thread.id);
-                }}
-              >
-                {row.menuText}
-              </text>
+              {row.settleText !== undefined ? (
+                <text
+                  height={1}
+                  width={Bun.stringWidth(row.settleText) + (row.timeText ? 2 : 0)}
+                  selectable={false}
+                  fg={theme.accent}
+                  bg={bg}
+                  onMouseUp={(event) => {
+                    event.stopPropagation();
+                    if (enabled && event.button === 0 && row.entry.thread)
+                      onSettle?.(row.entry.thread.id);
+                  }}
+                >
+                  {row.timeText ? ` ${row.settleText} ` : row.settleText}
+                </text>
+              ) : null}
+              {row.settleText !== undefined && row.timeText ? (
+                <text
+                  height={1}
+                  width={Bun.stringWidth(row.timeText)}
+                  selectable={false}
+                  fg={row.entry.running ? theme.plain : theme.muted}
+                  bg={bg}
+                >
+                  {row.timeText}
+                </text>
+              ) : null}
+              {row.menuText !== undefined ? (
+                <text
+                  height={1}
+                  width={Bun.stringWidth(row.menuText)}
+                  selectable={false}
+                  fg={theme.accent}
+                  bg={bg}
+                  onMouseUp={(event) => {
+                    event.stopPropagation();
+                    if (enabled && event.button === 0 && row.entry.thread)
+                      onMenu?.(row.entry.thread.id);
+                  }}
+                >
+                  {row.menuText}
+                </text>
+              ) : null}
             </box>
           );
         })}

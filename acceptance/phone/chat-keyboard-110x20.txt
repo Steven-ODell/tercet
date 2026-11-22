@@ -2,7 +2,7 @@ tercet · live · threads=26 · Full access                                     
 ╭─≡ Threads──────────────────╮╭─¶ Transcript─────────────────────────────────────────────────────────────────╮
 │[h] All threads             ││when they do not fit, and the composer keeps four rows.                       │
 │                            ││                                                                              │
-│  ◎ · ■ Alpha repo       10m││• One view at a time                                                          │
+│  ◎ · ■ Alpha repo     ✓ 10m││• One view at a time                                                          │
 │────────────────────────────││• Tabs on the status row                                                      │
 │  Make the phone         […]││                                                                              │
 │  terminal layout usable    ││╭─ bash ──────────────────────────────────────────────────────────── [copy] ─╮│
@@ -12,7 +12,7 @@ tercet · live · threads=26 · Full access                                     
 │  composer above the        ││                                                                              │
 │  keyboard and never cut    │╰──────────────────────────────────────────────────────────────────────────────╯
 │  a label                   │╭─● » Composer─────────────────────────────────────────────────────────────────╮
-│  ✻ · ■ Alpha repo       10m││Wrap it, then run the tests                                                   │
+│  ✻ · ■ Alpha repo     ✓ 10m││Wrap it, then run the tests                                                   │
 │────────────────────────────││                                                                              │
 │                            ││                                                                              │
 │                            ││[send] [steer] [stop]                                                         │

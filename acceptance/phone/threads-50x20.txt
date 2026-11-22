@@ -3,16 +3,16 @@
 │[h] All threads                                 │
 │                                                │
 │  Alpha woke from snooze                        │
-│  ◎ · ■ Alpha repo                            5m│
+│  ◎ · ■ Alpha repo                          ✓ 5m│
 │────────────────────────────────────────────────│
 │  Alpha newest active thread                    │
-│  ◎ · ■ Alpha repo                           10m│
+│  ◎ · ■ Alpha repo                         ✓ 10m│
 │────────────────────────────────────────────────│
 │  Make the phone terminal layout usable in   […]│
 │  portrait and landscape: wrap every thread     │
 │  name, keep the composer above the keyboard    │
 │  and never cut a label                         │
-│  ✻ · ■ Alpha repo                           10m│
+│  ✻ · ■ Alpha repo                         ✓ 10m│
 │────────────────────────────────────────────────│
 │                                                │
 │                                                │

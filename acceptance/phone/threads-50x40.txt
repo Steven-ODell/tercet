@@ -5,35 +5,35 @@
 │[h] All threads                                 │
 │                                                │
 │  ◆ Alpha pinned first                          │
-│  ◎ · ■ Alpha repo                            1h│
+│  ◎ · ■ Alpha repo                          ✓ 1h│
 │────────────────────────────────────────────────│
 │  ◆ Beta pinned second                          │
-│  ◎ · ■ Beta repo                            50m│
+│  ◎ · ■ Beta repo                          ✓ 50m│
 │────────────────────────────────────────────────│
 │  Machine launched thread                       │
-│  ◎ · ■ Beta repo                             4m│
+│  ◎ · ■ Beta repo                           ✓ 4m│
 │────────────────────────────────────────────────│
 │  Alpha woke from snooze                        │
-│  ◎ · ■ Alpha repo                            5m│
+│  ◎ · ■ Alpha repo                          ✓ 5m│
 │────────────────────────────────────────────────│
 │  Alpha newest active thread                    │
-│  ◎ · ■ Alpha repo                           10m│
+│  ◎ · ■ Alpha repo                         ✓ 10m│
 │────────────────────────────────────────────────│
 │  Make the phone terminal layout usable in   […]│
 │  portrait and landscape: wrap every thread     │
 │  name, keep the composer above the keyboard    │
 │  and never cut a label                         │
-│  ✻ · ■ Alpha repo                           10m│
+│  ✻ · ■ Alpha repo                         ✓ 10m│
 │────────────────────────────────────────────────│
 │  Beta newer active thread                      │
-│  ◎ ▶ running · ■ Beta repo                  20m│
+│  ◎ ▶ · ■ Beta repo                        ✓ 20m│
 │────────────────────────────────────────────────│
 │  Alpha older active thread with a long name    │
 │  that wraps                                    │
-│  ◎ · ■ Alpha repo                           30m│
+│  ◎ · ■ Alpha repo                         ✓ 30m│
 │────────────────────────────────────────────────│
 │  Beta oldest active thread                     │
-│  ◎ · ■ Beta repo                            40m│
+│  ◎ · ■ Beta repo                          ✓ 40m│
 │                                                │
 │                                                │
 ╰────────────────────────────────────────────────╯

@@ -2,7 +2,7 @@ tercet · live · threads=26 · Full access                                     
 ╭─● ≡ Threads────────────────╮╭─¶ Transcript─────────────────────────────────────────────────────────────────╮
 │[h] All threads             ││──────────────────────────────────────────────────────────────────────────────│
 │                            ││assistant                                                                     │
-│  ◎ · ■ Alpha repo       10m││Done. Names wrap on word breaks, the project and age move to their own row    │
+│  ◎ · ■ Alpha repo     ✓ 10m││Done. Names wrap on word breaks, the project and age move to their own row    │
 │────────────────────────────││when they do not fit, and the composer keeps four rows.                       │
 │  Make the phone         […]││                                                                              │
 │  terminal layout usable    ││• One view at a time                                                          │
@@ -12,7 +12,7 @@ tercet · live · threads=26 · Full access                                     
 │  composer above the        │││ bun test                                                                   ││
 │  keyboard and never cut    ││╰────────────────────────────────────────────────────────────────────────────╯│
 │  a label                   ││Following tail                                                                │
-│  ✻ · ■ Alpha repo       10m││                                                                              │
+│  ✻ · ■ Alpha repo     ✓ 10m││                                                                              │
 │────────────────────────────│╰──────────────────────────────────────────────────────────────────────────────╯
 │                            │╭─» Composer───────────────────────────────────────────────────────────────────╮
 │                            ││Message · @file · /skill · :emoji                                             │

@@ -823,6 +823,12 @@ export function AppFrame({
                   wrapNames={compact}
                   tapOpens={oneView}
                   onOpen={() => setFocus("transcript")}
+                  onSettle={(id) => {
+                    const thread = allThreads(client).find((t) => t.id === id);
+                    actions
+                      .run("settle", thread)
+                      .catch((error) => setActionError(String(error?.message ?? error)));
+                  }}
                   onMenu={(id) => {
                     setMenuTarget(allThreads(client).find((t) => t.id === id));
                     setOverlay("menu");

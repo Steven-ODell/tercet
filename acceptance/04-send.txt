@@ -5,7 +5,7 @@ tercet · live · threads=1 · Supervised                                       
 │[h] All threads             ││No messages yet                                                                         │
 │                            ││                                                                                        │
 │  tercet acceptance sandbox ││                                                                                        │
-│  › · ■ demo-app         now││                                                                                        │
+│  › · ■ demo-app       ✓ now││                                                                                        │
 │  ▸ Settled (0)             ││                                                                                        │
 │                            ││                                                                                        │
 │                            ││                                                                                        │

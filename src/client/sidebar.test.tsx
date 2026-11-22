@@ -69,14 +69,24 @@ function fixture(): OrchestrationV2ShellSnapshot {
         title: "A long thread name that overflows with an ellipsis",
         updatedAt: DateTime.add(at, { hours: 1 }),
       },
-      { ...base, id: threadId("settled"), title: "Hidden history", settledOverride: "settled" },
+      {
+        ...base,
+        id: threadId("settled"),
+        title: "Hidden history",
+        settledOverride: "settled",
+      },
       ...["mcp", "server", "provider"].map((source) => ({
         ...base,
         id: threadId(source),
         creationSource: source as "mcp" | "server" | "provider",
         title: `Machine ${source}`,
       })),
-      { ...base, id: threadId("other"), projectId: projectId("project-b"), title: "Other project" },
+      {
+        ...base,
+        id: threadId("other"),
+        projectId: projectId("project-b"),
+        title: "Other project",
+      },
     ],
   };
 }
@@ -179,7 +189,10 @@ test("shelves collapse by default, count, sort soonest wake first and page settl
 
   // The open thread stays visible behind a collapsed shelf and past the settled page.
   const deep = settled[11]!.id;
-  const pulled = sidebarEntries(flatFixture(), { now: fixtureNow, selected: deep });
+  const pulled = sidebarEntries(flatFixture(), {
+    now: fixtureNow,
+    selected: deep,
+  });
   expect(pulled.at(-2)?.key).toBe("shelf:settled");
   expect(pulled.at(-1)?.key).toBe(deep);
   const paged = sidebarEntries(flatFixture(), {
@@ -230,7 +243,10 @@ test("Working shelf stays off by default and uses the shared inbox and working s
     folded.map((s) => s.id),
   );
   expect(entries.find((e) => e.shelf === "working")?.text).toBe("▾ Working");
-  const collapsed = sidebarEntries(working, { now: fixtureNow, workingShelf: true });
+  const collapsed = sidebarEntries(working, {
+    now: fixtureNow,
+    workingShelf: true,
+  });
   expect(collapsed.find((e) => e.shelf === "working")?.text).toBe("▸ Working (2)");
 });
 
@@ -257,7 +273,11 @@ test("ages use the last user interaction and settled completion, as on web", () 
   const snapshot = {
     ...fixture(),
     threads: [
-      { ...base, latestUserMessageAt: DateTime.subtract(at, { minutes: 5 }), updatedAt: at },
+      {
+        ...base,
+        latestUserMessageAt: DateTime.subtract(at, { minutes: 5 }),
+        updatedAt: at,
+      },
     ],
   };
   const entries = sidebarEntries(snapshot, { now: fixtureNow });
@@ -273,8 +293,10 @@ test("ages use the last user interaction and settled completion, as on web", () 
     ],
   };
   expect(
-    sidebarEntries(settled, { now: fixtureNow, expanded: shelves("settled") }).find((e) => e.thread)
-      ?.timeLabel,
+    sidebarEntries(settled, {
+      now: fixtureNow,
+      expanded: shelves("settled"),
+    }).find((e) => e.thread)?.timeLabel,
   ).toBe("2m");
   const fallback = {
     ...snapshot,
@@ -304,7 +326,9 @@ test.each([20, 32])(
     );
     try {
       await view.flush();
-      const entry = sidebarEntries(snapshot, { now: new Date(client.now()).toISOString() })[0]!;
+      const entry = sidebarEntries(snapshot, {
+        now: new Date(client.now()).toISOString(),
+      })[0]!;
       const lines = view.captureCharFrame().split("\n");
       const ageRow = lines.findIndex((line) => line.endsWith(entry.timeLabel!));
       expect(Bun.stringWidth(lines[ageRow]!)).toBe(width);
@@ -366,7 +390,14 @@ test("the machine filter is reversible and thread rows truncate to one line whil
   expect(roomy).toHaveLength(2);
   expect(roomy[1]!.projectText).toBe(" · Alpha");
   const narrow = sidebarRows(
-    [{ key: "x", text: "Name\n▶ running", project: "A very long project name", timeLabel: "5m" }],
+    [
+      {
+        key: "x",
+        text: "Name\n▶ running",
+        project: "A very long project name",
+        timeLabel: "5m",
+      },
+    ],
     24,
   );
   expect(narrow).toHaveLength(2);
@@ -387,15 +418,21 @@ test("project names use web's icon color: the saved icon, else one generated fro
     }),
   ).toBe("#c27aff");
   expect(
-    projectColor({ title: "mono", projectIcon: { kind: "monogram", text: "M", color: "blue" } }),
+    projectColor({
+      title: "mono",
+      projectIcon: { kind: "monogram", text: "M", color: "blue" },
+    }),
   ).toBe("#51a2ff");
   // Expected values come from apps/web's deriveProjectIdentity.
   expect(projectColor({ title: "demo-hub" })).toBe("#9ae600");
   expect(projectColor({ title: "mobile-app", projectIcon: null })).toBe("#ff8904");
   expect(projectColor({ title: "t3code" })).toBe("#00d5be");
-  expect(projectColor({ title: "emoji", projectIcon: { kind: "emoji", emoji: "🚀" } })).toBe(
-    "#9180ad",
-  );
+  expect(
+    projectColor({
+      title: "emoji",
+      projectIcon: { kind: "emoji", emoji: "🚀" },
+    }),
+  ).toBe("#9180ad");
   const entries = sidebarEntries(flatFixture(), { now: fixtureNow });
   expect(entries.find((e) => e.project === "Alpha repo")?.projectColor).toBe("#ff6467");
   expect(entries.find((e) => e.project === "Beta repo")?.projectColor).toBe(
@@ -404,7 +441,9 @@ test("project names use web's icon color: the saved icon, else one generated fro
 });
 
 test("a live activity run shows as running when the latest run was cancelled", () => {
-  expect(threadBadge({ ...base, status: "cancelled", activityRunStatus: "running" })).toContain("▶");
+  expect(threadBadge({ ...base, status: "cancelled", activityRunStatus: "running" })).toContain(
+    "▶",
+  );
   expect(threadBadge({ ...base, status: "failed", activityRunStatus: "waiting" })).toContain("?");
   expect(threadBadge({ ...base, status: "cancelled", activityRunStatus: null })).toBe("·");
 });
@@ -461,7 +500,7 @@ test.each([
     };
     try {
       await view.flush();
-      expect(view.captureCharFrame()).toContain("Project");
+      expect(view.captureCharFrame()).toContain("Proje");
       expect(view.captureCharFrame()).toContain("Pinned older");
       const yOf = (text: string) =>
         view
@@ -699,7 +738,10 @@ integration(
       expect(first).toBeDefined();
       const settledSnapshot = {
         ...snapshot,
-        threads: snapshot.threads.map((t) => ({ ...t, settledOverride: "settled" as const })),
+        threads: snapshot.threads.map((t) => ({
+          ...t,
+          settledOverride: "settled" as const,
+        })),
       };
       const collapsed = sidebarEntries(settledSnapshot);
       expect(collapsed.some((e) => e.shelf === "settled" && e.text.includes("Settled ("))).toBe(
@@ -754,7 +796,7 @@ test("5,000 thread rows stay virtualized and pointer scroll works without sideba
     const countNodes = (node: {
       getChildren(): ReturnType<typeof view.renderer.root.getChildren>;
     }): number => 1 + node.getChildren().reduce((total, child) => total + countNodes(child), 0);
-    expect(countNodes(view.renderer.root)).toBeLessThan(100);
+    expect(countNodes(view.renderer.root)).toBeLessThan(160);
     await act(async () => {
       await view.mockMouse.scroll(5, 8, "down");
     });
@@ -769,7 +811,7 @@ test("5,000 thread rows stay virtualized and pointer scroll works without sideba
     });
     await view.flush();
     expect(view.captureCharFrame()).toContain("Virtual thread 4999");
-    expect(countNodes(view.renderer.root)).toBeLessThan(100);
+    expect(countNodes(view.renderer.root)).toBeLessThan(160);
   } finally {
     await act(async () => view.renderer.destroy());
     await client.dispose();
@@ -787,23 +829,45 @@ test.each([
   const one = {
     ...base,
     activeProviderThreadId: "provider-one" as never,
-    modelSelection: { ...base.modelSelection, options: [{ id: "reasoningEffort", value: "high" }] },
+    modelSelection: {
+      ...base.modelSelection,
+      options: [{ id: "reasoningEffort", value: "high" }],
+    },
   };
-  const two = { ...base, id: threadId("two"), activeProviderThreadId: "provider-two" as never };
+  const two = {
+    ...base,
+    id: threadId("two"),
+    activeProviderThreadId: "provider-two" as never,
+  };
   // Upstream reports context usage on the thread's active provider thread.
-  const usage = (id: string, usedTokens: number, maxTokens: number, providerTurns: unknown[] = []) => ({
+  const usage = (
+    id: string,
+    usedTokens: number,
+    maxTokens: number,
+    providerTurns: unknown[] = [],
+  ) => ({
     ...client.getThread(id),
     projection: {
       turnItems: [],
-      visibleTurnItems: id === one.id ? [{
-        sourceThreadId: id,
-        sourceItemId: "tool",
-        visibility: "local",
-        item: {
-          id: "tool", providerThreadId: `provider-${id}`, type: "dynamic_tool",
-          status: "completed", toolName: "Read", input: "test", output: "result",
-        },
-      }] : [],
+      visibleTurnItems:
+        id === one.id
+          ? [
+              {
+                sourceThreadId: id,
+                sourceItemId: "tool",
+                visibility: "local",
+                item: {
+                  id: "tool",
+                  providerThreadId: `provider-${id}`,
+                  type: "dynamic_tool",
+                  status: "completed",
+                  toolName: "Read",
+                  input: "test",
+                  output: "result",
+                },
+              },
+            ]
+          : [],
       runtimeRequests: [],
       runs: [],
       messages: [],
@@ -940,7 +1004,87 @@ test.each([
     const count = (node: {
       getChildren(): ReturnType<typeof view.renderer.root.getChildren>;
     }): number => 1 + node.getChildren().reduce((n, child) => n + count(child), 0);
-    expect(count(view.renderer.root)).toBeLessThan(100);
+    expect(count(view.renderer.root)).toBeLessThan(160);
+  } finally {
+    await act(async () => view.renderer.destroy());
+    await client.dispose();
+  }
+});
+
+test("running shows only the ▶ icon in white; waiting keeps its word; ✓ marks unsettled rows", () => {
+  expect(threadBadge({ ...base, status: "running" })).toBe("▶");
+  expect(threadBadge({ ...base, status: "waiting" })).toBe("? waiting");
+  const snapshot = (status: "running" | "waiting" | "completed", settled = false) =>
+    ({
+      ...fixture(),
+      threads: [
+        {
+          ...base,
+          status,
+          ...(settled ? { settledOverride: "settled" as const } : {}),
+          latestUserMessageAt: DateTime.subtract(at, { minutes: 5 }),
+        },
+      ],
+    }) as OrchestrationV2ShellSnapshot;
+  const now = new Date(Date.parse("2026-11-08T12:30:00Z")).toISOString();
+  const pick = (status: "running" | "waiting" | "completed", settled = false) =>
+    sidebarEntries(snapshot(status, settled), {
+      now,
+      expanded: new Set<SidebarShelf>(["settled"]),
+    }).find((e) => e.thread)!;
+  const running = pick("running");
+  expect(running.running).toBe(true);
+  expect(running.text.split("\n")[1]).not.toContain("running");
+  expect(pick("waiting").running).toBe(false);
+  expect(pick("waiting").text).toContain("? waiting");
+  for (const width of [30, 50]) {
+    for (const wrapNames of [false, true]) {
+      const rows = sidebarRows([running], width, { wrapNames });
+      expect(rows.filter((r) => r.settleText === "✓")).toHaveLength(1);
+      const all = rows.map(
+        (r) => r.lead + r.text + r.projectText + (r.settleText ? " ✓ " : "") + r.timeText,
+      );
+      expect(all.every((line) => Bun.stringWidth(line) <= width)).toBe(true);
+    }
+  }
+  // Settled rows have no ✓.
+  const settled = pick("completed", true);
+  expect(settled.settleable).toBe(false);
+  expect(sidebarRows([settled], 30).some((r) => r.settleText !== undefined)).toBe(false);
+  expect(pick("completed").settleable).toBe(true);
+});
+
+test("a click on ✓ settles the thread without opening it; s settles the highlighted one", async () => {
+  const client = fakeClient();
+  const snapshot = {
+    ...fixture(),
+    threads: [{ ...base, latestUserMessageAt: DateTime.subtract(at, { minutes: 5 }) }],
+  };
+  client.registry.set(client.snapshot, snapshot);
+  const settled: string[] = [];
+  const view = await testRender(
+    <ThreadSidebar
+      client={client}
+      width={30}
+      height={20}
+      enabled
+      keyboardEnabled
+      onSettle={(id) => settled.push(id)}
+    />,
+    { width: 30, height: 20, kittyKeyboard: true },
+  );
+  try {
+    await view.flush();
+    const lines = view.captureCharFrame().split("\n");
+    const y = lines.findIndex((line) => line.includes("✓"));
+    expect(y).toBeGreaterThan(0);
+    await act(async () => {
+      await view.mockMouse.click(lines[y]!.indexOf("✓"), y);
+    });
+    expect(settled).toEqual([base.id]);
+    expect(client.registry.get(client.selectedThreadId)).not.toBe(base.id);
+    await act(async () => view.mockInput.pressKey("s"));
+    expect(settled).toEqual([base.id, base.id]);
   } finally {
     await act(async () => view.renderer.destroy());
     await client.dispose();
