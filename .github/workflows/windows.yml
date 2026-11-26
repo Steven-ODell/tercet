@@ -48,8 +48,19 @@ jobs:
       - name: Install pinned stock Windows T3 server
         run: |
           $env:T3CODE_HOME = Join-Path $env:RUNNER_TEMP 'tercet-t3-runtime'
-          npm exec --yes --package=t3@0.1.8 -- t3 --version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # T3's installer renames its staging dir into place; on the runner a scanner can still
+          # hold the fresh t3.exe, and the rename fails with EPERM. Clear the staging dir, retry.
+          $versions = Join-Path $env:T3CODE_HOME 'runtime/versions'
+          $exe = Join-Path $versions '0.1.8/t3.exe'
+          foreach ($try in 1..4) {
+            npm exec --yes --package=t3@0.1.8 -- t3 --version
+            if ($LASTEXITCODE -eq 0 -and (Test-Path $exe)) { break }
+            if ($try -eq 4) { Write-Error "t3 0.1.8 install failed after $try tries"; exit 1 }
+            Write-Host "t3 install try $try failed; retrying"
+            Get-ChildItem $versions -Filter '0.1.8.staging-*' -ErrorAction SilentlyContinue |
+              Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds (10 * $try)
+          }
           "TERCET_TEST_T3=$env:T3CODE_HOME/runtime/versions/0.1.8/t3.exe" >> $env:GITHUB_ENV
       - name: Authenticate and read a live snapshot from Windows T3
         run: bun scripts/windows-server-smoke.ts
