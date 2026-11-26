@@ -2,8 +2,8 @@ tercet · live · threads=1 · Supervised                                       
 › opencode/flint-40b-free · effort default
 ↱ branch unknown · /tmp/tercet-sandbox.XXXXXX/work/demo-app
 ╭─● ≡ Threads────────────────╮╭─¶ Transcript───────────────────────────────────────────────────────────────────────────╮
-│[h] All threads             ││tercet acceptance sandbox                                                               │
-│                            ││Loading transcript…                                                                     │
+│[h] All threads             ││No messages yet                                                                         │
+│                            ││                                                                                        │
 │  tercet acceptance sandbox ││                                                                                        │
 │  › · ■ demo-app       ✓ now││                                                                                        │
 │  ▸ Settled (0)             ││                                                                                        │
@@ -27,9 +27,9 @@ tercet · live · threads=1 · Supervised                                       
 │                            ││                                                                                        │
 │                            ││                                                                                        │
 │                            ││                                                                                        │
-│                            ││                                                                                        │
-│                            ││                                                                                        │
-│                            ││                                                                                        │
+│                            ││Hover / click text · [ / ] focus block                                                  │
+│                            ││hjkl wbe move · v/V select · y yank · Y block                                           │
+│                            ││Following tail                                                                          │
 │                            ││                                                                                        │
 │                            │╰────────────────────────────────────────────────────────────────────────────────────────╯
 │                            │╭─» Composer─────────────────────────────────────────────────────────────────────────────╮

@@ -5,6 +5,9 @@ import { join } from "node:path";
 
 const tmux = Bun.which("tmux");
 const nvim = Bun.which("nvim");
+// The rig runs its own tmux server. Run from inside another tmux, the outer TMUX and TMUX_PANE
+// would leak into that server and the launcher would act on the outer session instead.
+const { TMUX: _tmux, TMUX_PANE: _pane, ...isolated } = process.env;
 
 test.skipIf(!tmux || !nvim)(
   "external tmux editor saves the selected file and returns the same client to Tercet's session",
@@ -13,7 +16,7 @@ test.skipIf(!tmux || !nvim)(
     const socket = "tercet-external-" + process.pid;
     const path = join(dir, "space ' $ file.txt");
     const run = async (...args: string[]) => {
-      const child = Bun.spawn([tmux!, "-L", socket, ...args], { stdout: "pipe", stderr: "pipe" });
+      const child = Bun.spawn([tmux!, "-L", socket, ...args], { env: isolated, stdout: "pipe", stderr: "pipe" });
       const text = await new Response(child.stdout).text();
       const error = await new Response(child.stderr).text();
       if (await child.exited) throw new Error(error);
@@ -62,7 +65,7 @@ setInterval(async () => {
         join(dir, "fixture.ts"),
       );
       attach = Bun.spawn([tmux!, "-L", socket, "attach-session", "-t", "conversation"], {
-        env: { ...process.env, TERM: "xterm-256color" },
+        env: { ...isolated, TERM: "xterm-256color" },
         terminal: { cols: 100, rows: 30, data() {} },
       });
       await until(async () =>

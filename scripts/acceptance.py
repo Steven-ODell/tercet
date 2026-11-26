@@ -71,12 +71,17 @@ def mouse(button, x, y, release=False):
 
 def normalized(text):
     """Mask what changes between runs without moving columns: the sandbox dir's random
-    suffix, spinner frame, sidebar age and live provider token counts.
-    The context percentage, bar and limit still have to match."""
+    suffix, spinner frame, sidebar age, live provider token counts and the context bar's fill
+    (the live turn's tokens sit on a cell boundary, so it flips between runs). The context
+    percentage, bar width and limit still have to match."""
     text = SANDBOX_PATH.sub("/tmp/tercet-sandbox.XXXXXX", text)
     text = SPINNER.sub("\u280b", text)
     text = SIDEBAR_AGE.sub(lambda m: "now".rjust(len(m.group(0))), text)
-    return re.sub(r" +Context (\d+% [▰▱]+) [\d.]+[kM]? /", r" Context \1 <live> /", text)
+    return re.sub(
+        r" +Context (\d+%) ([▰▱]+) [\d.]+[kM]? /",
+        lambda m: f" Context {m.group(1)} {'▱' * len(m.group(2))} <live> /",
+        text,
+    )
 
 
 def save(name):
@@ -85,6 +90,16 @@ def save(name):
 
 def screen(name, text):
     wait_for(lambda: text in capture(), name + " missing " + text)
+    # A popup can show its text a frame before its border and values settle: save the screen
+    # once two captures 300 ms apart agree (masked, so spinners and ages don't count), or
+    # after 5 s, when the comparison shows whatever still moves.
+    last = normalized(capture())
+    for _ in range(16):
+        time.sleep(0.3)
+        now = normalized(capture())
+        if now == last:
+            break
+        last = now
     save(name)
 
 

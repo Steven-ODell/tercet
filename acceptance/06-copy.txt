@@ -1,4 +1,4 @@
-tercet · live · threads=1 · Supervised Context 3% ▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ <live> / 262k ▾
+tercet · live · threads=1 · Supervised Context 3% ▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ <live> / 262k ▾
 › opencode/flint-40b-free · effort high
 ↱ branch unknown · /tmp/tercet-sandbox.XXXXXX/work/demo-app
 ╭─≡ Threads──────────────────╮╭─● ¶ Transcript─────────────────────────────────────────────────────────────────────────╮

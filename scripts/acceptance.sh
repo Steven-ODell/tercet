@@ -59,7 +59,10 @@ sandbox_token "$dir" "$t3"
 
 out="$dir/screens"
 [[ $record == 1 ]] && out="$root/acceptance"
-bgrun -t 300s -C "$root" "$run_job" -- env TERCET_SANDBOX_DIR="$dir" TERCET_ACCEPTANCE_TMUX="$socket" \
+# The recorded screens have no [mic] button. Tercet hides built-in dictation over SSH, so an SSH
+# marker keeps a local microphone tool (pw-record, arecord...) from changing them.
+bgrun -t 300s -C "$root" "$run_job" -- env -u TMUX -u TMUX_PANE SSH_CONNECTION="acceptance 0 0 0" \
+  TERCET_SANDBOX_DIR="$dir" TERCET_ACCEPTANCE_TMUX="$socket" \
   TERCET_ACCEPTANCE_OUT="$out" TERCET_ACCEPTANCE_RECORD="$record" HOME="$dir" \
   python3 "$root/scripts/acceptance.py" >/dev/null
 record_dir=$(bgrun_record "$run_job")
