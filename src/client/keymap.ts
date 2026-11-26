@@ -41,7 +41,9 @@ export const COMMANDS = [
   { id: "focusUp", keys: "Ctrl+k", label: "Pane up" },
   { id: "focusRight", keys: "Ctrl+l", label: "Pane right" },
   { id: "leave", keys: "Alt+c", label: "Close side panel" },
-  { id: "dismissNotice", keys: "Alt+x", label: "Dismiss server warning", needs: "notice" },
+  { id: "dismissNotice", keys: "Alt+x", label: "Dismiss notice", needs: "notice" },
+  { id: "updateProviders", keys: "Alt+n", label: "Update providers", needs: "providerUpdate" },
+  { id: "autoContinue", keys: "Alt+z", label: "Auto-continue at usage reset", needs: "limit" },
   { id: "close", keys: "Esc", label: "Close overlay / next pane", fixed: true },
   { id: "quit", keys: "Ctrl+c", label: "Quit", fixed: true, twice: true },
   { id: "pullRequests", keys: "Alt+w", label: "Pull requests" },
@@ -64,7 +66,7 @@ export interface Binding {
   chord?: Chord;
   /** How the key is written in hints and help, e.g. "Alt+t" or "Ctrl+c ×2". */
   hint: string;
-  needs?: "shell" | "dictation" | "notice" | "screenshot" | "attach" | "spell";
+  needs?: "shell" | "dictation" | "notice" | "screenshot" | "attach" | "spell" | "providerUpdate" | "limit";
 }
 
 /**
@@ -274,6 +276,8 @@ export function cheatSheet(
     shell?: boolean;
     dictation?: boolean;
     notice?: boolean;
+    providerUpdate?: boolean;
+    limit?: boolean;
     screenshot?: boolean;
     attach?: boolean;
     spell?: boolean;

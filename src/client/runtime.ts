@@ -82,6 +82,16 @@ export interface Boundary {
   ) => Effect.Effect<unknown, unknown>;
   /** Asks the server to re-read model catalogs; the new providers arrive on the config stream. */
   refreshModels?: (token: string) => Effect.Effect<unknown, unknown>;
+  /** `server.updateProvider`: the provider update banner's Update button. */
+  updateProvider?: (
+    token: string,
+    input: import("@t3tools/contracts").ServerProviderUpdateInput,
+  ) => Effect.Effect<unknown, unknown>;
+  /** Provider update offers the user dismissed (web keeps them in local storage). */
+  noticeDismissals?: {
+    read: () => Promise<string[]>;
+    write: (keys: string[]) => Promise<void>;
+  };
   /** `defaults.autoFavorites` patterns, straight from the settings in memory. */
   autoFavorites?: () => Promise<import("./model-picker").FavoriteRef[]>;
   modelFavorites?: () => Promise<import("@t3tools/contracts").ClientSettings["favorites"]>;
@@ -449,6 +459,10 @@ export function createClient(
       },
     },
     /** Best effort: offline or an older server just leaves the catalog as it is. */
+    updateProvider(input: import("@t3tools/contracts").ServerProviderUpdateInput) {
+      if (!token || !boundary.updateProvider) return Promise.reject(new Error("Offline"));
+      return runtime.runPromise(boundary.updateProvider(token, input));
+    },
     async refreshModels() {
       if (!token || !boundary.refreshModels) return;
       await runtime.runPromise(boundary.refreshModels(token)).catch(() => undefined);

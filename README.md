@@ -277,6 +277,12 @@ terminal](docs/settings.md#keys-that-depend-on-the-terminal).
   tested on. It still works, but screens or actions T3 added since may be missing or broken.
   `Alt+x` or a click hides the banner for the session; `"hideWarning": true` under `server` in
   the settings file never draws it. Update tercet when a release for your T3 version is out.
+- **"Provider update available" banner.** T3 found a newer Claude, Codex or other provider
+  release. `Alt+n` (or a click on `[ Update ]`) runs the server's update command, like the web
+  app's popup; `Alt+x` dismisses that release for good. A provider T3 cannot update itself says so.
+- **"Usage limit reached" banner.** The selected thread stopped on a usage limit. `Alt+z` (or a
+  click) turns auto-continue at the reset on or off for that run, the web composer's
+  "Resume at reset".
 - **"Incompatible server protocol".** The server speaks another orchestration protocol, so
   tercet stops before it connects. Update tercet (or T3). `tercet --ignore-version`, or
   `"ignoreVersion": true` under `server` in the settings file, tries anyway at your own risk.

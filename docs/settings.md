@@ -242,8 +242,10 @@ digit, Enter, Tab, Space or Backspace is refused, because it types. `"none"` unb
 Commands: `shell`, `terminal`, `editor`, `web`, `launchers`, `sidebar`, `model`, `effort`, `files`,
 `diff`, `dictation`, `attach` (the file picker), `spell` (spelling suggestions), `palette`, `newThread`, `search`, `threadMenu`, `help`, `hints` (shows
 or hides the key hint rows at the bottom), `focusLeft`,
-`focusDown`, `focusUp`, `focusRight`, `leave`, `dismissNotice` (the server-version banner,
-listed only while it shows). `close` (Esc) and `quit` (Ctrl+c twice) are fixed.
+`focusDown`, `focusUp`, `focusRight`, `leave`, `dismissNotice` (the server-version or
+provider-update banner), `updateProviders` (Alt+n, the provider-update banner's Update button) and
+`autoContinue` (Alt+z, the usage-limit banner's auto-continue toggle); these three are listed only
+while their banner shows. `close` (Esc) and `quit` (Ctrl+c twice) are fixed.
 Keys without Ctrl or Alt (`?`, `.`, capitals) are typed text while the composer has focus.
 
 Two commands on one key is an error naming both, and so is a key a pane already uses: the

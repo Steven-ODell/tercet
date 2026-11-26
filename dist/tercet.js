@@ -82758,7 +82758,9 @@ var COMMANDS = [
   { id: "focusUp", keys: "Ctrl+k", label: "Pane up" },
   { id: "focusRight", keys: "Ctrl+l", label: "Pane right" },
   { id: "leave", keys: "Alt+c", label: "Close side panel" },
-  { id: "dismissNotice", keys: "Alt+x", label: "Dismiss server warning", needs: "notice" },
+  { id: "dismissNotice", keys: "Alt+x", label: "Dismiss notice", needs: "notice" },
+  { id: "updateProviders", keys: "Alt+n", label: "Update providers", needs: "providerUpdate" },
+  { id: "autoContinue", keys: "Alt+z", label: "Auto-continue at usage reset", needs: "limit" },
   { id: "close", keys: "Esc", label: "Close overlay / next pane", fixed: true },
   { id: "quit", keys: "Ctrl+c", label: "Quit", fixed: true, twice: true },
   { id: "pullRequests", keys: "Alt+w", label: "Pull requests" },
@@ -144855,6 +144857,9 @@ function searchThreads(url, token, query2) {
 function refreshModelCatalog(url, token) {
   return withConnection(url, token, (session) => session.client[WS_METHODS.serverRefreshProviders]({ modelCatalogOnly: true }));
 }
+function updateProvider(url, token, input) {
+  return withConnection(url, token, (session) => session.client[WS_METHODS.serverUpdateProvider](input));
+}
 function answerSecret(url, token, input) {
   return withConnection(url, token, (session) => session.client[WS_METHODS.secretsAnswerRequest](input));
 }
@@ -145002,6 +145007,7 @@ function tokenIssueArgs(config) {
 }
 function platform(config, sshHost, env = process.env) {
   const draftPath = `${config.tokenFile}.drafts-${Bun.hash(config.url).toString(16)}.json`;
+  const dismissalPath = `${config.tokenFile}.dismissed-updates-${Bun.hash(config.url).toString(16)}.json`;
   const git3 = (token, operation, input) => suspend2(() => {
     try {
       assertGitPolicy(operation, config.readOnly);
@@ -145031,6 +145037,26 @@ function platform(config, sshHost, env = process.env) {
     },
     answerSecret: (token, input) => answerSecret(config.url, token, input),
     refreshModels: (token) => refreshModelCatalog(config.url, token),
+    updateProvider: (token, input) => updateProvider(config.url, token, input),
+    noticeDismissals: {
+      async read() {
+        const text4 = await readOptional(dismissalPath).catch(() => {
+          return;
+        });
+        try {
+          const keys3 = JSON.parse(text4 ?? "[]");
+          return Array.isArray(keys3) ? keys3.filter((key5) => typeof key5 === "string") : [];
+        } catch {
+          return [];
+        }
+      },
+      async write(keys3) {
+        await mkdir5(dirname4(dismissalPath), { recursive: true, mode: 448 });
+        const temporary = `${dismissalPath}.${process.pid}.tmp`;
+        await writeFile4(temporary, JSON.stringify(keys3.slice(-50)), { mode: 384 });
+        await rename2(temporary, dismissalPath);
+      }
+    },
     autoFavorites: async () => config.settings.defaults.autoFavorites,
     modelFavorites: async () => decodeUnknownSync2(ModelFavorites)(config.settings.defaults.favorites),
     favoriteEntries: async () => config.settings.defaults.favorites,
@@ -145148,6 +145174,7 @@ function platform(config, sshHost, env = process.env) {
     return {
       ...boundary,
       dispatch: blocked,
+      updateProvider: blocked,
       uploadImage: blocked,
       speech: undefined,
       answerSecret: blocked,
@@ -148478,6 +148505,11 @@ function createClient(boundary, managedToken, now2 = Date.now) {
           return Promise.reject(new Error("Files unavailable; reconnect and retry"));
         return runtime2.runPromise(boundary.files.read(token, input));
       }
+    },
+    updateProvider(input) {
+      if (!token || !boundary.updateProvider)
+        return Promise.reject(new Error("Offline"));
+      return runtime2.runPromise(boundary.updateProvider(token, input));
     },
     async refreshModels() {
       if (!token || !boundary.refreshModels)
@@ -162559,7 +162591,7 @@ ${detail.message}` } : message;
 }
 
 // src/client/frame.tsx
-var import_react63 = __toESM(require_react(), 1);
+var import_react64 = __toESM(require_react(), 1);
 
 // src/client/context-content.ts
 function textBytes(text5) {
@@ -163084,6 +163116,271 @@ function ContextDropdown({
   });
 }
 
+// src/client/notices.tsx
+var import_react63 = __toESM(require_react(), 1);
+
+// src/client/notice-logic.ts
+var providerName = (provider2) => provider2.displayName ?? PROVIDER_DISPLAY_NAMES[provider2.driver] ?? provider2.driver;
+var version2 = (value4) => value4.startsWith("v") ? value4 : `v${value4}`;
+function isUpdateCandidate(provider2) {
+  return provider2.enabled && provider2.compatibilityAdvisory?.latestVersionStatus !== "broken" && provider2.compatibilityAdvisory?.latestVersionStatus !== "unsupported" && provider2.versionAdvisory?.status === "behind_latest" && provider2.versionAdvisory.latestVersion !== null;
+}
+var isActive = (provider2) => provider2.updateState?.status === "queued" || provider2.updateState?.status === "running";
+function updateCandidates(providers) {
+  const byDriver = new Map;
+  for (const provider2 of providers.filter(isUpdateCandidate)) {
+    const current2 = byDriver.get(provider2.driver);
+    if (!current2 || provider2.instanceId === provider2.driver)
+      byDriver.set(provider2.driver, provider2);
+  }
+  return [...byDriver.values()];
+}
+function canOneClick(candidate, providers) {
+  if (isActive(candidate) || !candidate.versionAdvisory.canUpdate)
+    return false;
+  if (!candidate.versionAdvisory.updateCommand)
+    return false;
+  const commands2 = new Set;
+  for (const provider2 of providers.filter((p) => p.driver === candidate.driver)) {
+    if (!isUpdateCandidate(provider2))
+      continue;
+    if (!provider2.versionAdvisory.canUpdate || !provider2.versionAdvisory.updateCommand)
+      return false;
+    commands2.add(provider2.versionAdvisory.updateCommand);
+  }
+  return commands2.size === 1;
+}
+function updateKey(candidates) {
+  const parts2 = candidates.map((c2) => `${c2.driver}:${c2.versionAdvisory.latestVersion}`).sort();
+  return parts2.length ? parts2.join("|") : null;
+}
+function offerText(candidates, oneClick) {
+  const list2 = candidates.map((c2) => {
+    const from = c2.versionAdvisory.currentVersion ?? c2.version;
+    return `${providerName(c2)} ${from ? `${version2(from)} \u2192 ` : ""}${version2(c2.versionAdvisory.latestVersion)}`;
+  }).join(", ");
+  return `Provider update available: ${list2}${oneClick ? "" : " (update it from T3's provider settings)"}`;
+}
+function updateOutcome(run3, providers) {
+  const sent = providers.filter((p) => run3.ids.includes(p.instanceId));
+  const names = (list2) => [...new Set(list2.map(providerName))].join(", ");
+  const failed = sent.filter((p) => p.updateState?.status === "failed");
+  if (run3.errors.length || failed.length) {
+    const detail = run3.errors[0] ?? failed[0]?.updateState?.message ?? "the update command failed";
+    return { phase: "failed", text: `${names(failed.length ? failed : sent) || "Provider"} update failed: ${detail}` };
+  }
+  if (!run3.settled || sent.some(isActive)) {
+    return { phase: "running", text: `Updating ${names(sent) || "providers"}\u2026` };
+  }
+  const unchanged = sent.filter((p) => p.updateState?.status === "unchanged");
+  if (unchanged.length)
+    return { phase: "unchanged", text: `${names(unchanged)} still needs an update; see T3's provider settings.` };
+  const done4 = sent.map((p) => p.version ? `${providerName(p)} ${version2(p.version)}` : providerName(p)).filter((text5, i, all4) => all4.indexOf(text5) === i).join(", ");
+  return { phase: "succeeded", text: `Updated ${done4 || "providers"}. New sessions use the new version.` };
+}
+function limitNotice(thread) {
+  if (!thread || thread.lastErrorClass !== "usage_limit" || !thread.latestRunId)
+    return null;
+  const resetAt = thread.usageLimitResetAt ?? null;
+  const stopped = toEpochMillis2(thread.latestRunCompletedAt ?? thread.updatedAt);
+  const recovery = thread.limitRecovery;
+  return {
+    threadId: thread.id,
+    runId: thread.latestRunId,
+    resetAt,
+    canSchedule: resetAt !== null && Date.parse(resetAt) > stopped,
+    scheduled: !!recovery && recovery.runId === thread.latestRunId && recovery.resetAt === resetAt && recovery.autoResume
+  };
+}
+function resetText(resetAt, now2 = Date.now()) {
+  const at = new Date(resetAt);
+  const time = at.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  if (at.toDateString() === new Date(now2).toDateString())
+    return time;
+  if (Math.abs(at.getTime() - now2) < 6 * 86400000)
+    return `${at.toLocaleDateString(undefined, { weekday: "short" })} ${time}`;
+  return `${at.toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${time}`;
+}
+function limitText(notice, now2 = Date.now()) {
+  if (!notice.resetAt)
+    return "Usage limit reached \xB7 reset time unavailable; retry manually";
+  const reset = `resets ${resetText(notice.resetAt, now2)}`;
+  if (!notice.canSchedule)
+    return `Usage limit reached \xB7 ${reset}`;
+  return `Usage limit reached \xB7 ${reset} \xB7 auto-continue ${notice.scheduled ? "on" : "off"}`;
+}
+
+// src/client/notices.tsx
+var SUCCESS_MS = 4000;
+var errorText = (error2) => error2 instanceof Error ? error2.message : typeof error2 === "string" ? error2 : "request failed";
+function useProviderUpdateNotice(client) {
+  const providers = useClientAtom(client, client.providers);
+  const candidates = import_react63.useMemo(() => updateCandidates(providers), [providers]);
+  const key5 = updateKey(candidates);
+  const oneClick = candidates.filter((c2) => canOneClick(c2, providers));
+  const [dismissed, setDismissed] = import_react63.useState(new Set);
+  const [run3, setRun] = import_react63.useState(null);
+  const store = client.boundary.noticeDismissals;
+  import_react63.useEffect(() => {
+    store?.read().then((keys3) => setDismissed((now2) => new Set([...now2, ...keys3]))).catch(() => {});
+  }, [store]);
+  const dismissKey = (k) => {
+    if (!k)
+      return;
+    setDismissed((now2) => {
+      const next2 = new Set(now2).add(k);
+      store?.write([...next2]).catch(() => {});
+      return next2;
+    });
+  };
+  const outcome = run3 ? updateOutcome(run3, providers) : null;
+  import_react63.useEffect(() => {
+    if (outcome?.phase !== "succeeded")
+      return;
+    const timer = setTimeout(() => setRun(null), SUCCESS_MS);
+    return () => clearTimeout(timer);
+  }, [outcome?.phase]);
+  const started = import_react63.useRef(false);
+  const startUpdate = () => {
+    if (started.current || oneClick.length === 0)
+      return;
+    started.current = true;
+    const ids = oneClick.map((c2) => c2.instanceId);
+    setRun({ ids, errors: [], settled: false });
+    Promise.allSettled(oneClick.map((c2) => client.updateProvider({ provider: c2.driver, instanceId: c2.instanceId }))).then((results2) => {
+      started.current = false;
+      setRun({
+        ids,
+        settled: true,
+        errors: results2.flatMap((r) => r.status === "rejected" ? [errorText(r.reason)] : [])
+      });
+    });
+  };
+  if (run3 && outcome) {
+    const close2 = () => {
+      setRun(null);
+      dismissKey(key5);
+    };
+    return {
+      id: "provider-update",
+      text: outcome.text,
+      tone: outcome.phase === "failed" ? "error" : outcome.phase === "succeeded" ? "success" : "info",
+      buttons: [],
+      ...outcome.phase === "running" ? {} : { dismiss: close2 }
+    };
+  }
+  if (!key5 || dismissed.has(key5))
+    return null;
+  return {
+    id: "provider-update",
+    text: offerText(candidates, oneClick.length > 0),
+    tone: "warning",
+    buttons: oneClick.length > 0 ? [{ label: "Update", command: "updateProviders", run: startUpdate }] : [],
+    dismiss: () => dismissKey(key5)
+  };
+}
+function useLimitNotice(client, thread) {
+  const limit = limitNotice(thread);
+  const [pending, setPending] = import_react63.useState(false);
+  const [error2, setError] = import_react63.useState(null);
+  const runId = limit?.runId;
+  import_react63.useEffect(() => setError(null), [runId]);
+  const [, tick2] = import_react63.useState(0);
+  import_react63.useEffect(() => {
+    if (!limit)
+      return;
+    const timer = setInterval(() => tick2((n) => n + 1), 60000);
+    return () => clearInterval(timer);
+  }, [!!limit]);
+  if (!limit)
+    return null;
+  const toggle = () => {
+    if (pending || !limit.canSchedule || !limit.resetAt)
+      return;
+    setPending(true);
+    setError(null);
+    client.dispatch({
+      type: "thread.metadata.update",
+      commandId: CommandId.make(crypto.randomUUID()),
+      threadId: limit.threadId,
+      limitRecovery: { runId: limit.runId, resetAt: limit.resetAt, autoResume: !limit.scheduled }
+    }).catch((cause2) => setError(`Could not change auto-continue: ${errorText(cause2)}`)).finally(() => setPending(false));
+  };
+  return {
+    id: `usage-limit:${limit.runId}`,
+    text: error2 ?? limitText(limit),
+    tone: error2 ? "error" : "warning",
+    buttons: limit.canSchedule ? [
+      {
+        label: pending ? "Saving\u2026" : limit.scheduled ? "Turn off auto-continue" : "Auto-continue at reset",
+        command: "autoContinue",
+        run: toggle
+      }
+    ] : []
+  };
+}
+var glyph2 = { warning: "!", error: "\u2717", success: "\u2713", info: "\u2026" };
+var buttonText = (label, command2) => {
+  const key5 = command2 ? hintFor(command2) : "none";
+  return `[ ${label}${key5 === "none" ? "" : ` (${key5})`} ]`;
+};
+function buttonsOf(notice) {
+  return [
+    ...notice.buttons,
+    ...notice.dismiss ? [{ label: "Dismiss", command: "dismissNotice", run: notice.dismiss }] : []
+  ].map((button2) => ({ ...button2, text: buttonText(button2.label, button2.command) }));
+}
+function noticeLayout(notices, width2) {
+  return notices.map((notice) => {
+    const buttons = buttonsOf(notice);
+    const strip = buttons.map((b) => b.text).join(" ");
+    const lines = wrapName(`${glyph2[notice.tone]} ${notice.text}`, width2);
+    const last = lines.at(-1) ?? "";
+    const inline2 = !strip || last.length + 1 + strip.length <= width2;
+    return { notice, buttons, lines, inline: inline2, rows: lines.length + (inline2 ? 0 : 1) };
+  });
+}
+function NoticeRows({ layout }) {
+  return /* @__PURE__ */ import_jsx_runtime.jsx(import_jsx_runtime.Fragment, {
+    children: layout.map(({ notice, buttons, lines, inline: inline2 }) => {
+      const fg = notice.tone === "error" ? theme.red : notice.tone === "success" ? theme.green : notice.tone === "info" ? theme.accent : theme.yellow;
+      const strip = /* @__PURE__ */ import_jsx_runtime.jsx(import_jsx_runtime.Fragment, {
+        children: buttons.map((button2, i) => /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+          fg: theme.accent,
+          selectable: false,
+          onMouseUp: (event) => {
+            if (event.button === 0)
+              button2.run();
+          },
+          children: `${i || inline2 ? " " : ""}${button2.text}`
+        }, button2.text))
+      });
+      return /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
+        flexDirection: "column",
+        flexShrink: 0,
+        children: [
+          lines.map((line, i) => /* @__PURE__ */ import_jsx_runtime.jsxs("box", {
+            height: 1,
+            flexDirection: "row",
+            children: [
+              /* @__PURE__ */ import_jsx_runtime.jsx("text", {
+                fg,
+                children: line
+              }),
+              inline2 && i === lines.length - 1 && strip
+            ]
+          }, i)),
+          !inline2 && /* @__PURE__ */ import_jsx_runtime.jsx("box", {
+            height: 1,
+            flexDirection: "row",
+            children: strip
+          })
+        ]
+      }, notice.id);
+    })
+  });
+}
+
 // src/client/frame.tsx
 var MODEL_WATCH_MS = 5 * 60 * 1000;
 function rightWidth(kind2, width2) {
@@ -163115,7 +163412,7 @@ function AppFrame({
   const selectedId = useClientAtom(client, client.selectedThreadId);
   const snapshot2 = useClientAtom(client, client.snapshot);
   useClientAtom(client, client.transcripts);
-  const [agentStack, setAgentStack] = import_react63.useState([]);
+  const [agentStack, setAgentStack] = import_react64.useState([]);
   const agentId = agentStack.at(-1) ?? null;
   const agentCard = agentId ? pendingCard(client.getThread(agentId).projection) : undefined;
   const hasCard = !!(agentId ? agentCard : selectedId && pendingCard(client.getThread(selectedId).projection));
@@ -163124,7 +163421,7 @@ function AppFrame({
   const agentThread = agentId ? snapshot2?.threads.find((thread) => thread.id === agentId) ?? client.registry.get(client.archives).find((thread) => thread.id === agentId) : undefined;
   const selected = snapshot2?.threads.find((thread) => thread.id === selectedId);
   const providers = useClientAtom(client, client.providers);
-  import_react63.useEffect(() => {
+  import_react64.useEffect(() => {
     client.refreshModels();
     const timer = setInterval(() => void client.refreshModels(), MODEL_WATCH_MS);
     return () => clearInterval(timer);
@@ -163144,31 +163441,37 @@ function AppFrame({
   const effort = modelSelection2?.options?.find((option3) => ["reasoningEffort", "effort", "variant"].includes(option3.id))?.value;
   const statusText = `tercet \xB7 ${status2} \xB7 threads=${count}${selected ? ` \xB7 ${runtimeModeLabels[selected.runtimeMode] ?? selected.runtimeMode}` : ""}`;
   const agentsText = runningAgents > 0 ? `${runningAgents} ${runningAgents === 1 ? "agent" : "agents"} running` : "";
-  const [layoutMode, setLayoutMode] = import_react63.useState("auto");
-  import_react63.useEffect(() => {
+  const [layoutMode, setLayoutMode] = import_react64.useState("auto");
+  import_react64.useEffect(() => {
     client.boundary.layoutMode?.().then(setLayoutMode).catch(() => {});
   }, [client]);
   const layout = layoutFor({ width: width2, height, mode: layoutMode });
   const compact2 = layout.compact;
   const oneView = layout.narrow && compact2;
-  const [infoOpen, setInfoOpen] = import_react63.useState(false);
+  const [infoOpen, setInfoOpen] = import_react64.useState(false);
   const allHeaderRows = selected ? [
     ...wrapName(`${modelLogo?.glyph} ${agentId ? "agent \xB7 " : ""}${modelSelection2?.model ?? "model unknown"} \xB7 effort ${effort ?? "default"}`, width2),
     ...wrapName(`${paneGlyphs.branch} ${selected.branch ?? "branch unknown"} \xB7 ${selected.worktreePath ?? snapshot2?.projects.find((p) => p.id === selected.projectId)?.workspaceRoot ?? "workspace unknown"}`, width2)
   ] : [];
   const infoToggle = compact2 && height < 30 && allHeaderRows.length > 0;
   const headerRows = !compact2 || height >= 30 || infoOpen ? allHeaderRows : [];
-  const notice = import_react63.useContext(ServerNotice);
+  const notice = import_react64.useContext(ServerNotice);
   const noticeRows = notice ? wrapName(`! ${notice.text} [ Dismiss${hintFor("dismissNotice") === "none" ? "" : ` (${hintFor("dismissNotice")})`} ]`, width2) : [];
-  const topRows = headerRows.length + noticeRows.length;
-  const [hintsShown, setHintsShown] = import_react63.useState(true);
-  import_react63.useEffect(() => {
+  const providerNotice = useProviderUpdateNotice(client);
+  const limitBanner = useLimitNotice(client, agentId ? undefined : selected);
+  const extraNotices = [providerNotice, limitBanner].filter((n) => n !== null);
+  const extraLayout = noticeLayout(extraNotices, width2);
+  const dismissable = !!notice || extraNotices.some((n) => n.dismiss);
+  const noticeButton = (command2) => extraNotices.flatMap((n) => n.buttons).find((b) => b.command === command2);
+  const topRows = headerRows.length + noticeRows.length + extraLayout.reduce((sum3, l) => sum3 + l.rows, 0);
+  const [hintsShown, setHintsShown] = import_react64.useState(true);
+  import_react64.useEffect(() => {
     client.boundary.showHints?.().then(setHintsShown).catch(() => {});
   }, [client]);
   const chromeRows = topRows + (hintsShown && !compact2 ? 2 : 0);
-  const [sidebarWanted, setSidebar] = import_react63.useState(!attached);
-  const [focus, setFocusPane] = import_react63.useState(attached ? "composer" : "sidebar");
-  const [sent, setSent] = import_react63.useState(false);
+  const [sidebarWanted, setSidebar] = import_react64.useState(!attached);
+  const [focus, setFocusPane] = import_react64.useState(attached ? "composer" : "sidebar");
+  const [sent, setSent] = import_react64.useState(false);
   const setFocus = (next2) => {
     if (next2 === "composer")
       setSent(false);
@@ -163176,18 +163479,18 @@ function AppFrame({
   };
   const hasQueued = !agentId && !!selectedId && !!client.getThread(selectedId).projection?.runs.some((run3) => run3.status === "queued");
   const composerCollapsed = !hasCard && !hasQueued && (!!agentId || focus !== "composer" || sent);
-  const [composerRows, setComposerRows] = import_react63.useState(() => compactComposerRows(40, {}));
+  const [composerRows, setComposerRows] = import_react64.useState(() => compactComposerRows(40, {}));
   const panesRows = height - 2 - chromeRows;
   const composerHeight = hasCard ? Math.min(19, Math.max(15, height - 5 - chromeRows)) : composerCollapsed ? 3 : compact2 ? Math.max(3, panesRows < 14 ? panesRows - 2 : Math.min(composerRows + 4, panesRows - 2)) : 9;
-  const [filePath, setFilePath] = import_react63.useState();
-  const [diffTarget, setDiffTarget] = import_react63.useState();
-  const [diffSerial, setDiffSerial] = import_react63.useState(0);
-  const [editorSession, setEditorSession] = import_react63.useState();
-  const [right, setRight] = import_react63.useState(null);
+  const [filePath, setFilePath] = import_react64.useState();
+  const [diffTarget, setDiffTarget] = import_react64.useState();
+  const [diffSerial, setDiffSerial] = import_react64.useState(0);
+  const [editorSession, setEditorSession] = import_react64.useState();
+  const [right, setRight] = import_react64.useState(null);
   const sidebarWidth = oneView ? width2 : width2 < 100 ? 22 : 30;
   const tuckSidebar = width2 >= 70 && (right === "files" || right === "diff") && width2 - sidebarWidth - rightWidth(right, width2) - 2 < 60;
-  const [compactSidebar, setCompactSidebar] = import_react63.useState(false);
-  import_react63.useEffect(() => setCompactSidebar(false), [right, tuckSidebar]);
+  const [compactSidebar, setCompactSidebar] = import_react64.useState(false);
+  import_react64.useEffect(() => setCompactSidebar(false), [right, tuckSidebar]);
   const sidebar = oneView ? focus === "sidebar" : tuckSidebar ? compactSidebar : sidebarWanted;
   const inChat = focus === "transcript" || focus === "composer";
   const hasSidebar = oneView ? !attached : sidebar;
@@ -163200,14 +163503,14 @@ function AppFrame({
   ];
   const tabsText = [...tabs.map((tab) => `[${tab.label}]`), ...infoToggle ? ["[Info]"] : []].join(" ");
   const chipColumns = oneView ? width2 - Bun.stringWidth(tabsText) - 2 : width2 - Bun.stringWidth(statusText) - (agentsText ? 2 + Bun.stringWidth(agentsText) : 0) - 2;
-  import_react63.useEffect(() => {
+  import_react64.useEffect(() => {
     if (!sidebar && focus === "sidebar")
       setFocusPane(right ? "right" : "transcript");
   }, [sidebar, focus, right]);
-  const [queuedRun, setQueuedRun] = import_react63.useState();
-  const runThread = import_react63.useRef(selectedId);
+  const [queuedRun, setQueuedRun] = import_react64.useState();
+  const runThread = import_react64.useRef(selectedId);
   runThread.current = selectedId;
-  const effects = import_react63.useMemo(() => !configured || configured.run || !client.terminalAvailable ? configured : {
+  const effects = import_react64.useMemo(() => !configured || configured.run || !client.terminalAvailable ? configured : {
     ...configured,
     run: ({ command: command2 }) => {
       setQueuedRun((last) => ({
@@ -163220,22 +163523,22 @@ function AppFrame({
       return Promise.resolve();
     }
   }, [configured, client]);
-  const [overlay, setOverlay] = import_react63.useState(null);
+  const [overlay, setOverlay] = import_react64.useState(null);
   const activeProviderThreadId = selected?.activeProviderThreadId;
   const hasMoreHistory = transcript?.history.hasMoreHistory ?? false;
-  const contextContent = import_react63.useMemo(() => overlay === "context" && projection ? contextContentOf(projection, activeProviderThreadId, hasMoreHistory) : null, [overlay, projection, activeProviderThreadId, hasMoreHistory]);
-  const actions = import_react63.useMemo(() => createThreadActions(client), [client]);
-  import_react63.useEffect(() => {
+  const contextContent = import_react64.useMemo(() => overlay === "context" && projection ? contextContentOf(projection, activeProviderThreadId, hasMoreHistory) : null, [overlay, projection, activeProviderThreadId, hasMoreHistory]);
+  const actions = import_react64.useMemo(() => createThreadActions(client), [client]);
+  import_react64.useEffect(() => {
     client.viewThread(agentId);
   }, [client, agentId]);
-  import_react63.useEffect(() => setAgentStack([]), [selectedId]);
-  import_react63.useEffect(() => setQueuedRun(undefined), [selectedId]);
-  import_react63.useEffect(() => {
+  import_react64.useEffect(() => setAgentStack([]), [selectedId]);
+  import_react64.useEffect(() => setQueuedRun(undefined), [selectedId]);
+  import_react64.useEffect(() => {
     if (right !== "terminal")
       setQueuedRun(undefined);
   }, [right]);
   const agentCardKey = agentId && agentCard ? `${agentId}:${requestKey(agentCard)}` : undefined;
-  import_react63.useEffect(() => {
+  import_react64.useEffect(() => {
     if (agentCardKey)
       setFocus("composer");
   }, [agentCardKey]);
@@ -163248,19 +163551,19 @@ function AppFrame({
     setAgentStack((stack) => stack.slice(0, -1));
     setFocus("transcript");
   };
-  const [menuTarget, setMenuTarget] = import_react63.useState();
-  const [actionError, setActionError] = import_react63.useState("");
-  const dictation = import_react63.useMemo(() => createDictation(client, effects), [client, effects]);
-  const micMessage = import_react63.useSyncExternalStore(dictation.subscribe, dictation.getMessage);
-  import_react63.useEffect(() => () => dictation.dispose(), [dictation]);
-  import_react63.useEffect(() => onMediaNotice(setActionError), []);
-  const [quitArmed, setQuitArmed] = import_react63.useState(false);
-  import_react63.useEffect(() => {
+  const [menuTarget, setMenuTarget] = import_react64.useState();
+  const [actionError, setActionError] = import_react64.useState("");
+  const dictation = import_react64.useMemo(() => createDictation(client, effects), [client, effects]);
+  const micMessage = import_react64.useSyncExternalStore(dictation.subscribe, dictation.getMessage);
+  import_react64.useEffect(() => () => dictation.dispose(), [dictation]);
+  import_react64.useEffect(() => onMediaNotice(setActionError), []);
+  const [quitArmed, setQuitArmed] = import_react64.useState(false);
+  import_react64.useEffect(() => {
     if (oneView && focus === "right" && !right)
       setFocusPane("transcript");
   }, [oneView, focus, right]);
-  const center = import_react63.useRef("transcript");
-  import_react63.useEffect(() => {
+  const center = import_react64.useRef("transcript");
+  import_react64.useEffect(() => {
     if (focus === "transcript" || focus === "composer")
       center.current = focus;
   }, [focus]);
@@ -163276,9 +163579,9 @@ function AppFrame({
   ];
   const cwd = selected?.worktreePath ?? snapshot2?.projects.find((p) => p.id === selected?.projectId)?.workspaceRoot;
   const busyWorkspace = (path) => (snapshot2?.threads ?? []).filter((t) => (t.worktreePath ?? snapshot2?.projects.find((p) => p.id === t.projectId)?.workspaceRoot) === path).some((t) => !!t.activeRunId || !!t.activityRunStatus || client.getThread(t.id).projection?.runs.some((run3) => !["completed", "failed", "cancelled", "interrupted", "rolled_back"].includes(run3.status)));
-  const busyWorkspaceRef = import_react63.useRef(busyWorkspace);
+  const busyWorkspaceRef = import_react64.useRef(busyWorkspace);
   busyWorkspaceRef.current = busyWorkspace;
-  const branchTarget = import_react63.useRef(undefined);
+  const branchTarget = import_react64.useRef(undefined);
   branchTarget.current = selected && cwd ? {
     projectId: selected.projectId,
     threadId: selected.id,
@@ -163288,8 +163591,8 @@ function AppFrame({
     knownWorkspaces: snapshot2?.threads.filter((t) => t.projectId === selected.projectId),
     running: busyWorkspace(cwd)
   } : undefined;
-  const branchWorkflow = import_react63.useMemo(() => createBranchWorkflow(client, () => branchTarget.current, (path) => busyWorkspaceRef.current(path)), [client]);
-  const pullRequestWorkflow = import_react63.useMemo(() => createPullRequestWorkflow(client, () => branchTarget.current), [client]);
+  const branchWorkflow = import_react64.useMemo(() => createBranchWorkflow(client, () => branchTarget.current, (path) => busyWorkspaceRef.current(path)), [client]);
+  const pullRequestWorkflow = import_react64.useMemo(() => createPullRequestWorkflow(client, () => branchTarget.current), [client]);
   const runShell = () => Promise.resolve().then(() => {
     if (!cwd || !effects?.shell)
       throw new Error("Unavailable");
@@ -163322,7 +163625,14 @@ function AppFrame({
     }
     setQuitArmed(false);
     if (command2 === "dismissNotice") {
-      notice?.dismiss();
+      if (notice)
+        notice.dismiss();
+      else
+        extraNotices.find((n) => n.dismiss)?.dismiss?.();
+      return;
+    }
+    if (command2 === "updateProviders" || command2 === "autoContinue") {
+      noticeButton(command2)?.run();
       return;
     }
     if (command2 === "screenshot" || command2 === "attach" || command2 === "spell")
@@ -163406,8 +163716,8 @@ function AppFrame({
         setFocus(target2);
     }
   };
-  const [pending, setPending] = import_react63.useState(null);
-  import_react63.useEffect(() => {
+  const [pending, setPending] = import_react64.useState(null);
+  import_react64.useEffect(() => {
     if (!pending || overlay)
       return;
     setPending(null);
@@ -163424,7 +163734,7 @@ function AppFrame({
     if (renderer.currentFocusedRenderable?.id === "transcript-search")
       return;
     const found = commandForKey(key5);
-    const command2 = found === "shell" && !effects?.shell || found === "dictation" && !hasDictation(effects) || found === "screenshot" && !effects?.captureRegion || found === "attach" && !effects?.pickFiles || found === "spell" && !effects?.spell || found === "dismissNotice" && !notice ? undefined : found;
+    const command2 = found === "shell" && !effects?.shell || found === "dictation" && !hasDictation(effects) || found === "screenshot" && !effects?.captureRegion || found === "attach" && !effects?.pickFiles || found === "spell" && !effects?.spell || found === "dismissNotice" && !dismissable || found === "updateProviders" && !noticeButton("updateProviders") || found === "autoContinue" && !noticeButton("autoContinue") ? undefined : found;
     if (command2 === "quit" && focus === "composer" && renderer.currentFocusedEditor?.hasSelection()) {
       setQuitArmed(false);
       return;
@@ -163478,7 +163788,9 @@ function AppFrame({
   const sheet = cheatSheet(keymap(), {
     shell: !!effects?.shell,
     dictation: hasDictation(effects),
-    notice: !!notice,
+    notice: dismissable,
+    providerUpdate: !!noticeButton("updateProviders"),
+    limit: !!noticeButton("autoContinue"),
     screenshot: !!effects?.captureRegion,
     attach: !!effects?.pickFiles,
     spell: !!effects?.spell
@@ -163636,6 +163948,9 @@ function AppFrame({
               fg: theme.yellow,
               children: row
             }, i))
+          }),
+          /* @__PURE__ */ import_jsx_runtime.jsx(NoticeRows, {
+            layout: extraLayout
           }),
           headerRows.map((row) => /* @__PURE__ */ import_jsx_runtime.jsx("text", {
             onMouseUp: (event) => {
@@ -164109,7 +164424,7 @@ function threadState(thread) {
     return "running";
   return "idle";
 }
-var isActive = (state2) => state2 === "running" || state2 === "waiting";
+var isActive2 = (state2) => state2 === "running" || state2 === "waiting";
 var iso3 = (at) => new Date(toEpochMillis2(at)).toISOString();
 function threadRows(snapshot2, options2 = {}) {
   const projects2 = new Map(snapshot2.projects.map((project2) => [String(project2.id), project2.title]));
@@ -164271,14 +164586,14 @@ async function runList(args2) {
 function planWindows(rows, windows, options2) {
   const byId = new Map(rows.map((row) => [row.id, row]));
   const have = new Set(windows.filter((w) => w.threadId).map((w) => w.threadId));
-  const open2 = rows.filter((row) => isActive(row.state) && !have.has(row.id) && !options2.dismissed.has(row.id));
+  const open2 = rows.filter((row) => isActive2(row.state) && !have.has(row.id) && !options2.dismissed.has(row.id));
   const close2 = options2.prune ? windows.filter((w) => {
     if (!w.threadId)
       return false;
     const row = byId.get(w.threadId);
     if (!row)
       return !w.viewed;
-    if (isActive(row.state))
+    if (isActive2(row.state))
       return false;
     return !w.viewed && (options2.idleMs.get(row.id) ?? 0) >= options2.graceMs;
   }) : [];
@@ -164366,7 +164681,7 @@ async function runTmux(args2) {
       const rows = threadRows(snapshot2, { all: true });
       const now2 = Date.now();
       for (const row of rows) {
-        if (isActive(row.state))
+        if (isActive2(row.state))
           idleSince.delete(row.id);
         else if (!idleSince.has(row.id))
           idleSince.set(row.id, now2);
@@ -164378,11 +164693,11 @@ async function runTmux(args2) {
           continue;
         known.delete(threadId);
         const row = rows.find((r) => r.id === threadId);
-        if (row && isActive(row.state) && !row.archived)
+        if (row && isActive2(row.state) && !row.archived)
           dismissed.add(threadId);
       }
       for (const row of rows)
-        if (!isActive(row.state))
+        if (!isActive2(row.state))
           dismissed.delete(row.id);
       const plan = planWindows(rows, windows ?? [], {
         idleMs: new Map([...idleSince].map(([id3, at]) => [id3, now2 - at])),
@@ -164410,7 +164725,7 @@ async function runTmux(args2) {
       return opened;
     };
     const first = sync5();
-    const active2 = threadRows(client.registry.get(client.snapshot)).filter((row) => isActive(row.state));
+    const active2 = threadRows(client.registry.get(client.snapshot)).filter((row) => isActive2(row.state));
     console.log(active2.length ? `tercet: ${first} new window${first === 1 ? "" : "s"} for ${active2.length} active thread${active2.length === 1 ? "" : "s"} in tmux session "${session}"` : `tercet: no active threads right now`);
     if (!watch) {
       if (active2.length)

@@ -46,6 +46,7 @@ import { ConnectionScreen, ServerNotice, useClientAtom } from "./screen";
 import { cheatSheet, commandForKey, hintFor, HintsShown, keymap, type Command } from "./keymap";
 import { targetKeys } from "../actions";
 import { onMediaNotice } from "./media";
+import { NoticeRows, noticeLayout, useLimitNotice, useProviderUpdateNotice, type Notice } from "./notices";
 
 type Pane = "sidebar" | "transcript" | "composer" | "right";
 type RightPanel = "files" | "diff" | "launchers" | "terminal" | "editor";
@@ -184,7 +185,16 @@ export function AppFrame({
         width,
       )
     : [];
-  const topRows = headerRows.length + noticeRows.length;
+  // Provider updates and the selected thread's usage limit get banners below it.
+  const providerNotice = useProviderUpdateNotice(client);
+  const limitBanner = useLimitNotice(client, agentId ? undefined : selected);
+  const extraNotices = [providerNotice, limitBanner].filter((n): n is Notice => n !== null);
+  const extraLayout = noticeLayout(extraNotices, width);
+  const dismissable = !!notice || extraNotices.some((n) => n.dismiss);
+  const noticeButton = (command: Command) =>
+    extraNotices.flatMap((n) => n.buttons).find((b) => b.command === command);
+  const topRows =
+    headerRows.length + noticeRows.length + extraLayout.reduce((sum, l) => sum + l.rows, 0);
   // The two key hint rows at the bottom; the hints key (Alt+i) gives them back to the panes.
   const [hintsShown, setHintsShown] = useState(true);
   useEffect(() => {
@@ -399,7 +409,12 @@ export function AppFrame({
     }
     setQuitArmed(false);
     if (command === "dismissNotice") {
-      notice?.dismiss();
+      if (notice) notice.dismiss();
+      else extraNotices.find((n) => n.dismiss)?.dismiss?.();
+      return;
+    }
+    if (command === "updateProviders" || command === "autoContinue") {
+      noticeButton(command)?.run();
       return;
     }
     // The composer runs attach itself (it owns the draft), from wherever a paste would land.
@@ -538,7 +553,9 @@ export function AppFrame({
       (found === "screenshot" && !effects?.captureRegion) ||
       (found === "attach" && !effects?.pickFiles) ||
       (found === "spell" && !effects?.spell) ||
-      (found === "dismissNotice" && !notice)
+      (found === "dismissNotice" && !dismissable) ||
+      (found === "updateProviders" && !noticeButton("updateProviders")) ||
+      (found === "autoContinue" && !noticeButton("autoContinue"))
         ? undefined
         : found;
     // The frame may receive the key before the composer hook. Let its selection own Copy.
@@ -624,7 +641,9 @@ export function AppFrame({
     {
       shell: !!effects?.shell,
       dictation: hasDictation(effects),
-      notice: !!notice,
+      notice: dismissable,
+      providerUpdate: !!noticeButton("updateProviders"),
+      limit: !!noticeButton("autoContinue"),
       screenshot: !!effects?.captureRegion,
       attach: !!effects?.pickFiles,
       spell: !!effects?.spell,
@@ -801,6 +820,7 @@ export function AppFrame({
             ))}
           </box>
         )}
+        <NoticeRows layout={extraLayout} />
         {headerRows.map((row) => (
           <text onMouseUp={(event) => { if (event.button === 0 && row.includes(`${paneGlyphs.branch} `)) dispatch("branches"); }}
             key={row}

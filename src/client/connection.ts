@@ -194,6 +194,13 @@ export function refreshModelCatalog(url: string, token: string) {
   );
 }
 
+/** Runs a provider's update command on the server; the config stream reports its `updateState`. */
+export function updateProvider(url: string, token: string, input: C.ServerProviderUpdateInput) {
+  return withConnection(url, token, (session) =>
+    session.client[WS_METHODS.serverUpdateProvider](input),
+  );
+}
+
 export function answerSecret(
   url: string,
   token: string,

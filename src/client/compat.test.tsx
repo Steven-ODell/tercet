@@ -265,7 +265,7 @@ test("a newer server opens the app under a banner that Alt+x or a click dismisse
       // The dismiss key is listed in help while the banner shows.
       await act(async () => view.mockInput.pressKey("?"));
       await view.flush();
-      expect(view.captureCharFrame()).toContain("Dismiss server warning");
+      expect(view.captureCharFrame()).toContain("Dismiss notice");
       await act(async () => view.mockInput.pressKey("ESCAPE"));
       await view.flush();
       if (how === "key") await act(async () => view.mockInput.pressKey("x", { meta: true }));
@@ -285,7 +285,7 @@ test("a newer server opens the app under a banner that Alt+x or a click dismisse
       // Gone for the session: help no longer offers a key that does nothing.
       await act(async () => view.mockInput.pressKey("?"));
       await view.flush();
-      expect(view.captureCharFrame()).not.toContain("Dismiss server warning");
+      expect(view.captureCharFrame()).not.toContain("Dismiss notice");
     } finally {
       await act(async () => view.dispose());
     }
@@ -300,7 +300,7 @@ test("the pinned release and its patches draw no banner and list no dismiss key"
       expect(view.captureCharFrame()).not.toContain("Built for T3");
       await act(async () => view.mockInput.pressKey("?"));
       await view.flush();
-      expect(view.captureCharFrame()).not.toContain("Dismiss server warning");
+      expect(view.captureCharFrame()).not.toContain("Dismiss notice");
     } finally {
       await act(async () => view.dispose());
     }

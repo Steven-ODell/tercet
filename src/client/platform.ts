@@ -31,6 +31,7 @@ import {
   mediaUrl,
   answerSecret,
   refreshModelCatalog,
+  updateProvider,
   searchThreads,
   followShell,
   followThread,
@@ -88,6 +89,7 @@ export function platform(
   env: Record<string, string | undefined> = process.env,
 ) {
   const draftPath = `${config.tokenFile}.drafts-${Bun.hash(config.url).toString(16)}.json`;
+  const dismissalPath = `${config.tokenFile}.dismissed-updates-${Bun.hash(config.url).toString(16)}.json`;
   const git: GitBoundary = <K extends GitOperation>(token: string, operation: K, input: GitInput<K>) =>
     Effect.suspend(() => {
       try { assertGitPolicy(operation, config.readOnly); }
@@ -136,6 +138,25 @@ export function platform(
     answerSecret: (token: string, input: import("@t3tools/contracts").SecretRequestAnswerInput) =>
       answerSecret(config.url, token, input),
     refreshModels: (token: string) => refreshModelCatalog(config.url, token),
+    updateProvider: (token: string, input: import("@t3tools/contracts").ServerProviderUpdateInput) =>
+      updateProvider(config.url, token, input),
+    noticeDismissals: {
+      async read() {
+        const text = await readOptional(dismissalPath).catch(() => undefined);
+        try {
+          const keys = JSON.parse(text ?? "[]");
+          return Array.isArray(keys) ? keys.filter((key) => typeof key === "string") : [];
+        } catch {
+          return [];
+        }
+      },
+      async write(keys: string[]) {
+        await mkdir(dirname(dismissalPath), { recursive: true, mode: 0o700 });
+        const temporary = `${dismissalPath}.${process.pid}.tmp`;
+        await writeFile(temporary, JSON.stringify(keys.slice(-50)), { mode: 0o600 });
+        await rename(temporary, dismissalPath);
+      },
+    },
     autoFavorites: async () => config.settings.defaults.autoFavorites,
     modelFavorites: async () =>
       Schema.decodeUnknownSync(ModelFavorites)(config.settings.defaults.favorites),
@@ -283,6 +304,7 @@ export function platform(
     return {
       ...boundary,
       dispatch: blocked,
+      updateProvider: blocked,
       uploadImage: blocked,
       speech: undefined,
       answerSecret: blocked,
