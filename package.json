@@ -1,6 +1,6 @@
 {
   "name": "tercet",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "A terminal client (TUI) for T3 Code: threads, transcripts, diffs and a composer in your terminal.",
   "keywords": ["t3-code", "t3", "tui", "terminal", "cli", "opentui", "ai-coding-agent"],
   "private": true,

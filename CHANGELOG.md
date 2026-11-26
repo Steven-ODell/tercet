@@ -1,5 +1,16 @@
 # Changelog
 
+## tercet 0.1.10 (2026-11-26)
+
+Works with T3 Code servers >=0.1.9 <0.2.0, tested on 0.1.9.
+
+Changes since v0.1.9:
+
+- test: checks no longer depend on SSH, tmux or live timing (d2a1b1e)
+- ci(windows): retry the stock T3 install when its staging rename hits EPERM (82d5823)
+- Provider update and usage limit banners (a05070d)
+- ci: fix macOS recorder test race and canary against upstream main (247f918)
+
 ## tercet 0.1.9 (2026-11-22)
 
 Works with T3 Code servers >=0.1.9 <0.2.0, tested on 0.1.9.

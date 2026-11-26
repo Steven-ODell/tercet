@@ -145353,7 +145353,7 @@ async function detectAppearance(input, output, env) {
   return fromEnv ? { appearance: fromEnv, source: "COLORFGBG" } : { appearance: null, source: "no answer from the terminal" };
 }
 // package.json
-var version = "0.1.9";
+var version = "0.1.10";
 
 // src/doctor.ts
 var TERCET_VERSION = version;
